@@ -1,0 +1,293 @@
+import SwiftUI
+import AppKit
+
+struct DatabaseSidebar: View {
+    @Bindable var controller: WorkspaceController
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text("Bases de datos").font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+                Spacer()
+                Button { controller.database.editingConnection = DatabaseConnection() } label: { Image(systemName: "plus").font(.system(size: 11)) }
+                    .buttonStyle(.plain).help("Agregar conexión MySQL").accessibilityLabel("Agregar conexión MySQL")
+            }.padding(.horizontal, 15).padding(.top, 13).padding(.bottom, 5)
+            ForEach(controller.workspace?.connections ?? []) { connection in
+                if let state = controller.database.states[connection.id] {
+                    DatabaseRow(connection: connection, state: state,
+                                selected: controller.database.selectedConnectionID == connection.id,
+                                connect: { controller.database.connect(connection) })
+                    .contextMenu {
+                        Button(state.status == .connected ? "Desconectar" : "Conectar") {
+                            if state.status == .connected { Task { _ = await controller.database.disconnect(connection) } }
+                            else { controller.database.connect(connection) }
+                        }.disabled(state.busy || state.status == .connecting)
+                        Button("Editar…") { controller.database.editingConnection = connection }
+                            .disabled(state.busy || state.status == .connecting)
+                        Divider()
+                        Button("Quitar conexión") { controller.removeConnection(connection) }
+                            .disabled(state.busy || state.status == .connecting)
+                    }
+                }
+            }
+            HStack {
+                Text("SQL").font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+                Spacer()
+                Menu {
+                    Button("Nuevo script…") { controller.createFile(in: controller.workspaceURL?.deletingLastPathComponent()) }
+                    Button("Abrir script…", action: controller.importScripts)
+                } label: { Image(systemName: "plus").font(.system(size: 11)) }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                    .help("Agregar script SQL")
+            }.padding(.horizontal, 15).padding(.top, 12).padding(.bottom, 4)
+            ForEach(controller.workspace?.scripts ?? [], id: \.self) { path in
+                let url = controller.scriptURL(path)
+                Button { controller.openFile(url) } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "doc").foregroundStyle(.secondary)
+                        Text(url.lastPathComponent).lineLimit(1)
+                        Spacer()
+                    }.font(.system(size: 12)).padding(.horizontal, 17).frame(height: 28).contentShape(Rectangle())
+                }.buttonStyle(.plain).help(url.path)
+            }
+        }.padding(.bottom, 12)
+    }
+}
+
+private struct DatabaseRow: View {
+    let connection: DatabaseConnection
+    let state: DatabaseState
+    let selected: Bool
+    let connect: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button(action: connect) {
+                HStack(spacing: 8) {
+                    Image(systemName: "externaldrive").foregroundStyle(.secondary)
+                    Text(connection.name).lineLimit(1)
+                    Spacer()
+                    if state.status == .connecting { ProgressView().controlSize(.mini) }
+                    else { Circle().fill(state.status == .connected ? Color.green.opacity(0.75) : .secondary.opacity(0.4)).frame(width: 6, height: 6) }
+                }
+                .font(.system(size: 12)).padding(.horizontal, 10).frame(height: 30)
+                .background(selected ? Theme.blue.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 5))
+                .contentShape(Rectangle())
+            }.buttonStyle(.plain).help(connection.destination)
+            if let error = state.error {
+                Text(error).font(.system(size: 10)).foregroundStyle(.red.opacity(0.85))
+                    .lineLimit(3).textSelection(.enabled).padding(.horizontal, 10)
+            }
+        }.padding(.horizontal, 7)
+    }
+}
+
+struct ConnectionSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State var connection: DatabaseConnection
+    @State private var password = ""
+    @State private var busy = false
+    @State private var message: String?
+    @State private var succeeded = false
+    let controller: WorkspaceController
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("MySQL").font(.headline)
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
+                row("Nombre") { TextField("Mi base", text: $connection.name) }
+                row("Servidor") {
+                    HStack {
+                        TextField("127.0.0.1", text: $connection.host)
+                        TextField("3306", value: $connection.port, format: .number.grouping(.never)).frame(width: 70)
+                    }
+                }
+                row("Usuario") { TextField("root", text: $connection.username) }
+                row("Contraseña") { SecureField("", text: $password) }
+                row("Base de datos") { TextField("Opcional", text: $connection.database) }
+                row("TLS") {
+                    Picker("TLS", selection: $connection.tls) {
+                        ForEach(DatabaseConnection.TLSMode.allCases, id: \.self) { mode in Text(mode.label).tag(mode) }
+                    }.labelsHidden()
+                }
+            }.textFieldStyle(.roundedBorder).disabled(busy)
+            if let message {
+                Text(message).font(.system(size: 11)).foregroundStyle(succeeded ? Color.green : .red)
+                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                Button("Probar") { test() }.disabled(busy)
+                if busy { ProgressView().controlSize(.small) }
+                Spacer()
+                Button("Cancelar") { dismiss() }.keyboardShortcut(.cancelAction).disabled(busy)
+                Button("Guardar") { save() }.keyboardShortcut(.defaultAction).disabled(busy)
+            }
+        }
+        .padding(24).frame(width: 470)
+        .task {
+            do { password = try CredentialStore.read(for: connection) }
+            catch { message = error.localizedDescription }
+        }
+        .onChange(of: connection) { _, _ in message = nil }
+        .onChange(of: password) { _, _ in message = nil }
+        .interactiveDismissDisabled(busy)
+    }
+
+    private func row<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
+        GridRow { Text(label).font(.system(size: 12)).foregroundStyle(.secondary); content() }
+    }
+
+    private func test() {
+        busy = true; message = nil
+        Task {
+            defer { busy = false }
+            do {
+                let value = try connection.validated()
+                try await controller.database.client.test(value, password: password)
+                succeeded = true; message = "Conexión correcta"
+            } catch { succeeded = false; message = MySQLClient.message(error) }
+        }
+    }
+
+    private func save() {
+        busy = true; message = nil
+        Task {
+            defer { busy = false }
+            do { try await controller.saveConnection(connection, password: password); dismiss() }
+            catch { succeeded = false; message = MySQLClient.message(error) }
+        }
+    }
+}
+
+struct SQLToolbar: View {
+    let document: EditorDocument
+    @Bindable var controller: WorkspaceController
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Picker("Conexión", selection: Binding(get: { controller.database.selectedConnectionID }, set: { controller.database.selectedConnectionID = $0 })) {
+                Text("Conexión").tag(nil as UUID?)
+                ForEach(controller.workspace?.connections ?? []) { connection in
+                    Text(connection.name).tag(Optional(connection.id))
+                }
+            }.labelsHidden().pickerStyle(.menu).fixedSize()
+                .disabled(document.sqlExecution.isRunning)
+            if let connection = controller.selectedDatabase {
+                let state = controller.database.states[connection.id]
+                let database = state?.status == .connected ? state?.currentDatabase ?? "" : connection.database
+                Text("\(connection.host):\(connection.port)" + (database.isEmpty ? "" : " / \(database)"))
+                    .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                if state?.inTransaction == true { Text("Transacción").font(.system(size: 10)).foregroundStyle(.orange) }
+            }
+            Spacer(minLength: 4)
+            if document.sqlExecution.isRunning {
+                Button { controller.database.cancel(document.sqlExecution) } label: { Image(systemName: "stop.fill") }
+                    .disabled(document.sqlExecution.isCancelling).help("Cancelar consulta").accessibilityLabel("Cancelar consulta")
+            } else {
+                Button(action: controller.executeSQL) { Image(systemName: "play.fill") }
+                    .disabled(controller.selectedDatabase == nil || controller.selectedDatabase.map { controller.database.states[$0.id]?.busy == true || controller.database.states[$0.id]?.status == .connecting } == true)
+                    .help("Ejecutar selección o script (⌘↩)").accessibilityLabel("Ejecutar SQL")
+            }
+        }
+        .buttonStyle(.plain).padding(.horizontal, 18).frame(height: 33)
+        .background(Theme.bar)
+    }
+}
+
+struct SQLResultsPanel: View {
+    @Bindable var execution: SQLExecution
+    let hide: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Text("Resultados").font(.system(size: 11, weight: .medium))
+                if execution.isRunning { ProgressView().controlSize(.mini) }
+                if execution.results.count > 1 {
+                    Picker("Resultado", selection: $execution.selectedResultID) {
+                        ForEach(execution.results) { result in Text("\(result.statement) · línea \(result.line)").tag(Optional(result.id)) }
+                    }.labelsHidden().fixedSize()
+                }
+                Spacer()
+                Text(execution.connectionName).font(.system(size: 10)).foregroundStyle(.secondary).help(execution.destination)
+                Button(action: hide) { Image(systemName: "chevron.down").font(.system(size: 10)) }.buttonStyle(.plain).help("Ocultar resultados")
+            }.padding(.horizontal, 15).frame(height: 32).background(Theme.bar)
+            Rectangle().fill(Theme.border).frame(height: 1)
+            if let result = execution.selectedResult {
+                if !result.columns.isEmpty { SQLResultTable(result: result) }
+                else {
+                    Text(result.error ?? "\(result.affectedRows) filas afectadas")
+                        .font(.system(size: 12, design: .monospaced)).foregroundStyle(result.error == nil ? Color.secondary : .red.opacity(0.9))
+                        .textSelection(.enabled).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(16)
+                }
+                HStack {
+                    Text(result.error == nil ? result.summary : "Línea \(result.line)").lineLimit(1)
+                    Spacer()
+                    if let error = execution.error { Text(error).foregroundStyle(.red.opacity(0.9)).lineLimit(1).help(error) }
+                }.font(.system(size: 10)).foregroundStyle(.secondary).padding(.horizontal, 15).frame(height: 25)
+            } else {
+                Text(execution.error ?? (execution.isCancelling ? "Cancelando…" : execution.isRunning ? "Ejecutando…" : ""))
+                    .font(.system(size: 12)).foregroundStyle(execution.error == nil ? Color.secondary : .red)
+                    .textSelection(.enabled).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(16)
+            }
+        }.background(Theme.background)
+    }
+}
+
+private struct SQLResultTable: NSViewRepresentable {
+    let result: SQLResult
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = true
+        scroll.autohidesScrollers = true
+        let table = NSTableView()
+        table.backgroundColor = EditorPalette.background
+        table.style = .plain
+        table.rowHeight = 25
+        table.intercellSpacing = NSSize(width: 12, height: 0)
+        table.gridStyleMask = [.solidVerticalGridLineMask]
+        table.gridColor = .separatorColor.withAlphaComponent(0.25)
+        table.allowsMultipleSelection = true
+        table.columnAutoresizingStyle = .noColumnAutoresizing
+        table.delegate = context.coordinator; table.dataSource = context.coordinator
+        scroll.documentView = table
+        return scroll
+    }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        guard let table = scroll.documentView as? NSTableView, context.coordinator.result?.id != result.id else { return }
+        context.coordinator.result = result
+        for column in table.tableColumns { table.removeTableColumn(column) }
+        for (index, name) in result.columns.enumerated() {
+            let column = NSTableColumn(identifier: .init("\(index)"))
+            column.title = name
+            let length = max(name.count, result.rows.prefix(25).map { $0[index]?.count ?? 4 }.max() ?? 0)
+            column.width = CGFloat(min(380, max(95, length * 7 + 24)))
+            column.minWidth = 60; column.maxWidth = 1600
+            table.addTableColumn(column)
+        }
+        table.reloadData()
+        if !result.rows.isEmpty { table.scrollRowToVisible(0) }
+    }
+
+    final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate {
+        var result: SQLResult?
+        func numberOfRows(in tableView: NSTableView) -> Int { result?.rows.count ?? 0 }
+        func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+            guard let result, let index = Int(tableColumn?.identifier.rawValue ?? ""), result.rows.indices.contains(row) else { return nil }
+            let identifier = NSUserInterfaceItemIdentifier("value")
+            let field = (tableView.makeView(withIdentifier: identifier, owner: nil) as? NSTextField) ?? NSTextField(labelWithString: "")
+            let value = result.rows[row][index]
+            field.identifier = identifier
+            field.stringValue = value ?? "NULL"
+            field.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+            field.textColor = value == nil ? .tertiaryLabelColor : EditorPalette.text
+            field.lineBreakMode = .byTruncatingTail
+            field.isSelectable = true
+            field.toolTip = value ?? "NULL"
+            return field
+        }
+    }
+}

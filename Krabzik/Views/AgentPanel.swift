@@ -1,0 +1,196 @@
+import SwiftUI
+
+struct AgentPanel: View {
+    @Bindable var controller: WorkspaceController
+    @State private var showingDiff = false
+    var body: some View {
+        @Bindable var agent = controller.agent
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Text("Codex").font(.system(size: 12, weight: .semibold))
+                Spacer()
+                Text(agent.account).font(.system(size: 10)).foregroundStyle(.secondary).help(agent.model)
+                Button { agent.clearConversation() } label: { Image(systemName: "square.and.pencil") }
+                    .disabled(agent.isRunning || agent.messages.isEmpty).help("Nueva conversación").accessibilityLabel("Nueva conversación")
+                Button { agent.visible = false } label: { Image(systemName: "xmark") }
+                    .help("Cerrar panel Codex").accessibilityLabel("Cerrar panel Codex")
+            }.buttonStyle(.plain).padding(.horizontal, 14).frame(height: 39).background(Theme.bar)
+            Divider()
+            if agent.isConnecting {
+                Spacer(); ProgressView().controlSize(.small); Spacer()
+            } else if !agent.connected || agent.account.isEmpty {
+                VStack(spacing: 14) {
+                    if agent.loginPending {
+                        Text("Continuá en el navegador").font(.system(size: 12)).foregroundStyle(.secondary)
+                        Button("Cancelar", action: agent.cancelLogin)
+                    } else if agent.missingExecutable { Button("Seleccionar Codex…", action: agent.chooseExecutable) }
+                    else if !agent.connected { Button("Conectar Codex") { Task { await agent.connect() } } }
+                    else { Button("Iniciar sesión con ChatGPT", action: agent.login) }
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                Picker("Subproyectos", selection: $agent.selectedProjectID) {
+                    Text("Todos los subproyectos").tag(nil as UUID?)
+                    ForEach(controller.workspace?.projects ?? []) { project in Text(project.name).tag(Optional(project.id)) }
+                }.labelsHidden().pickerStyle(.menu).disabled(agent.isRunning).padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 18) {
+                        ForEach(agent.messages) { message in AgentMessageView(message: message) }
+                        if agent.isRunning {
+                            HStack(alignment: .top, spacing: 8) {
+                                ProgressView().controlSize(.mini)
+                                Text(agent.requests.isEmpty ? agent.activity : "Esperando respuesta…")
+                                    .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(3)
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }.padding(14)
+                }.defaultScrollAnchor(.bottom)
+                if !agent.changes.isEmpty {
+                    Divider()
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack {
+                            Text("\(agent.changes.count) archivos modificados").font(.system(size: 10)).foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Ver cambios") { showingDiff = true }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(Theme.blue)
+                        }
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 5) {
+                                ForEach(agent.changes) { change in
+                                    Button { controller.openAgentFile(change.path) } label: {
+                                        HStack(spacing: 7) {
+                                            Text(change.kind == "add" ? "+" : change.kind == "delete" ? "−" : "M")
+                                                .foregroundStyle(change.kind == "delete" ? Color.red : Theme.blue).font(.system(size: 10, design: .monospaced))
+                                            Text(controller.agentFileLabel(change.path)).lineLimit(1).truncationMode(.middle)
+                                        }.font(.system(size: 11))
+                                    }.buttonStyle(.plain).disabled(change.kind == "delete").help(change.path)
+                                }
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                        }.frame(maxHeight: 100)
+                    }.padding(12)
+                }
+                if let request = agent.requests.first { Divider(); AgentRequestView(request: request, agent: agent).id(request.id).padding(12) }
+                Divider()
+                VStack(spacing: 8) {
+                    AgentComposer(text: $agent.draft, enabled: !agent.isRunning, send: controller.sendToAgent).frame(height: 82)
+                        .overlay(alignment: .topLeading) {
+                            if agent.draft.isEmpty { Text("Pedile un cambio a Codex…").font(.system(size: 12)).foregroundStyle(.tertiary).padding(5).allowsHitTesting(false) }
+                        }
+                    HStack {
+                        Spacer()
+                        if agent.isRunning {
+                            Button(action: agent.stop) { Image(systemName: "stop.fill") }
+                                .disabled(agent.isStopping).help("Detener Codex").accessibilityLabel("Detener Codex")
+                        } else {
+                            Button(action: controller.sendToAgent) { Image(systemName: "arrow.up") }
+                                .disabled(agent.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || controller.workspace?.projects.isEmpty != false)
+                                .help("Enviar a Codex (⌘↩)").accessibilityLabel("Enviar a Codex")
+                        }
+                    }.buttonStyle(.bordered).controlSize(.small)
+                }.padding(12)
+            }
+            if let error = agent.error {
+                Text(error).font(.system(size: 11)).foregroundStyle(.red.opacity(0.9)).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(12)
+            }
+        }.background(Theme.background).task(id: controller.workspaceURL) { await agent.connect() }
+        .onChange(of: agent.selectedProjectID) { _, _ in agent.clearConversation() }
+        .sheet(isPresented: $showingDiff) {
+            VStack(spacing: 0) {
+                HStack { Text("Cambios de Codex").font(.headline); Spacer(); Button("Cerrar") { showingDiff = false }.keyboardShortcut(.cancelAction) }.padding(18)
+                Divider()
+                ScrollView([.horizontal, .vertical]) {
+                    Text(agent.diff.isEmpty ? agent.changes.map { $0.path + "\n" + $0.diff }.joined(separator: "\n\n") : agent.diff)
+                        .font(.system(size: 12, design: .monospaced)).textSelection(.enabled).padding(18)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+            }.frame(width: 780, height: 520)
+        }
+    }
+}
+
+private struct AgentMessageView: View {
+    let message: AgentMessage
+    var body: some View {
+        Text(message.text).font(.system(size: 12)).textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading).padding(message.isUser ? 10 : 0)
+            .background(message.isUser ? Theme.blue.opacity(0.09) : .clear, in: RoundedRectangle(cornerRadius: 7))
+    }
+}
+
+private struct AgentRequestView: View {
+    let request: AgentRequest
+    let agent: AgentController
+    @State private var answers: [String: String] = [:]
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if request.isQuestion {
+                ForEach(Array(request.params["questions"].array.enumerated()), id: \.offset) { _, question in
+                    let id = question["id"].string ?? ""
+                    Text(question["question"].string ?? "").font(.system(size: 12))
+                    if question["isSecret"].bool { SecureField("Respuesta", text: Binding(get: { answers[id] ?? "" }, set: { answers[id] = $0 })) }
+                    else {
+                        TextField("Respuesta", text: Binding(get: { answers[id] ?? "" }, set: { answers[id] = $0 }))
+                        ForEach(Array(question["options"].array.enumerated()), id: \.offset) { _, option in
+                            Button(option["label"].string ?? "") { answers[id] = option["label"].string ?? "" }.help(option["description"].string ?? "")
+                        }
+                    }
+                }
+                Button("Responder") { agent.answerQuestions(request, answers: answers) }
+                    .disabled(request.params["questions"].array.contains { (answers[$0["id"].string ?? ""] ?? "").isEmpty })
+            } else {
+                Text(request.method.contains("fileChange") ? "Permitir cambios" : "Permitir comando").font(.system(size: 12, weight: .medium))
+                if let reason = request.params["reason"].string { Text(reason).font(.system(size: 11)).textSelection(.enabled) }
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if let cwd = request.params["cwd"].string { Text(cwd).foregroundStyle(.secondary) }
+                        if let root = request.params["grantRoot"].string { Text(root).foregroundStyle(.secondary) }
+                        Text(request.params["command"].string ?? agent.proposedDiff(for: request)).textSelection(.enabled)
+                    }.font(.system(size: 10, design: .monospaced)).frame(maxWidth: .infinity, alignment: .leading)
+                }.frame(maxHeight: 130)
+                HStack { Spacer(); Button("Rechazar") { agent.answer(request, accept: false) }; Button("Permitir una vez") { agent.answer(request, accept: true) } }
+            }
+        }.buttonStyle(.bordered).controlSize(.small)
+    }
+}
+
+/// Owns ⌘Return while composing so it cannot execute the active SQL file.
+private struct AgentComposer: NSViewRepresentable {
+    @Binding var text: String
+    let enabled: Bool
+    let send: () -> Void
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSScrollView(), view = ComposerTextView()
+        view.isRichText = false; view.isAutomaticQuoteSubstitutionEnabled = false; view.isAutomaticDashSubstitutionEnabled = false
+        view.isAutomaticTextReplacementEnabled = false; view.font = .systemFont(ofSize: 12)
+        view.textColor = EditorPalette.text; view.backgroundColor = EditorPalette.background
+        view.textContainerInset = NSSize(width: 1, height: 5)
+        view.isVerticallyResizable = true; view.isHorizontallyResizable = false
+        view.autoresizingMask = [.width]; view.textContainer?.widthTracksTextView = true
+        view.textContainer?.containerSize = NSSize(width: 300, height: CGFloat.greatestFiniteMagnitude)
+        view.minSize = .zero; view.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        view.delegate = context.coordinator; view.setAccessibilityLabel("Mensaje para Codex")
+        scroll.documentView = view; scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true
+        return scroll
+    }
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        context.coordinator.owner = self
+        guard let view = scroll.documentView as? ComposerTextView else { return }
+        if view.string != text { view.string = text }
+        view.isEditable = enabled; view.send = send
+    }
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var owner: AgentComposer
+        init(_ owner: AgentComposer) { self.owner = owner }
+        func textDidChange(_ notification: Notification) { if let view = notification.object as? NSTextView { owner.text = view.string } }
+    }
+    final class ComposerTextView: NSTextView {
+        var send: (() -> Void)?
+        override func performKeyEquivalent(with event: NSEvent) -> Bool {
+            if event.keyCode == 36, event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command {
+                if isEditable { send?() }; return true
+            }
+            return super.performKeyEquivalent(with: event)
+        }
+    }
+}

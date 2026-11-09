@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="es">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mi tienda</title>
+<style>
+  body { max-width: 640px; margin: 12vh auto; padding: 24px; background: #1b1e23; color: #d9dfe8; font: 16px system-ui; }
+  h1 { font-size: 24px; font-weight: 500; }
+  li { display: flex; justify-content: space-between; padding: 18px 0; border-bottom: 1px solid #343942; }
+  ul { padding: 0; }
+  span { color: #9ea9bb; }
+</style>
+<h1>Mi tienda</h1>
+<ul id="products"></ul>
+<script type="module">
+  const list = document.querySelector('#products');
+  try {
+    const response = await fetch('http://127.0.0.1:18765');
+    const products = await response.json();
+    for (const product of products) {
+      const row = document.createElement('li');
+      const name = document.createElement('strong');
+      name.textContent = product.name;
+      const price = document.createElement('span');
+      price.textContent = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(product.price);
+      row.append(name, price);
+      list.append(row);
+    }
+  } catch { list.textContent = 'API no disponible.'; }
+</script>
+</html>

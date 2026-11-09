@@ -1,0 +1,6 @@
+{
+  "name": "krabzik-example-web",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "node server.js" }
+}
