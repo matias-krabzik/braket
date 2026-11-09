@@ -124,3 +124,44 @@ En `KrabzikTests/DatabaseTests.swift`:
 - Si el usuario cambia la contraseña en el llavero mientras hay una sesión abierta, el `KILL` fallará con
   error de autenticación. Antes, con la copia en memoria, habría funcionado. Es un caso raro y el mensaje
   nuevo lo explica; no vale la pena conservar la copia por eso.
+
+## Resuelto
+
+**2026-11-09** · commit `909ae2e`.
+
+| # | Criterio | Resultado |
+|---|---|---|
+| 1 | `Session` sin campo de credencial | ✓ queda `connection`, `configuration`, `serverID`, `database`, `flags` |
+| 2 | Cancelar sigue cerrando la sesión del servidor | ✓ `testMySQLCancellationClosesActualServerSession` pasa **sin modificar su cuerpo** |
+| 3 | Si falla el llavero, se cierra lo local y la UI avisa; sin `catch` vacío | ✓ `testCancellationReportsWhenCredentialIsUnavailable` |
+| 4 | Servidor sin contraseña sigue funcionando, incluida la cancelación | ✓ las 6 pruebas de MySQL real corren contra una instancia con `MYSQL_ALLOW_EMPTY_PASSWORD` |
+
+Suite completa con MySQL real: **44 pruebas, 1 saltada** (la de Codex con suscripción), 0 fallos.
+
+### Decisiones
+
+- **El lector de credenciales es inyectable.** `MySQLClient(readPassword:)` tiene como valor por defecto
+  `CredentialStore.read`. Además de permitir la prueba del punto 3 sin tocar el llavero real, saca la
+  dependencia dura con Security y deja el actor probable sin él. Fue el cambio de diseño que el spec
+  anticipaba, y valió la pena.
+- **`CancelOutcome` en vez de `catch {}`.** El spec de S4 pedía reportar; acá se agregó el tipo que
+  [C6](C6-logging-y-errores.md) también necesitaba. C6 le suma el logging.
+- **El aviso va en `SQLExecution.cancelNote`, no en `.error`.** Si se escribiera en `.error`, el `catch` del
+  propio `execute` lo pisaría al terminar con `CancellationError`. Un campo aparte evita depender del orden
+  en que se resuelven las dos tareas.
+- **`DatabaseController` no guarda la credencial** en estado observable: la lee del llavero y la pasa como
+  parámetro. Quedó un comentario que lo dice, para que no se agregue después «por comodidad».
+
+### Limitación que queda, declarada
+
+La contraseña viaja como `String` porque así la pide el transporte de MySQLNIO, y Swift no garantiza el
+borrado de ese buffer. Lo que cambió es su **vida**: ya nadie la retiene más allá del handshake. Está
+anotado en `CredentialStore`. Cerrar esa limitación requeriría reescribir el transporte con buffers propios
+y se dejó explícitamente fuera de alcance.
+
+### Costo aceptado
+
+Cancelar ahora hace una lectura del llavero en un camino sensible al tiempo. Es un ítem ya desbloqueado
+(`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`), del orden de milisegundos, una vez por cancelación. Y si
+el usuario cambió la contraseña en el llavero mientras había una sesión abierta, el `KILL` falla con error
+de autenticación donde antes habría funcionado; el mensaje nuevo lo explica.
