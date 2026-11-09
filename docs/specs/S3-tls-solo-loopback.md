@@ -128,3 +128,38 @@ En `KrabzikTests/DatabaseTests.swift`:
   `.krabzik` y visible en la barra lateral.
 - `SocketAddress` para un socket Unix no aplica (no se soportan), pero conviene que `isLoopbackAddress`
   devuelva `false` en el caso `.unixDomainSocket` en lugar de romper.
+
+## Resuelto
+
+**2026-11-09** · commit `c4ce3ab`.
+
+| # | Criterio | Resultado |
+|---|---|---|
+| 1 | Guardar con host remoto y sin TLS falla | ✓ `testDisabledTLSRejectedForNonLoopbackHostOnSave` |
+| 2 | Con `127.0.0.1` funciona | ✓ misma prueba |
+| 3 | Un `.krabzik` con conexión remota insegura **se abre**, y conectar falla | ✓ `testWorkspaceWithRemoteInsecureConnectionStillLoads` + el chequeo de `open` |
+| 4 | Un nombre que resuelve a IP pública falla al conectar | ✓ `testDisabledTLSRejectedWhenResolvedAddressIsNotLoopback` |
+| 5 | `.verified` sin cambios de comportamiento | ✓ las pruebas de MySQL existentes no se tocaron |
+
+### Decisiones de implementación
+
+- **Los dos niveles de validación** son la pieza central. Sin ellos, aplicar la regla nueva en
+  `Workspace.read` haría que un proyecto existente con una conexión remota sin TLS dejara de abrirse, que es
+  peor que el problema que se quería resolver. El rechazo llega al conectar, con un mensaje que dice qué
+  cambiar.
+- **Doble comprobación, textual y real.** `isLoopbackHost` filtra en la UI y al guardar; la dirección
+  resuelta se comprueba en `MySQLClient.open`, antes de abrir el socket. La primera da un mensaje temprano;
+  la segunda es la que de verdad cierra el agujero, porque un host puede resolver a cualquier parte.
+- **`127.` no se acepta por prefijo.** `127.malicioso.example` empieza con `127.` y no es una IP: se exige
+  que las cuatro partes sean octetos. Igual con `.localhost`, que no matchea `localhost.attacker.example`.
+- **Ninguna prueba nueva necesita red ni servidor.** La del extremo remoto usa la IP literal
+  `93.184.216.34`, que no requiere DNS, y el rechazo ocurre antes de conectar.
+
+### Lo que quedó fuera, a propósito
+
+No se agregó un tercer modo «sin cifrado, acepto el riesgo» para extremos remotos. El spec lo dejaba fuera
+y se respetó: reintroducirlo con otro nombre sería volver al mismo agujero. Si alguna vez se decide, tiene
+que ser un `TLSMode` con nombre inequívoco, persistido en el `.krabzik` y visible en la barra lateral.
+
+Caso que deja de funcionar y es intencional: «Sin TLS» contra un servidor en la red local
+(`192.168.x.x`). La alternativa es activar TLS.
