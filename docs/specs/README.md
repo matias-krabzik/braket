@@ -36,31 +36,31 @@ Dos hallazgos de la auditoría se resolvieron durante esa ventana y los specs ya
 
 ## Seguridad
 
-| Spec | Título | Severidad |
-|---|---|---|
-| [S1](S1-proyecto-no-confiable.md) | Un `.krabzik` ajeno no debe poder ejecutar código | Alta |
-| [S2](S2-verificar-ejecutable-codex.md) | Verificar el ejecutable de Codex antes de lanzarlo | Media |
-| [S3](S3-tls-solo-loopback.md) | «Sin TLS» solo para conexiones locales | Media |
-| [S4](S4-no-retener-password.md) | No retener la contraseña en memoria durante la sesión | Media-baja |
-| [S5](S5-contenido-del-modelo.md) | Marcar y sanear el contenido que viene del modelo | Baja |
-| [S6](S6-sandbox-y-firma.md) | Decidir y documentar sandbox, firma y distribución | Estructural |
-| [S7](S7-gobernanza-fork-mysqlnio.md) | Gobernanza del fork local de MySQLNIO | Proceso |
+| Spec | Título | Severidad | Estado |
+|---|---|---|---|
+| [S1](S1-proyecto-no-confiable.md) | Un `.krabzik` ajeno no debe poder ejecutar código | Alta | pendiente |
+| [S2](S2-verificar-ejecutable-codex.md) | Verificar el ejecutable de Codex antes de lanzarlo | Media | pendiente |
+| [S3](S3-tls-solo-loopback.md) | «Sin TLS» solo para conexiones locales | Media | pendiente |
+| [S4](S4-no-retener-password.md) | No retener la contraseña en memoria durante la sesión | Media-baja | pendiente |
+| [S5](S5-contenido-del-modelo.md) | Marcar y sanear el contenido que viene del modelo | Baja | pendiente |
+| [S6](S6-sandbox-y-firma.md) | Decidir y documentar sandbox, firma y distribución | Estructural | pendiente |
+| [S7](S7-gobernanza-fork-mysqlnio.md) | Gobernanza del fork local de MySQLNIO | Proceso | pendiente |
 
 ## Calidad y prácticas
 
 | Spec | Título | Severidad | Estado |
 |---|---|---|---|
 | [C1](C1-repositorio-git.md) | Inicializar el control de versiones | Crítica | **resuelto** |
-| [C2](C2-swift-6-mode.md) | Migrar a Swift 6 language mode | Alta |
-| [C3](C3-ci-lint-warnings.md) | CI, linter y warnings como errores | Alta |
-| [C4](C4-legibilidad.md) | Legibilidad: estilo, nombres y constantes con nombre | Media |
-| [C5](C5-dividir-workspacecontroller.md) | Dividir `WorkspaceController` | Media |
-| [C6](C6-logging-y-errores.md) | Logging real y errores no silenciados | Media |
-| [C7](C7-validacion-formato-krabzik.md) | Validar y acotar el formato `.krabzik` | Media |
-| [C8](C8-pbxproj-sincronizado.md) | Garantizar que el `.pbxproj` generado esté al día | Media |
-| [C9](C9-cobertura-pruebas.md) | Cerrar los huecos de cobertura que quedan | Media |
-| [C10](C10-version-unica.md) | Una sola fuente de verdad para la versión | Baja |
-| [C11](C11-rendimiento-editor.md) | Rendimiento del editor y arquitecturas del Release | Baja |
+| [C2](C2-swift-6-mode.md) | Migrar a Swift 6 language mode | Alta | pendiente |
+| [C3](C3-ci-lint-warnings.md) | CI, linter y warnings como errores | Alta | pendiente |
+| [C4](C4-legibilidad.md) | Legibilidad: estilo, nombres y constantes con nombre | Media | pendiente |
+| [C5](C5-dividir-workspacecontroller.md) | Dividir `WorkspaceController` | Media | pendiente |
+| [C6](C6-logging-y-errores.md) | Logging real y errores no silenciados | Media | pendiente |
+| [C7](C7-validacion-formato-krabzik.md) | Validar y acotar el formato `.krabzik` | Media | pendiente |
+| [C8](C8-pbxproj-sincronizado.md) | Garantizar que el `.pbxproj` generado esté al día | Media | pendiente |
+| [C9](C9-cobertura-pruebas.md) | Cerrar los huecos de cobertura que quedan | Media | pendiente |
+| [C10](C10-version-unica.md) | Una sola fuente de verdad para la versión | Baja | pendiente |
+| [C11](C11-rendimiento-editor.md) | Rendimiento del editor y arquitecturas del Release | Baja | pendiente |
 
 ## Orden de ejecución propuesto
 
