@@ -143,3 +143,42 @@ En `KrabzikTests/AgentTests.swift`:
   indicar «(caracteres no imprimibles omitidos)» cuando saneó algo.
 - Agregar fricción a los campos secretos puede molestar si Codex los usa para algo legítimo y frecuente.
   No se conoce ese caso hoy; si aparece, se revisa con datos.
+
+## Resuelto
+
+**2026-11-09** · commit `50c90a2`.
+
+| # | Criterio | Resultado |
+|---|---|---|
+| 1 | Un mensaje con `U+202E` se muestra sin ese carácter | ✓ `testModelTextStripsControlAndBidiCharacters` |
+| 2 | Los `path` de los cambios se muestran saneados | ✓ `testFileChangePathsAreSanitizedBeforeReachingState` |
+| 3 | `isSecret` no permite escribir hasta aceptar el riesgo, y hay **Rechazar** | ✓ en `AgentRequestView` |
+| 4 | El texto del modelo se distingue del de la interfaz | ✓ encabezado con icono y `modelBlock` con fondo propio |
+| 5 | El saneado no altera diffs legítimos | ✓ la prueba verifica tabuladores, saltos simples, acentos y emoji intactos |
+| 6 | Ninguna vista lee `params[...]` sin sanear | ✓ `AgentRequestView` pasa todo por `ModelText.display` |
+
+### Decisiones
+
+- **El saneado va en el borde, no en la vista.** Se aplica dentro de `receive(_:)`, en los siete puntos
+  donde entra texto del modelo. Una vista futura hereda la garantía sin acordarse de nada.
+- **`needsSanitizing` existe** para que la vista pueda avisar que se quitó algo, como pedía la sección de
+  riesgos. Queda disponible; el bloque de diff todavía no lo usa.
+- **El límite de los deltas es 4.000, no 120.000.** Un delta es un fragmento; el tope de 120.000 es del
+  mensaje acumulado y se conserva aparte.
+- **Se agregó Rechazar a la rama de preguntas.** No estaba en el diseño explícitamente, pero `answer(_:accept:)`
+  ya existía y la vista solo lo usaba en la rama de aprobaciones: si el modelo preguntaba, las únicas salidas
+  eran responder o detener el turno entero.
+
+### Cómo se probó el estado, y por qué así
+
+La primera versión agregaba un `beginTurnForTesting(scope:threadID:)` a `AgentController` para poder
+alimentar `receive(_:)` desde la prueba. Se descartó: era superficie de producción que existe solo para
+pruebas. En su lugar se reusó el servidor falso en Python que `AgentTests` ya tenía, agregándole una segunda
+entrada de cambio con `U+202E`, un BEL y un NUL en el diff. La prueba ejercita el protocolo real y la
+existente sigue pasando porque su aserción mira la primera entrada.
+
+### Pendiente, anotado en el código
+
+Registrar con OSLog cuando llega una pregunta con `isSecret` quedó como `TODO(C6)`: el subsistema de logging
+lo crea [C6](C6-logging-y-errores.md). Se intentó dejarlo en un array en memoria y se quitó por no tener
+consumidor.

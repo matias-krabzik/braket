@@ -42,7 +42,7 @@ Dos hallazgos de la auditoría se resolvieron durante esa ventana y los specs ya
 | [S2](S2-verificar-ejecutable-codex.md) | Verificar el ejecutable de Codex antes de lanzarlo | Media | pendiente |
 | [S3](S3-tls-solo-loopback.md) | «Sin TLS» solo para conexiones locales | Media | **resuelto** |
 | [S4](S4-no-retener-password.md) | No retener la contraseña en memoria durante la sesión | Media-baja | **resuelto** |
-| [S5](S5-contenido-del-modelo.md) | Marcar y sanear el contenido que viene del modelo | Baja | pendiente |
+| [S5](S5-contenido-del-modelo.md) | Marcar y sanear el contenido que viene del modelo | Baja | **resuelto** |
 | [S6](S6-sandbox-y-firma.md) | Decidir y documentar sandbox, firma y distribución | Estructural | pendiente |
 | [S7](S7-gobernanza-fork-mysqlnio.md) | Gobernanza del fork local de MySQLNIO | Proceso | pendiente |
 
