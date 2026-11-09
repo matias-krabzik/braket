@@ -4,3 +4,6 @@ DerivedData/
 xcuserdata/
 .DS_Store
 
+# Artefactos que generan los proyectos de ejemplo al ejecutarlos
+Examples/**/node_modules/
+Examples/**/vendor/
