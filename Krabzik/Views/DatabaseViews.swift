@@ -1,5 +1,5 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 
 struct DatabaseSidebar: View {
     @Bindable var controller: WorkspaceController

@@ -52,7 +52,7 @@ Dos hallazgos de la auditoría se resolvieron durante esa ventana y los specs ya
 |---|---|---|---|
 | [C1](C1-repositorio-git.md) | Inicializar el control de versiones | Crítica | **resuelto** |
 | [C2](C2-swift-6-mode.md) | Migrar a Swift 6 language mode | Alta | **resuelto** |
-| [C3](C3-ci-lint-warnings.md) | CI, linter y warnings como errores | Alta | **implementado**, verificación parcial |
+| [C3](C3-ci-lint-warnings.md) | CI, linter y warnings como errores | Alta | **implementado** · falta C8, C4, S7 y un remoto |
 | [C4](C4-legibilidad.md) | Legibilidad: estilo, nombres y constantes con nombre | Media | pendiente |
 | [C5](C5-dividir-workspacecontroller.md) | Dividir `WorkspaceController` | Media | pendiente |
 | [C6](C6-logging-y-errores.md) | Logging real y errores no silenciados | Media | pendiente |
@@ -89,8 +89,8 @@ compilador. Habilita el punto 1 de C3.
 
 **C3 implementado** el 2026-11-09 (commit `7696e36`), con verificación parcial: warnings como errores,
 `scripts/verify.sh`, configuración de lint y workflow de CI están en su lugar y los gates se comprobaron
-inyectando fallos. Cuatro de sus siete criterios dependen de C4, C8, de instalar `swiftlint`/`swiftformat`
-y de que exista un remoto; el spec lista cuál espera a qué.
+inyectando fallos. Con `swiftlint` y `swiftformat` ya instalados, `verify.sh` tiene seis pasos bloqueantes en verde y dos
+omitidos, que esperan a C8 y S7. El spec lista qué criterio depende de qué.
 
 Los otros 15 están sin implementar. Al cerrar uno, marcarlo en la tabla de este índice y dejar en el propio
 spec una sección `## Resuelto` con la fecha, los commits y los criterios verificados.

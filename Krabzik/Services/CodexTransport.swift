@@ -1,5 +1,5 @@
-import Foundation
 import Darwin
+import Foundation
 
 enum CodexExecutable {
     static func locate(override: String? = nil) -> URL? {
@@ -87,7 +87,7 @@ enum CodexExecutable {
         }
         DispatchQueue.global(qos: .utility).async {
             var status: Int32 = 0
-            while waitpid(spawnedPID, &status, 0) < 0 && errno == EINTR { }
+            while waitpid(spawnedPID, &status, 0) < 0 && errno == EINTR {}
         }
     }
 

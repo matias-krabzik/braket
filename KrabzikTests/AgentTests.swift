@@ -1,5 +1,5 @@
-import XCTest
 @testable import Krabzik
+import XCTest
 
 final class AgentTests: XCTestCase {
     func testJSONLinesPreserveUnicodeAndSplitMessages() throws {
@@ -60,13 +60,13 @@ final class AgentTests: XCTestCase {
         let transport = CodexTransport()
         defer { transport.stop() }
         try transport.start(executable: URL(fileURLWithPath: "/usr/bin/python3"), arguments: ["-u", script.path])
-        do { _ = try await transport.request("hang", timeout: 0.1); XCTFail("Debe vencer") } catch { }
+        do { _ = try await transport.request("hang", timeout: 0.1); XCTFail("Debe vencer") } catch {}
         let result = try await transport.request("echo", .string("🦀"))
         XCTAssertEqual(result, .string("🦀"))
         let job = Task { try await transport.request("hang", timeout: 10) }
         await Task.yield()
         transport.stop()
-        do { _ = try await job.value; XCTFail("Debe completar con error al cerrar") } catch { }
+        do { _ = try await job.value; XCTFail("Debe completar con error al cerrar") } catch {}
     }
 
     @MainActor func testAgentApprovalStreamingAndFileEvents() async throws {

@@ -182,7 +182,7 @@ final class AgentController {
                 _ = try await transport.request("turn/interrupt", .object(["threadId": .string(threadID), "turnId": .string(turnID)]), timeout: 5)
                 // A response acknowledges interruption; completion is a separate notification.
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
-            } catch { }
+            } catch {}
         }
         if token == generation, operation == operationID, isRunning {
             sendTask?.cancel(); transport.stop(); connected = false; threadID = nil

@@ -1,8 +1,8 @@
-import XCTest
+@testable import Krabzik
 import MySQLNIO
 import NIOCore
 import NIOPosix
-@testable import Krabzik
+import XCTest
 
 private actor ResultSink {
     var values: [SQLResult] = []
@@ -128,7 +128,7 @@ final class DatabaseTests: XCTestCase {
             do {
                 _ = try await client.execute("INSERT INTO tx VALUES(2); INVALID SQL; INSERT INTO tx VALUES(3);", startingLine: 1, configuration: config, password: "", operation: UUID()) { await sink.append($0) }
                 XCTFail("El script debe detenerse en el error")
-            } catch { }
+            } catch {}
             let partial = await sink.values
             XCTAssertEqual(partial.count, 2)
             XCTAssertNotNil(partial.last?.error)
@@ -159,7 +159,7 @@ final class DatabaseTests: XCTestCase {
             let job = Task { try await client.execute("SELECT SLEEP(30)", startingLine: 1, configuration: config, password: "", operation: operation) { _ in } }
             try await Task.sleep(nanoseconds: 200_000_000)
             await client.cancel(operation)
-            do { _ = try await job.value; XCTFail("La consulta debe cancelarse") } catch is CancellationError { }
+            do { _ = try await job.value; XCTFail("La consulta debe cancelarse") } catch is CancellationError {}
             let rows = try await execute("SELECT COUNT(*) FROM information_schema.processlist WHERE ID = \(serverID)", client: observer, config: config)
             XCTAssertEqual(rows[0].rows[0][0], "0")
             await client.shutdown(); await observer.shutdown()
@@ -170,9 +170,9 @@ final class DatabaseTests: XCTestCase {
         var config = try configuration()
         let client = MySQLClient()
         config.username = "krabzik_nonexistent_user"
-        do { try await client.test(config, password: "invalid"); XCTFail("Debe rechazar al usuario inexistente") } catch { }
+        do { try await client.test(config, password: "invalid"); XCTFail("Debe rechazar al usuario inexistente") } catch {}
         config.username = "root"; config.tls = .verified
-        do { try await client.test(config, password: ""); XCTFail("No debe aceptar el certificado autofirmado") } catch { }
+        do { try await client.test(config, password: ""); XCTFail("No debe aceptar el certificado autofirmado") } catch {}
         await client.shutdown()
     }
 
@@ -187,7 +187,7 @@ final class DatabaseTests: XCTestCase {
             // First connection exercises full RSA auth; the next exercises cached auth.
             try await client.test(config, password: password)
             try await client.test(config, password: password)
-            do { try await client.test(config, password: "wrong"); XCTFail("Debe rechazar una contraseña incorrecta") } catch { }
+            do { try await client.test(config, password: "wrong"); XCTFail("Debe rechazar una contraseña incorrecta") } catch {}
             let sink = ResultSink()
             _ = try await client.execute("""
             DELIMITER $$
@@ -241,7 +241,7 @@ final class DatabaseTests: XCTestCase {
                         tlsConfiguration: nil, connectTimeout: .milliseconds(150), on: group.next()).get()
                     try await connection.close().get()
                     XCTFail("Un servidor sin handshake no debe quedar conectado")
-                } catch { }
+                } catch {}
                 let child = try await accepted.futureResult.get()
                 if child.isActive { try await child.close().get() }
                 try await server.close().get()

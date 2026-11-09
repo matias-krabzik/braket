@@ -1,9 +1,9 @@
 import Foundation
+import Logging
 import MySQLNIO
 import NIOCore
 import NIOPosix
 import NIOSSL
-import Logging
 
 struct DatabaseSessionInfo: Sendable {
     var database: String
@@ -144,9 +144,9 @@ actor MySQLClient {
         // A second, short-lived connection terminates only this app-owned session.
         do {
             let control = try await open(value.configuration, password: value.password)
-            do { _ = try await control.simpleQuery("KILL CONNECTION \(value.serverID)").get() } catch { }
+            do { _ = try await control.simpleQuery("KILL CONNECTION \(value.serverID)").get() } catch {}
             try? await control.close().get()
-        } catch { }
+        } catch {}
         try? await value.connection.close().get()
     }
 

@@ -1,6 +1,6 @@
+import Darwin
 import Foundation
 import Observation
-import Darwin
 
 enum RunStatus: Equatable {
     case idle, running, stopping, exited(Int32), failed(String)

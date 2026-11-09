@@ -1,5 +1,5 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 
 struct WelcomeView: View {
     let controller: WorkspaceController

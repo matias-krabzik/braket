@@ -1,6 +1,6 @@
-import XCTest
 import AppKit
 @testable import Krabzik
+import XCTest
 
 final class CoreTests: XCTestCase {
     private func temporaryDirectory() throws -> URL {

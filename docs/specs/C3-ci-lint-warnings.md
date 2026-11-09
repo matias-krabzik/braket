@@ -202,8 +202,8 @@ remoto que no existe. Se listan abajo con quién los desbloquea, en vez de darlo
 |---|---|
 | `SWIFT_TREAT_WARNINGS_AS_ERRORS` y `GCC_TREAT_WARNINGS_AS_ERRORS` en `YES` | en las 6 configuraciones |
 | `scripts/verify.sh` | 119 líneas, pasos bloqueantes e informativos separados |
-| `.swiftlint.yml` | `only_rules` con 8 reglas |
-| `.swiftformat` | informativo hasta C4 |
+| `.swiftlint.yml` | `only_rules` con 8 reglas · swiftlint 0.65.1 instalado, exit 0, 66 avisos con tope |
+| `.swiftformat` | lista blanca de 5 reglas · swiftformat 0.64.6 instalado, **bloqueante**, 0/27 |
 | `.github/workflows/ci.yml` | listo, sin remoto donde correr |
 | `docs/contributing.md` | `verify.sh` reemplaza al comando de pruebas; trinquetes y hook documentados |
 
@@ -214,10 +214,10 @@ remoto que no existe. Se listan abajo con quién los desbloquea, en vez de darlo
 | 1 | `verify.sh` pasa en el árbol limpio y falla si algún paso falla | **✓ verificado**: exit 0 en limpio, exit 1 con un fallo inyectado |
 | 2 | Un aviso del compilador rompe el build | **✓ verificado**: una variable sin usar dio `error: initialization of immutable value 'avisoDePrueba' was never used` y el build falló |
 | 3 | Agregar un `.swift` sin regenerar hace fallar `verify.sh` | **pendiente de C8.** El paso existe pero se omite: `generate_project.py` no tiene `--check`. Ojo: hoy el script **ignora los argumentos y regenera**, así que llamarlo con `--check` reescribiría el `.pbxproj` en silencio. Por eso `verify.sh` detecta la capacidad con `grep -q -- "--check"` antes de invocarlo |
-| 4 | Una línea de 200 columnas falla; una de 150 avisa | **desviado** (ver abajo) |
+| 4 | Una línea de 200 columnas falla; una de 150 avisa | **parcial**: con swiftlint instalado, una de 150 avisa y no falla ✓. Que una de 200 *falle el lint* no se cumple con el umbral 470; lo cubre el trinquete de cantidad, verificado inyectando una de 250 columnas |
 | 5 | En CI corren las 38 pruebas (`0 tests skipped`) | **no verificable**: no hay remoto ni runner. El workflow crea el marcador `.build/mysql-test-port`, que es lo que lo haría cierto |
 | 6 | El workflow es válido | **parcial**: estructura y claves comprobadas con un chequeo propio; sin `actionlint` ni corrida real |
-| 7 | `swiftformat --lint` sin diferencias | **pendiente de C4**, que es quien formatea |
+| 7 | `swiftformat --lint` sin diferencias | **✓ verificado**: 0/27 archivos requieren formateo, y el paso es bloqueante. Se adelantó a C4 al acotar la lista de reglas (ver desviación 6) |
 
 ### Desviaciones del diseño
 
@@ -246,13 +246,36 @@ runners Linux, y en los de macOS —necesarios para Xcode— no hay Docker prein
 `mysql@8.4` con brew y espera a `mysqladmin ping`. [S7](S7-gobernanza-fork-mysqlnio.md) quedó corregido en
 el mismo commit, porque arrastraba el mismo error.
 
-**5. `swiftlint` y `swiftformat` no están instalados** en esta máquina, así que sus pasos se omiten con
-aviso y las reglas que escriben los archivos de configuración **no se ejercitaron**. Instalarlos
-(`brew install swiftlint swiftformat`) es lo que falta para cerrar de verdad los criterios 4 y 7.
+**5. Trinquete también sobre los avisos de SwiftLint.** Son 66 y no pueden crecer: 62 `line_length`,
+3 `force_unwrapping` y 1 `force_try`. `verify.sh` imprime el resumen por regla en vez de volcar las 66
+líneas en cada corrida. Nota: `force_unwrapping` encontró **3** casos, no 1 como estimaba C4
+(`MySQLClient.swift:31` y dos en `DatabaseTests.swift`); C4 debería corregir su cuenta.
+
+**6. La lista de reglas de SwiftFormat hubo que acotarla, y eso adelantó el criterio 7.** Con el conjunto
+por defecto, `swiftformat --lint` pedía **1195 cambios en los 27 archivos**, y los dominantes eran
+`wrapIfStatementBodies` (274), `indent` (135), `wrap` (101) y `wrapFunctionBodies` (63): reglas que pelean
+con el estilo compacto deliberado del proyecto (`guard … else { return }` en una línea). Eso es
+configuración mal elegida, no deuda técnica.
+
+Con `--rules semicolons,trailingSpace,sortImports,emptyBraces,consecutiveBlankLines` quedaron 32
+diferencias, todas triviales: 20 de orden de `import` y 12 de `{ }` → `{}`. Se aplicaron en el mismo
+commit, así que **`swiftformat` ya es un paso bloqueante** en lugar de quedar diferido a C4. Las 38
+pruebas pasan después del reformateo.
+
+Dos detalles para C4: `--semicolons never` **no** está en la configuración, porque con la opción por
+defecto (`inline`) las 159 líneas con `;` son admisibles para SwiftFormat; el gate de hoy es el trinquete.
+Y `wrap` tampoco, así que `--maxwidth 140` todavía no se aplica: el ancho lo controla `line_length`.
+
+**7. Una regla de SwiftLint estaba renombrada.** `redundant_optional_initialization` pasó a
+`implicit_optional_initialization` en SwiftLint 0.65; la configuración emitía un aviso en cada corrida.
+Corregido.
 
 ### Lo que falta para cerrar C3
 
-1. Instalar `swiftlint` y `swiftformat` y ajustar lo que reporten.
-2. C8, para que el paso del `.pbxproj` deje de omitirse (criterio 3).
-3. C4, para bajar los umbrales y pasar `swiftformat` a bloqueante (criterios 4 y 7).
-4. Un remoto, para el criterio 5.
+1. **C8**, para que el paso del `.pbxproj` deje de omitirse (criterio 3).
+2. **C4**, para bajar los tres trinquetes a 0, el umbral de `line_length` a 180, y agregar `wrap` y
+   `--semicolons never` a `.swiftformat`.
+3. **S7**, para que `check_vendor.sh` exista y su paso deje de omitirse.
+4. **Un remoto**, para el criterio 5, y `actionlint` para el 6.
+
+Estado de `verify.sh` hoy: seis pasos bloqueantes en verde, dos omitidos (C8 y S7).

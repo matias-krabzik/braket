@@ -13,6 +13,7 @@ cd "${0:A:h:h}"
 BASE_LONG_LINES=64      # líneas de más de 140 columnas        -> C4 las baja a 0
 BASE_SEMICOLONS=159     # líneas con varias sentencias y ';'   -> C4 las baja a 0
 BASE_EMPTY_CATCH=10     # bloques catch vacíos                 -> C6 los baja a 0
+BASE_LINT=66            # avisos de SwiftLint                   -> C4 los baja a 0
 
 failures=0
 skipped=()
@@ -65,17 +66,36 @@ else
 fi
 
 # ------------------------------------------------------------------------- lint
-step "SwiftLint (BLOQUEANTE si está instalado)"
+step "SwiftLint (BLOQUEANTE: sin errores, y los avisos no crecen)"
 if command -v swiftlint >/dev/null; then
-  if swiftlint lint --quiet; then ok "sin errores"; else fail "SwiftLint reportó errores"; fi
+  lint_log=$(mktemp -t krabzik-lint)
+  swiftlint lint --quiet > "$lint_log" 2>&1
+  lint_status=$?
+  lint_count=$(grep -cE ':[0-9]+:[0-9]+: ' "$lint_log")
+  if (( lint_status != 0 )); then
+    fail "SwiftLint reportó errores"
+    grep -E ': error: ' "$lint_log" | head -5 | sed 's/^/      /'
+  elif (( lint_count > BASE_LINT )); then
+    fail "avisos de SwiftLint: $lint_count (tope $BASE_LINT)"
+  else
+    ok "sin errores · avisos: $lint_count (tope $BASE_LINT)"
+  fi
+  # Resumen por regla en vez de volcar 66 líneas en cada corrida.
+  grep -oE '\(([a-z_]+)\)$' "$lint_log" | sort | uniq -c | sort -rn | sed 's/^/      /'
+  (( lint_count > 0 )) && info "detalle: swiftlint lint --quiet"
+  rm -f "$lint_log"
 else
   skip "swiftlint no está instalado (brew install swiftlint)" "swiftlint"
 fi
 
-step "SwiftFormat (INFORMATIVO hasta C4)"
+step "SwiftFormat (BLOQUEANTE)"
 if command -v swiftformat >/dev/null; then
-  swiftformat --lint . 2>&1 | tail -3 | sed 's/^/  · /'
-  info "diferencias de formato: informativas hasta que C4 haga la pasada mecánica"
+  if swiftformat --lint . >/dev/null 2>&1; then
+    ok "formato al día según .swiftformat"
+  else
+    fail "hay diferencias de formato: ejecutá swiftformat ."
+    swiftformat --lint . 2>&1 | grep -E "^/" | head -5 | sed 's|.*Krabzik IDE/||' | sed 's/^/      /'
+  fi
 else
   skip "swiftformat no está instalado (brew install swiftformat)" "swiftformat"
 fi

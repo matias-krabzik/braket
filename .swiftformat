@@ -1,10 +1,17 @@
-# Configuración de SwiftFormat. Hoy verify.sh la corre en modo informativo:
-# el proyecto todavía no está formateado según estas reglas. C4 hace la pasada
-# mecánica y a partir de ahí pasa a ser bloqueante.
+# Lista blanca, por el mismo motivo que only_rules en .swiftlint.yml: el conjunto
+# por defecto de SwiftFormat quiere reescribir 1195 cosas en los 27 archivos,
+# y 274 de ellas son wrapIfStatementBodies, que pelea con el estilo compacto
+# deliberado del proyecto (`guard ... else { return }` en una línea). Acá van solo
+# las reglas que el proyecto acordó en docs/specs/C4-legibilidad.md.
+#
+# Con esta lista las 32 diferencias que quedaban (20 de orden de import y 12 de
+# `{ }` -> `{}`) se aplicaron al implementar C3, así que verify.sh ya lo corre
+# como paso BLOQUEANTE. C4 agrega `wrap` y `--semicolons never`.
+--rules semicolons,trailingSpace,sortImports,emptyBraces,consecutiveBlankLines
+
+# Objetivo de ancho. Todavía no se aplica porque la regla `wrap` no está en la
+# lista: el ancho lo controla line_length en .swiftlint.yml. C4 agrega `wrap`.
 --maxwidth 140
 --indent 4
---semicolons never
---trimwhitespace always
---commas inline
 --swiftversion 6.0
 --exclude Vendor,.build,Examples

@@ -7,7 +7,8 @@ only_rules:
   - force_try
   - empty_count
   - unused_import
-  - redundant_optional_initialization
+  # Renombrada en SwiftLint 0.65: antes redundant_optional_initialization.
+  - implicit_optional_initialization
   - trailing_whitespace
   - vertical_whitespace
 

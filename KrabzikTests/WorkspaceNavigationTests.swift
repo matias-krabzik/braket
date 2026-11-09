@@ -1,5 +1,5 @@
-import XCTest
 @testable import Krabzik
+import XCTest
 
 @MainActor
 final class WorkspaceNavigationTests: XCTestCase {
