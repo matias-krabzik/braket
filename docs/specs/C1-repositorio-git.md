@@ -142,3 +142,36 @@ el repositorio.
 - `ThirdPartyNotices.txt` (128 KB) y las fuentes vendored engordan el repositorio; es irrelevante a esta
   escala y necesario por licencia.
 - No agregar `.build/` al repositorio por accidente: contiene logs con rutas locales y el puerto de pruebas.
+
+## Resuelto
+
+**2026-11-09** · commits `1785260` y `8883bba`.
+
+- `1785260` «Estado inicial de Krabzik IDE 0.3.0»: repositorio inicializado en `main` con el estado tal como
+  estaba, sin ninguna modificación previa. 114 archivos, 1,6 MB.
+- `8883bba` «Versionar convenciones de trabajo y atributos de git»: `.gitattributes`, las entradas nuevas de
+  `.gitignore` y `docs/contributing.md`.
+
+Criterios verificados:
+
+| # | Criterio | Resultado |
+|---|---|---|
+| 1 | `git log --oneline` muestra commits | 2 |
+| 2 | `git status --short` limpio | sí |
+| 3 | `project.pbxproj` y `Package.resolved` versionados | 1 y 1 |
+| 4 | Nada de `.build/` versionado | 0 |
+| 5 | Clon limpio compila | `BUILD SUCCEEDED`, `.app` de 21 MB, y el clon queda sin cambios pendientes |
+| 6 | `docs/contributing.md` con las convenciones | sí |
+
+Desviaciones respecto del diseño:
+
+- **No se agregó `.build/mysql-test-port` al `.gitignore`.** La entrada `.build/` ya lo cubre; repetirlo solo
+  sugeriría que no estaba cubierto. Anotado en el mensaje del commit.
+- **Se agregó `*.xcscheme -merge`** además de `*.pbxproj -merge`: el esquema también lo genera
+  `scripts/generate_project.py`, así que tiene el mismo problema de fusión.
+- **Se agregaron reglas `text eol=lf`** para `.py`, `.sh`, `.json` y `.plist`, no solo para `.swift` y `.md`.
+  Comprobado que no marcan ningún archivo como modificado, ni en el repositorio ni en el clon.
+
+Pendiente, fuera del alcance de este spec: no hay remoto configurado. El repositorio es local, que es lo que
+C1 se propuso resolver. El workflow de CI que escribe [C3](C3-ci-lint-warnings.md) queda listo para cuando
+exista uno.

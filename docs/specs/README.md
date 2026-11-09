@@ -48,9 +48,9 @@ Dos hallazgos de la auditoría se resolvieron durante esa ventana y los specs ya
 
 ## Calidad y prácticas
 
-| Spec | Título | Severidad |
-|---|---|---|
-| [C1](C1-repositorio-git.md) | Inicializar el control de versiones | Crítica |
+| Spec | Título | Severidad | Estado |
+|---|---|---|---|
+| [C1](C1-repositorio-git.md) | Inicializar el control de versiones | Crítica | **resuelto** |
 | [C2](C2-swift-6-mode.md) | Migrar a Swift 6 language mode | Alta |
 | [C3](C3-ci-lint-warnings.md) | CI, linter y warnings como errores | Alta |
 | [C4](C4-legibilidad.md) | Legibilidad: estilo, nombres y constantes con nombre | Media |
@@ -80,5 +80,8 @@ C1 ──> C2 ──> C3 ──┬──> C8
 
 ## Estado
 
-Ningún spec está implementado. Al cerrar uno, marcarlo en este índice y dejar en el propio spec una
-línea `## Resuelto` con la fecha y el commit.
+**C1 resuelto** el 2026-11-09 (commits `1785260` y `8883bba`): el proyecto ya está bajo control de versiones,
+así que el resto de los specs se puede implementar con diffs revisables y reversibles.
+
+Los otros 17 están sin implementar. Al cerrar uno, marcarlo en la tabla de este índice y dejar en el propio
+spec una sección `## Resuelto` con la fecha, los commits y los criterios verificados.
