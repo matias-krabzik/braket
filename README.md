@@ -1,10 +1,14 @@
-# Krabzik IDE · 0.3
+# Krabzik IDE
 
 IDE nativo para macOS 14 o posterior, escrito en Swift con SwiftUI, AppKit y TextKit 2. Permite reunir carpetas de código, procesos y scripts SQL en un proyecto `.krabzik`.
 
 ## Abrir y compilar
 
-Abrí `Krabzik.xcodeproj`, seleccioná **Krabzik** y ejecutá con ⌘R. Xcode resuelve las dependencias Swift Package Manager en la primera compilación; requiere acceso a Internet. Compilación local con firma ad hoc, sin cuenta de desarrollador. Verificado con Xcode 27.1 / Swift 6.4.
+Abrí `Krabzik.xcodeproj`, seleccioná **Krabzik** y ejecutá con ⌘R. Xcode resuelve las dependencias Swift Package Manager en la primera compilación; requiere acceso a Internet. Compilación local con firma ad hoc, sin cuenta de desarrollador.
+
+La versión del producto se define en un solo lugar, `scripts/generate_project.py`; este documento no la
+repite para que no pueda quedar desincronizada. La sección **Entorno verificado**, más abajo, dice contra
+qué se comprobó y cuándo.
 
 ```sh
 ./scripts/build.sh
@@ -93,6 +97,19 @@ rm .build/mysql-test-port
 ```
 
 En la verificación final de la v0.3 pasaron 29 pruebas locales, sin fallos; se omitieron las seis de MySQL real y la de inferencia Codex por no tener sus marcadores activos. La prueba real de Codex se ejecutó por separado y pasó: lectura y modificación de dos subproyectos con una sesión ChatGPT. También se comprobó desde el panel una consulta sobre el ejemplo y la ejecución de cambios en dos archivos de prueba. La integración MySQL y la navegación de la pantalla de inicio se habían verificado previamente.
+
+## Entorno verificado
+
+Datos de la última comprobación, no promesas permanentes.
+
+| Qué | Cuándo | Resultado |
+|---|---|---|
+| Xcode 27.1 / Swift 6.4, Swift 6 language mode | 2026-11-09 | compila sin avisos propios |
+| Suite completa con MySQL 8.4 en contenedor desechable | 2026-11-09 | 38 pruebas, 1 saltada (Codex con suscripción), 0 fallos |
+| Release instalada en `/Applications` | 2026-11-09 | firma ad hoc válida, arranca |
+| swiftlint 0.65.1 / swiftformat 0.64.6 | 2026-11-09 | sin errores; 66 avisos con tope en `scripts/verify.sh` |
+
+No se garantiza compatibilidad con servidores derivados de MySQL ni con versiones de Xcode anteriores.
 
 ## Organización y dependencias
 

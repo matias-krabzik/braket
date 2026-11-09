@@ -44,6 +44,12 @@ final class AgentController {
         }
     }
 
+    /// La versión que la app declara a Codex. Sale del bundle, que la toma de
+    /// MARKETING_VERSION: no se repite el número en el código.
+    static var clientVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+    }
+
     func connect() async {
         guard !isConnecting else { return }
         if connected && transport.running { return }
@@ -57,7 +63,8 @@ final class AgentController {
             }
             try transport.start(executable: executable)
             _ = try await transport.request("initialize", .object([
-                "clientInfo": .object(["name": .string("krabzik_ide"), "title": .string("Krabzik IDE"), "version": .string("0.3.0")]),
+                "clientInfo": .object(["name": .string("krabzik_ide"), "title": .string("Krabzik IDE"),
+                                       "version": .string(Self.clientVersion)]),
                 "capabilities": .object(["optOutNotificationMethods": .array([.string("item/reasoning/textDelta"), .string("item/reasoning/summaryTextDelta"), .string("item/commandExecution/outputDelta")])])
             ]))
             guard token == connectionGeneration else { return }

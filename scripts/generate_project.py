@@ -19,6 +19,16 @@ import json
 import re
 import sys
 
+# FUENTE DE VERDAD de la versión del producto. Todo lo demás la deriva:
+#   - MARKETING_VERSION / CURRENT_PROJECT_VERSION del target
+#   - CFBundleShortVersionString / CFBundleVersion del Info.plist, que ya usan
+#     $(MARKETING_VERSION) y $(CURRENT_PROJECT_VERSION)
+#   - el clientInfo que la app envía a Codex, que lo lee del bundle en runtime
+# El README no repite el número a propósito: así no hay nada que pueda quedar
+# desincronizado. Ver docs/specs/C10-version-unica.md.
+MARKETING_VERSION = '0.3.0'
+BUILD_NUMBER = '3'
+
 root = Path(__file__).resolve().parent.parent
 PBXPROJ = root / 'Krabzik.xcodeproj/project.pbxproj'
 SCHEME = root / 'Krabzik.xcodeproj/xcshareddata/xcschemes/Krabzik.xcscheme'
@@ -91,7 +101,7 @@ def render():
                 settings.update({'SWIFT_OPTIMIZATION_LEVEL': '-Onone' if config == 'Debug' else '-O', 'DEBUG_INFORMATION_FORMAT': 'dwarf' if config == 'Debug' else 'dwarf-with-dsym', 'ENABLE_TESTABILITY': 'YES' if config == 'Debug' else 'NO', 'SWIFT_ACTIVE_COMPILATION_CONDITIONS': 'DEBUG' if config == 'Debug' else '', 'GCC_OPTIMIZATION_LEVEL': '0' if config == 'Debug' else 's'})
             elif scope == 'app':
                 settings['ASSETCATALOG_COMPILER_APPICON_NAME'] = 'AppIcon'
-                settings.update({'PRODUCT_BUNDLE_IDENTIFIER': 'com.krabzik.ide', 'PRODUCT_NAME': 'Krabzik IDE', 'PRODUCT_MODULE_NAME': 'Krabzik', 'INFOPLIST_FILE': 'Krabzik/Info.plist', 'GENERATE_INFOPLIST_FILE': 'NO', 'ENABLE_APP_SANDBOX': 'NO', 'ENABLE_HARDENED_RUNTIME': 'YES', 'LD_RUNPATH_SEARCH_PATHS': '$(inherited) @executable_path/../Frameworks', 'COMBINE_HIDPI_IMAGES': 'YES', 'CURRENT_PROJECT_VERSION': '3', 'MARKETING_VERSION': '0.3.0'})
+                settings.update({'PRODUCT_BUNDLE_IDENTIFIER': 'com.krabzik.ide', 'PRODUCT_NAME': 'Krabzik IDE', 'PRODUCT_MODULE_NAME': 'Krabzik', 'INFOPLIST_FILE': 'Krabzik/Info.plist', 'GENERATE_INFOPLIST_FILE': 'NO', 'ENABLE_APP_SANDBOX': 'NO', 'ENABLE_HARDENED_RUNTIME': 'YES', 'LD_RUNPATH_SEARCH_PATHS': '$(inherited) @executable_path/../Frameworks', 'COMBINE_HIDPI_IMAGES': 'YES', 'CURRENT_PROJECT_VERSION': BUILD_NUMBER, 'MARKETING_VERSION': MARKETING_VERSION})
             else:
                 settings.update({'PRODUCT_BUNDLE_IDENTIFIER': 'com.krabzik.ide.tests', 'PRODUCT_NAME': 'KrabzikTests', 'GENERATE_INFOPLIST_FILE': 'YES', 'TEST_HOST': '$(BUILT_PRODUCTS_DIR)/Krabzik IDE.app/Contents/MacOS/Krabzik IDE', 'BUNDLE_LOADER': '$(TEST_HOST)', 'LD_RUNPATH_SEARCH_PATHS': '$(inherited) @executable_path/../Frameworks @loader_path/../Frameworks'})
             obj(scope + '-' + config, 'isa = XCBuildConfiguration; name = ' + config + '; buildSettings = { ' + ' '.join(f'{k} = {q(v)};' for k, v in settings.items()) + ' };')

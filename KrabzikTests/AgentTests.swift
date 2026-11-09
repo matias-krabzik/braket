@@ -2,6 +2,17 @@
 import XCTest
 
 final class AgentTests: XCTestCase {
+    @MainActor func testClientVersionComesFromBundle() {
+        // La versión se define en scripts/generate_project.py y llega por el Info.plist.
+        // Si alguien vuelve a escribirla a mano en el código, esta prueba no lo detecta;
+        // lo que detecta es que la app NO esté declarando la cadena de respaldo.
+        let fromBundle = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+        XCTAssertEqual(AgentController.clientVersion, fromBundle)
+        XCTAssertNotEqual(AgentController.clientVersion, "0",
+                          "no debe caer en el valor de respaldo")
+        XCTAssertFalse(AgentController.clientVersion.isEmpty)
+    }
+
     func testJSONLinesPreserveUnicodeAndSplitMessages() throws {
         let messages = [RPCMessage(id: .number(1), result: .string("Café 🦀")), RPCMessage(method: "item/agentMessage/delta", params: .object(["delta": .string("línea\notra")]))]
         let data = try messages.reduce(into: Data()) { $0.append(try JSONEncoder().encode($1)); $0.append(10) }
