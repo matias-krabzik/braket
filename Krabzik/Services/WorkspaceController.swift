@@ -99,6 +99,7 @@ final class WorkspaceController {
         isSwitchingWorkspace = true
         defer { isSwitchingWorkspace = false }
         guard await prepareToLeave() else { return }
+        releaseEditors()
         documents.removeAll()
         selectedDocumentID = nil
         selectedProjectID = nil
@@ -116,6 +117,7 @@ final class WorkspaceController {
     }
 
     private func install(_ project: Workspace, at url: URL) {
+        releaseEditors()
         documents.removeAll()
         selectedDocumentID = nil
         workspace = project
@@ -324,6 +326,7 @@ final class WorkspaceController {
             }
             guard await confirmSave(document) else { return }
             let index = documents.firstIndex { $0.id == document.id } ?? 0
+            document.releaseEditor()
             documents.removeAll { $0.id == document.id }
             if selectedDocumentID == document.id {
                 selectedDocumentID = documents.isEmpty ? nil : documents[min(index, documents.count - 1)].id
@@ -450,6 +453,12 @@ final class WorkspaceController {
         if state.status.active { runner.stop(project.id) }
         else { runner.start(project, workspaceURL: workspaceURL) }
         processesVisible = true
+    }
+
+    /// Suelta las vistas nativas antes de descartar los documentos: el `deinit` de
+    /// `EditorSurface` no puede hacerlo bajo las reglas de concurrencia de Swift 6.
+    private func releaseEditors() {
+        for document in documents { document.releaseEditor() }
     }
 
     func show(_ error: Error) { errorMessage = error.localizedDescription }

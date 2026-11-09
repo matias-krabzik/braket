@@ -117,6 +117,40 @@ final class CoreTests: XCTestCase {
         XCTAssertTrue(surface.scrollView.verticalRulerView?.clipsToBounds == true)
     }
 
+    @MainActor func testEditorSurfaceTeardownIsIdempotentAndStopsObserving() async throws {
+        let url = try temporaryDirectory().appendingPathComponent("example.php")
+        let document = try EditorDocument(url: url, data: Data("<?php\n\nreturn 42;\n".utf8))
+        let surface = EditorSurface(document: document)
+        document.editorStorage = surface
+        XCTAssertTrue(surface.isObservingScroll)
+        surface.teardown()
+        XCTAssertFalse(surface.isObservingScroll)
+        surface.teardown()
+        XCTAssertFalse(surface.isObservingScroll, "teardown() tiene que ser idempotente")
+        // Una notificación posterior no debe programar resaltado ni fallar.
+        NotificationCenter.default.post(name: NSView.boundsDidChangeNotification, object: surface.scrollView.contentView)
+        XCTAssertFalse(surface.isObservingScroll)
+    }
+
+    @MainActor func testClosingDocumentReleasesItsEditorSurface() async throws {
+        let directory = try temporaryDirectory()
+        let url = directory.appendingPathComponent("example.php")
+        try Data("<?php\n".utf8).write(to: url)
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "krabzik-editor-\(UUID())"))
+        let controller = WorkspaceController(defaults: defaults)
+        let document = try EditorDocument(url: url, data: Data(contentsOf: url))
+        let surface = EditorSurface(document: document)
+        document.editorStorage = surface
+        controller.documents = [document]
+        controller.selectedDocumentID = document.id
+        XCTAssertTrue(surface.isObservingScroll)
+        controller.closeDocument(document)
+        for _ in 0..<100 where !controller.documents.isEmpty { try await Task.sleep(nanoseconds: 20_000_000) }
+        XCTAssertTrue(controller.documents.isEmpty)
+        XCTAssertFalse(surface.isObservingScroll, "cerrar la pestaña tiene que soltar la vista nativa")
+        XCTAssertNil(document.editorStorage)
+    }
+
     @MainActor func testProcessCapturesOutputExitCodeAndQuotedWorkingDirectory() async throws {
         let directory = try temporaryDirectory().appendingPathComponent("folder with ' quote")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

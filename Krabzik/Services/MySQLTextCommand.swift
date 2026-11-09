@@ -28,7 +28,9 @@ private extension ByteBuffer {
 }
 
 /// Text protocol keeps decimal precision, zero dates and SQL NULL intact. All
-/// mutable members of a command are confined to the connection's event loop.
+/// mutable members of a command are confined to the connection's event loop:
+/// `activate` y `handle` solo los llama MySQLNIO desde ese loop, y quien lee
+/// `results`/`status` lo hace con `eventLoop.submit`. De ahí `@unchecked Sendable`.
 final class MySQLTextCommand: MySQLCommand, @unchecked Sendable {
     private enum Phase { case header, columns(Int), metadataEnd, rows }
     private var phase = Phase.header

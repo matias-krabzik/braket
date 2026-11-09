@@ -36,6 +36,8 @@ final class ProjectRun: Identifiable {
 }
 
 /// Collects bursts without a permanent timer. At most one UI update per 80 ms.
+/// `@unchecked Sendable`: todo el estado mutable (`pending`, `scheduled`, `decoder`) se
+/// toca únicamente con `lock` tomado, y `deliver` está aislado al main actor.
 private final class OutputBatch: @unchecked Sendable {
     private let lock = NSLock()
     private var pending = Data()
@@ -151,7 +153,8 @@ final class ProcessRunner {
             run.append("\(String(cString: strerror(result)))\n")
             return
         }
-        run.processID = pid
+        let spawnedPID = pid
+        run.processID = spawnedPID
         run.status = .running
         let batch = OutputBatch { [weak run] text in
             guard let run, run.generation == generation else { return }
@@ -167,7 +170,7 @@ final class ProcessRunner {
             }
             Darwin.close(readFD)
             var status: Int32 = 0
-            while waitpid(pid, &status, 0) == -1 && errno == EINTR {}
+            while waitpid(spawnedPID, &status, 0) == -1 && errno == EINTR {}
             let exitCode: Int32 = (status & 0x7f) == 0 ? (status >> 8) & 0xff : 128 + (status & 0x7f)
             DispatchQueue.main.async {
                 batch.flush()

@@ -58,7 +58,8 @@ enum CodexExecutable {
             Darwin.close(stdinFD[1]); Darwin.close(stdoutFD[0])
             throw AgentFailure("No se pudo iniciar Codex: \(String(cString: strerror(status))).")
         }
-        processID = pid; generation = UUID()
+        let spawnedPID = pid
+        processID = spawnedPID; generation = UUID()
         let token = generation, readFD = stdoutFD[0]
         input = FileHandle(fileDescriptor: stdinFD[1], closeOnDealloc: true)
         DispatchQueue.global(qos: .utility).async { [weak self] in
@@ -86,7 +87,7 @@ enum CodexExecutable {
         }
         DispatchQueue.global(qos: .utility).async {
             var status: Int32 = 0
-            while waitpid(pid, &status, 0) < 0 && errno == EINTR { }
+            while waitpid(spawnedPID, &status, 0) < 0 && errno == EINTR { }
         }
     }
 

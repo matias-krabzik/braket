@@ -55,7 +55,7 @@ for kind, name, product in [('app', 'Krabzik', app_product), ('test', 'KrabzikTe
 for scope in ['project', 'app', 'test']:
     for config in ['Debug', 'Release']:
         settings = {
-            'MACOSX_DEPLOYMENT_TARGET': '14.0', 'SWIFT_VERSION': '5.0',
+            'MACOSX_DEPLOYMENT_TARGET': '14.0', 'SWIFT_VERSION': '6.0',
             'CLANG_ENABLE_MODULES': 'YES', 'SDKROOT': 'macosx', 'ONLY_ACTIVE_ARCH': 'YES',
             'CODE_SIGN_IDENTITY': '-', 'CODE_SIGN_STYLE': 'Manual',
         }

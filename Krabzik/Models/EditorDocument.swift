@@ -46,6 +46,12 @@ final class EditorDocument: Identifiable {
         self.originalData = data
     }
 
+    /// Suelta la vista nativa del documento. Se llama al cerrar el documento o el proyecto.
+    func releaseEditor() {
+        (editorStorage as? EditorSurface)?.teardown()
+        editorStorage = nil
+    }
+
     func acceptExternalData(_ data: Data, discardEdits: Bool = false) {
         guard data != originalData || discardEdits else { return }
         guard (!isDirty && !isSaving) || discardEdits, data.count <= 5 * 1024 * 1024,

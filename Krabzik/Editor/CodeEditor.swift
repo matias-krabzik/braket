@@ -42,13 +42,22 @@ final class CodeTextView: NSTextView {
     }
 }
 
+/// Quita el observador en su propio `deinit`, que puede correr en cualquier hilo.
+/// `@unchecked Sendable` es seguro acá porque lo único que se hace con el token es
+/// pasarlo a `removeObserver`, que NotificationCenter admite desde cualquier hilo.
+private final class ObserverToken: @unchecked Sendable {
+    private let token: any NSObjectProtocol
+    init(_ token: any NSObjectProtocol) { self.token = token }
+    deinit { NotificationCenter.default.removeObserver(token) }
+}
+
 @MainActor final class EditorSurface: NSView, NSTextViewDelegate {
     let scrollView = NSScrollView()
     let textView = CodeTextView(usingTextLayoutManager: true)
     weak var document: EditorDocument?
     var lines: LineIndex
     private var highlighter: DispatchWorkItem?
-    private var scrollObserver: NSObjectProtocol?
+    private var scrollObserver: ObserverToken?
     private var gutter: LineRuler!
     private var paragraph: NSParagraphStyle
     private var editRevision = 0
@@ -117,9 +126,10 @@ final class CodeTextView: NSTextView {
         scrollView.hasVerticalRuler = true
         scrollView.rulersVisible = true
         scrollView.contentView.postsBoundsChangedNotifications = true
-        scrollObserver = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: scrollView.contentView, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.gutter.needsDisplay = true; self?.scheduleHighlight() }
-        }
+        scrollObserver = ObserverToken(NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification, object: scrollView.contentView, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.gutter.needsDisplay = true; self?.scheduleHighlight() }
+            })
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -135,9 +145,17 @@ final class CodeTextView: NSTextView {
         editRevision += 1; gutter.needsDisplay = true; scheduleHighlight(); updatePosition()
     }
 
-    deinit {
-        if let scrollObserver { NotificationCenter.default.removeObserver(scrollObserver) }
+    /// Expuesto para las pruebas: indica si el surface sigue observando el scroll.
+    var isObservingScroll: Bool { scrollObserver != nil }
+
+    /// Limpieza determinista, idempotente. La llama el documento al cerrarse.
+    /// No se hace en `deinit` porque es `nonisolated` y no puede tocar estas propiedades.
+    /// Si nadie la llama, `ObserverToken` quita el observador al liberarse y el resaltado
+    /// pendiente no hace nada, porque captura `self` de forma débil.
+    func teardown() {
+        scrollObserver = nil
         highlighter?.cancel()
+        highlighter = nil
     }
 
     private var baseAttributes: [NSAttributedString.Key: Any] {
