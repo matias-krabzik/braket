@@ -260,6 +260,8 @@ final class AgentController {
             switch method {
             case "item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/tool/requestUserInput":
                 requests.append(AgentRequest(id: id.pretty, rpcID: id, method: method, params: p))
+                // TODO(C6): registrar con OSLog cuando llega una pregunta con isSecret.
+                // Si alguna vez pasa de verdad, hay que poder reconstruir qué se pidió.
             case "item/permissions/requestApproval":
                 try? transport.respond(id: id, result: .object(["permissions": .object([:]), "scope": .string("turn")]))
             case "mcpServer/elicitation/request":
@@ -276,15 +278,22 @@ final class AgentController {
             let turn = p["turn"]
             guard turnID == nil || turn["id"].string == turnID else { return }
             let status = turn["status"].string
-            finishTurn(error: status == "failed" ? turn["error"]["message"].string ?? "La tarea falló." : status == "interrupted" ? "Tarea detenida. Los cambios realizados se conservaron." : nil)
+            let failure = ModelText.display(turn["error"]["message"].string ?? "La tarea falló.", limit: 2_000)
+            finishTurn(error: status == "failed" ? failure
+                              : status == "interrupted" ? "Tarea detenida. Los cambios realizados se conservaron."
+                              : nil)
         case "error":
-            if !p["willRetry"].bool { error = p["error"]["message"].string ?? "Error de Codex." }
-        case "turn/diff/updated": diff = String((p["diff"].string ?? "").prefix(200_000))
+            if !p["willRetry"].bool {
+                error = ModelText.display(p["error"]["message"].string ?? "Error de Codex.", limit: 2_000)
+            }
+        case "turn/diff/updated": diff = ModelText.display(p["diff"].string ?? "", limit: 200_000)
         case "serverRequest/resolved": requests.removeAll { $0.rpcID == p["requestId"] }
         case "item/agentMessage/delta":
             guard let id = p["itemId"].string, !commentaryIDs.contains(id) else { return }
             let message = agentMessage(id)
-            if message.text.utf8.count < 120_000 { message.text += p["delta"].string ?? "" }
+            if message.text.utf8.count < 120_000 {
+                message.text += ModelText.display(p["delta"].string ?? "", limit: 4_000)
+            }
         case "item/started", "item/completed":
             let item = p["item"], completed = method == "item/completed"
             guard let id = item["id"].string else { return }
@@ -292,14 +301,18 @@ final class AgentController {
             case "agentMessage":
                 if item["phase"].string == "commentary" {
                     commentaryIDs.insert(id)
-                    if completed { activity = String((item["text"].string ?? "Trabajando…").prefix(160)) }
-                } else if completed { agentMessage(id).text = String((item["text"].string ?? "").prefix(120_000)) }
+                    if completed { activity = ModelText.display(item["text"].string ?? "Trabajando…", limit: 160) }
+                } else if completed {
+                    agentMessage(id).text = ModelText.display(item["text"].string ?? "", limit: 120_000)
+                }
             case "commandExecution":
                 if !completed { activity = "Ejecutando…" }
             case "fileChange":
                 let files = item["changes"].array.compactMap { value -> AgentFileChange? in
                     guard let path = value["kind"]["move_path"].string ?? value["path"].string else { return nil }
-                    return AgentFileChange(path: path, kind: value["kind"]["type"].string ?? "update", diff: String((value["diff"].string ?? "").prefix(100_000)))
+                    return AgentFileChange(path: ModelText.display(path, limit: 1_024),
+                                           kind: value["kind"]["type"].string ?? "update",
+                                           diff: ModelText.display(value["diff"].string ?? "", limit: 100_000))
                 }
                 if completed { proposedChanges.removeValue(forKey: id) }
                 else { proposedChanges[id] = files }

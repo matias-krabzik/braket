@@ -36,6 +36,48 @@ private extension JSONEncoder {
     static var pretty: JSONEncoder { let e = JSONEncoder(); e.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]; return e }
 }
 
+/// Todo lo que el panel de Codex muestra lo escribe el modelo. Antes de entrar al
+/// estado observable pasa por acá, para que ninguna vista —ni una futura— tenga que
+/// acordarse. Ver docs/specs/S5-contenido-del-modelo.md.
+enum ModelText {
+    /// Caracteres que se quitan: controles (salvo tab y salto de línea), DEL, los
+    /// overrides y aislamientos bidireccionales, y los invisibles de ancho cero.
+    /// Los bidi importan: con U+202E un path puede leerse al revés en el diálogo de
+    /// aprobación, que es justo donde el usuario decide.
+    private static func isRemovable(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.value {
+        case 0x09, 0x0A: return false
+        case 0x00...0x1F, 0x7F: return true
+        case 0x200B...0x200F, 0x202A...0x202E, 0x2066...0x2069, 0xFEFF: return true
+        default: return false
+        }
+    }
+
+    /// Texto del modelo listo para mostrar: sin controles ni bidi, con los saltos
+    /// de línea repetidos colapsados y acotado a `limit`.
+    static func display(_ raw: String, limit: Int) -> String {
+        var scalars = String.UnicodeScalarView()
+        var newlines = 0
+        for scalar in raw.unicodeScalars where !isRemovable(scalar) {
+            if scalar == "\n" {
+                newlines += 1
+                if newlines > 2 { continue }
+            } else {
+                newlines = 0
+            }
+            scalars.append(scalar)
+        }
+        let clean = String(scalars)
+        guard clean.count > limit else { return clean }
+        return String(clean.prefix(limit)) + "…"
+    }
+
+    /// `true` si `display` hubiera quitado algo. Sirve para avisarlo en la vista.
+    static func needsSanitizing(_ raw: String) -> Bool {
+        raw.unicodeScalars.contains(where: isRemovable)
+    }
+}
+
 struct AgentFailure: LocalizedError, Sendable {
     let message: String
     init(_ message: String) { self.message = message }

@@ -121,35 +121,117 @@ private struct AgentRequestView: View {
     let request: AgentRequest
     let agent: AgentController
     @State private var answers: [String: String] = [:]
+    @State private var acceptsSecretRisk = false
+
+    private var hasSecret: Bool {
+        request.params["questions"].array.contains { $0["isSecret"].bool }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if request.isQuestion {
-                ForEach(Array(request.params["questions"].array.enumerated()), id: \.offset) { _, question in
-                    let id = question["id"].string ?? ""
-                    Text(question["question"].string ?? "").font(.system(size: 12))
-                    if question["isSecret"].bool { SecureField("Respuesta", text: Binding(get: { answers[id] ?? "" }, set: { answers[id] = $0 })) }
-                    else {
-                        TextField("Respuesta", text: Binding(get: { answers[id] ?? "" }, set: { answers[id] = $0 }))
-                        ForEach(Array(question["options"].array.enumerated()), id: \.offset) { _, option in
-                            Button(option["label"].string ?? "") { answers[id] = option["label"].string ?? "" }.help(option["description"].string ?? "")
-                        }
+            header
+            if request.isQuestion { questions } else { approval }
+        }.buttonStyle(.bordered).controlSize(.small)
+    }
+
+    /// Procedencia explícita: lo que sigue lo escribió el modelo, no la interfaz.
+    private var header: some View {
+        HStack(spacing: 6) {
+            Image(systemName: request.isQuestion ? "questionmark.bubble" : "hand.raised")
+                .font(.system(size: 11))
+            Text(request.isQuestion ? "Codex pregunta" : "Codex pide permiso")
+                .font(.system(size: 11, weight: .semibold))
+            Spacer()
+        }.foregroundStyle(Theme.blue)
+    }
+
+    private var questions: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(Array(request.params["questions"].array.enumerated()), id: \.offset) { _, question in
+                let id = question["id"].string ?? ""
+                modelBlock(ModelText.display(question["question"].string ?? "", limit: 2_000))
+                if question["isSecret"].bool {
+                    secretField(id: id)
+                } else {
+                    TextField("Respuesta", text: binding(for: id))
+                    ForEach(Array(question["options"].array.enumerated()), id: \.offset) { _, option in
+                        let label = ModelText.display(option["label"].string ?? "", limit: 200)
+                        Button(label) { answers[id] = label }
+                            .help(ModelText.display(option["description"].string ?? "", limit: 500))
                     }
                 }
-                Button("Responder") { agent.answerQuestions(request, answers: answers) }
-                    .disabled(request.params["questions"].array.contains { (answers[$0["id"].string ?? ""] ?? "").isEmpty })
-            } else {
-                Text(request.method.contains("fileChange") ? "Permitir cambios" : "Permitir comando").font(.system(size: 12, weight: .medium))
-                if let reason = request.params["reason"].string { Text(reason).font(.system(size: 11)).textSelection(.enabled) }
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
-                        if let cwd = request.params["cwd"].string { Text(cwd).foregroundStyle(.secondary) }
-                        if let root = request.params["grantRoot"].string { Text(root).foregroundStyle(.secondary) }
-                        Text(request.params["command"].string ?? agent.proposedDiff(for: request)).textSelection(.enabled)
-                    }.font(.system(size: 10, design: .monospaced)).frame(maxWidth: .infinity, alignment: .leading)
-                }.frame(maxHeight: 130)
-                HStack { Spacer(); Button("Rechazar") { agent.answer(request, accept: false) }; Button("Permitir una vez") { agent.answer(request, accept: true) } }
             }
-        }.buttonStyle(.bordered).controlSize(.small)
+            HStack {
+                Spacer()
+                Button("Rechazar") { agent.answer(request, accept: false) }
+                Button("Responder") { agent.answerQuestions(request, answers: answers) }
+                    .disabled(answersIncomplete || (hasSecret && !acceptsSecretRisk))
+            }
+        }
+    }
+
+    /// Un campo secreto no puede ser una interacción silenciosa y normal: el modelo
+    /// pide el dato y la UI se lo presenta con el mismo aspecto que un campo propio.
+    @ViewBuilder private func secretField(id: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 10))
+                Text("Codex pide un dato secreto. Krabzik nunca necesita tus contraseñas para "
+                     + "trabajar. Si no sabés exactamente por qué lo pide, rechazá la pregunta.")
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .font(.system(size: 10)).foregroundStyle(.orange)
+            Toggle("Entiendo el riesgo y quiero responder", isOn: $acceptsSecretRisk)
+                .font(.system(size: 10)).toggleStyle(.checkbox)
+            SecureField("Respuesta", text: binding(for: id)).disabled(!acceptsSecretRisk)
+        }
+        .padding(8)
+        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private var approval: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(request.method.contains("fileChange") ? "Permitir cambios" : "Permitir comando")
+                .font(.system(size: 12, weight: .medium))
+            if let reason = request.params["reason"].string {
+                Text(ModelText.display(reason, limit: 2_000)).font(.system(size: 11)).textSelection(.enabled)
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    if let cwd = request.params["cwd"].string {
+                        Text(ModelText.display(cwd, limit: 1_024)).foregroundStyle(.secondary)
+                    }
+                    if let root = request.params["grantRoot"].string {
+                        Text(ModelText.display(root, limit: 1_024)).foregroundStyle(.secondary)
+                    }
+                    modelBlock(ModelText.display(request.params["command"].string
+                                                 ?? agent.proposedDiff(for: request), limit: 100_000))
+                }.font(.system(size: 10, design: .monospaced)).frame(maxWidth: .infinity, alignment: .leading)
+            }.frame(maxHeight: 130)
+            HStack {
+                Spacer()
+                Button("Rechazar") { agent.answer(request, accept: false) }
+                Button("Permitir una vez") { agent.answer(request, accept: true) }
+            }
+        }
+    }
+
+    /// Bloque con fondo propio: distingue el texto del modelo del de la interfaz.
+    private func modelBlock(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11))
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(7)
+            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 5))
+    }
+
+    private var answersIncomplete: Bool {
+        request.params["questions"].array.contains { (answers[$0["id"].string ?? ""] ?? "").isEmpty }
+    }
+
+    private func binding(for id: String) -> Binding<String> {
+        Binding(get: { answers[id] ?? "" }, set: { answers[id] = $0 })
     }
 }
 

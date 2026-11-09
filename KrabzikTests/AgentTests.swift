@@ -13,6 +13,44 @@ final class AgentTests: XCTestCase {
         XCTAssertFalse(AgentController.clientVersion.isEmpty)
     }
 
+    func testModelTextStripsControlAndBidiCharacters() {
+        // Lo hostil se va...
+        let bidi = "facturas/\u{202E}txt.ogap\u{202C}"
+        XCTAssertEqual(ModelText.display(bidi, limit: 100), "facturas/txt.ogap")
+        XCTAssertTrue(ModelText.needsSanitizing(bidi))
+        for scalar in [0x00, 0x07, 0x1B, 0x7F, 0x200B, 0x202A, 0x2066, 0xFEFF] {
+            let raw = "a\(Character(Unicode.Scalar(scalar)!))b"
+            XCTAssertEqual(ModelText.display(raw, limit: 100), "ab", "escalar \(scalar)")
+        }
+        // ...y lo legítimo queda intacto: tabuladores, saltos simples y acentos.
+        let diff = "--- a/x.swift\n+++ b/x.swift\n@@\n-\tlet año = 1\n+\tlet año = 2 🦀\n"
+        XCTAssertEqual(ModelText.display(diff, limit: 10_000), diff)
+        XCTAssertFalse(ModelText.needsSanitizing(diff))
+        // Saltos repetidos colapsados a dos, y truncado con elipsis.
+        XCTAssertEqual(ModelText.display("a\n\n\n\n\nb", limit: 100), "a\n\nb")
+        XCTAssertEqual(ModelText.display("abcdef", limit: 3), "abc…")
+    }
+
+    @MainActor func testFileChangePathsAreSanitizedBeforeReachingState() async throws {
+        let base = try fixture()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let script = base.appendingPathComponent("server.py")
+        try fakeServer.write(to: script, atomically: true, encoding: .utf8)
+        let agent = AgentController()
+        defer { agent.shutdown() }
+        try agent.transport.start(executable: URL(fileURLWithPath: "/usr/bin/python3"),
+                                  arguments: ["-u", script.path])
+        agent.connected = true; agent.account = "ChatGPT"
+        agent.send("Cambiar el archivo", scope: AgentScope(names: ["Test"], roots: [base]))
+        try await until { !agent.requests.isEmpty }
+        agent.answer(agent.requests[0], accept: true)
+        try await until { agent.changes.count == 2 }
+        // El servidor falso manda una ruta con override bidi y un BEL, y un diff con NUL.
+        let hostile = try XCTUnwrap(agent.changes.last)
+        XCTAssertEqual(hostile.path, "api/evil.swift")
+        XCTAssertEqual(hostile.diff, "-a\n+b\n")
+    }
+
     func testJSONLinesPreserveUnicodeAndSplitMessages() throws {
         let messages = [RPCMessage(id: .number(1), result: .string("Café 🦀")), RPCMessage(method: "item/agentMessage/delta", params: .object(["delta": .string("línea\notra")]))]
         let data = try messages.reduce(into: Data()) { $0.append(try JSONEncoder().encode($1)); $0.append(10) }
@@ -189,7 +227,7 @@ for line in sys.stdin:
   out({'id':'approve-1','method':'item/commandExecution/requestApproval','params':{'threadId':'thread-test','turnId':'turn-test','itemId':'cmd','command':'test command'}})
  elif i=='approve-1':
   if v.get('result',{}).get('decision')!='accept': continue
-  note('item/completed',{'item':{'id':'file','type':'fileChange','status':'completed','changes':[{'path':'hello.txt','kind':{'type':'update'},'diff':'-viejo\n+nuevo'}]}})
+  note('item/completed',{'item':{'id':'file','type':'fileChange','status':'completed','changes':[{'path':'hello.txt','kind':{'type':'update'},'diff':'-viejo\n+nuevo'},{'path':'api/\u202Eevil\u0007.swift','kind':{'type':'update'},'diff':'-a\u0000\n+b\n'}]}})
   note('turn/diff/updated',{'diff':'-viejo\n+nuevo'})
   note('item/agentMessage/delta',{'itemId':'answer','delta':'Cambio '})
   note('item/agentMessage/delta',{'itemId':'answer','delta':'terminado 🦀'})
