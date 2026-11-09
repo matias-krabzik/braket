@@ -24,7 +24,7 @@ info() { print -- "  · $1" }
 skip() { print -- "  — $1 (omitido)"; skipped+=("$2") }
 
 # ---------------------------------------------------------------- proyecto Xcode
-step "Proyecto Xcode al día (BLOQUEANTE cuando C8 esté hecho)"
+step "Proyecto Xcode al día (BLOQUEANTE)"
 if grep -q -- "--check" scripts/generate_project.py; then
   if python3 scripts/generate_project.py --check; then
     ok "el .pbxproj coincide con las fuentes"

@@ -13,8 +13,10 @@
 - **No se edita a mano**, ni desde la interfaz de Xcode.
 - Después de agregar, mover o borrar un archivo Swift: `python3 scripts/generate_project.py` y commitear
   el `.pbxproj` resultante **en el mismo commit**.
-- Si no se regenera, la compilación falla con `cannot find 'X' in scope`, un error que parece de código y
-  no lo es. Ver [docs/specs/C8-pbxproj-sincronizado.md](specs/C8-pbxproj-sincronizado.md).
+- Si no se regenera, `scripts/build.sh` y `scripts/verify.sh` fallan temprano diciendo qué archivo falta.
+  Antes de C8 el síntoma era `cannot find 'X' in scope`, un error que parece de código y no lo es.
+- `python3 scripts/generate_project.py --check` no escribe nada y devuelve 1 si el proyecto está
+  desactualizado. El propio modo se prueba con `scripts/tests/test_generate_project.sh`.
 - `.gitattributes` marca el `.pbxproj` como no fusionable: ante un conflicto, se regenera.
 
 ## Antes de commitear
