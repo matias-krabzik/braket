@@ -1,6 +1,9 @@
 import AppKit
 import Observation
 
+/// La contraseña se lee del llavero justo antes de usarla y viaja como parámetro.
+/// NO se guarda en el estado observable ni en `SQLExecution`, aunque sería cómodo
+/// para no releerla: acotar su vida es el punto de docs/specs/S4-no-retener-password.md.
 @MainActor @Observable
 final class DatabaseController {
     var selectedConnectionID: UUID?
@@ -66,6 +69,7 @@ final class DatabaseController {
         let operation = UUID()
         execution.operationID = operation
         execution.results = []; execution.selectedResultID = nil; execution.error = nil
+        execution.cancelNote = nil
         execution.connectionName = connection.name
         execution.destination = connection.destination
         execution.isRunning = true; execution.isCancelling = false
@@ -99,7 +103,13 @@ final class DatabaseController {
         guard let operation = execution.operationID, execution.isRunning, !execution.isCancelling else { return }
         execution.isCancelling = true
         execution.task?.cancel()
-        Task { await client.cancel(operation) }
+        execution.cancelNote = nil
+        Task {
+            if case .localOnly(let reason) = await client.cancel(operation) {
+                execution.cancelNote =
+                    "Se cerró la conexión local, pero la consulta puede seguir en el servidor (\(reason))."
+            }
+        }
     }
 
     func prepareToLeave() async -> Bool {

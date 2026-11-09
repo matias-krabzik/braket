@@ -98,6 +98,9 @@ final class SQLExecution {
     var connectionName = ""
     var destination = ""
     var error: String?
+    /// Aviso adicional cuando la cancelación no llegó al servidor. Va aparte de
+    /// `error` porque el propio `execute` escribe ahí al terminar cancelado.
+    var cancelNote: String?
     @ObservationIgnored var task: Task<Void, Never>?
     @ObservationIgnored var operationID: UUID?
 

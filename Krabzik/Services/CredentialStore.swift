@@ -1,6 +1,10 @@
 import Foundation
 import Security
 
+/// La contraseña se mueve como `String` porque así la pide el transporte de
+/// MySQLNIO. Swift no garantiza el borrado de ese buffer, así que el objetivo acá
+/// es acotar su VIDA, no su rastro en memoria: nadie la retiene más allá del
+/// handshake. Ver docs/specs/S4-no-retener-password.md.
 enum CredentialStore {
     private static let service = "com.krabzik.ide.mysql"
 

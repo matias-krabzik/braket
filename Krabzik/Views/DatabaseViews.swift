@@ -238,12 +238,19 @@ struct SQLResultsPanel: View {
                 HStack {
                     Text(result.error == nil ? result.summary : "Línea \(result.line)").lineLimit(1)
                     Spacer()
+                    if let note = execution.cancelNote {
+                        Text(note).foregroundStyle(.orange).lineLimit(1).help(note)
+                    }
                     if let error = execution.error { Text(error).foregroundStyle(.red.opacity(0.9)).lineLimit(1).help(error) }
                 }.font(.system(size: 10)).foregroundStyle(.secondary).padding(.horizontal, 15).frame(height: 25)
             } else {
-                Text(execution.error ?? (execution.isCancelling ? "Cancelando…" : execution.isRunning ? "Ejecutando…" : ""))
-                    .font(.system(size: 12)).foregroundStyle(execution.error == nil ? Color.secondary : .red)
-                    .textSelection(.enabled).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(16)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(execution.error ?? (execution.isCancelling ? "Cancelando…" : execution.isRunning ? "Ejecutando…" : ""))
+                        .foregroundStyle(execution.error == nil ? Color.secondary : .red)
+                    if let note = execution.cancelNote { Text(note).foregroundStyle(.orange) }
+                }
+                .font(.system(size: 12))
+                .textSelection(.enabled).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(16)
             }
         }.background(Theme.background)
     }

@@ -136,6 +136,31 @@ final class DatabaseTests: XCTestCase {
         await client.shutdown()
     }
 
+    func testCancellationReportsWhenCredentialIsUnavailable() async throws {
+        let config = try configuration()
+        // Lector que falla: simula que el llavero no está disponible al cancelar,
+        // sin tocar el llavero real.
+        let client = MySQLClient { _ in throw DatabaseFailure("llavero no disponible") }
+        let operation = UUID()
+        let started = expectation(description: "la consulta arrancó")
+        let task = Task {
+            started.fulfill()
+            _ = try? await client.execute("SELECT SLEEP(5)", startingLine: 1, configuration: config,
+                                          password: "", operation: operation) { _ in }
+        }
+        await fulfillment(of: [started], timeout: 5)
+        try await Task.sleep(nanoseconds: 400_000_000)
+        let outcome = await client.cancel(operation)
+        task.cancel()
+        guard case .localOnly(let reason) = outcome else {
+            XCTFail("Debe informar que solo se cerró la conexión local, no \(outcome)")
+            await client.shutdown()
+            return
+        }
+        XCTAssertTrue(reason.contains("llavero no disponible"), reason)
+        await client.shutdown()
+    }
+
     private func configuration() throws -> DatabaseConnection {
         let marker = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent(".build/mysql-test-port")

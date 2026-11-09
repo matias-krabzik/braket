@@ -24,10 +24,26 @@ struct DatabaseSessionInfo: Sendable {
 }
 
 actor MySQLClient {
+    /// Resultado de cancelar. `localOnly` significa que se cerró el socket pero el
+    /// servidor pudo no haber recibido el KILL: la consulta puede seguir corriendo.
+    enum CancelOutcome: Sendable, Equatable {
+        case killed
+        case localOnly(reason: String)
+    }
+
+    /// Cómo se obtiene la contraseña cuando hace falta reconectar para cancelar.
+    /// Inyectable para poder probar el camino de fallo sin tocar el llavero real.
+    private let readPassword: @Sendable (DatabaseConnection) throws -> String
+
+    init(readPassword: @escaping @Sendable (DatabaseConnection) throws -> String = {
+        try CredentialStore.read(for: $0)
+    }) {
+        self.readPassword = readPassword
+    }
+
     private struct Session {
         let connection: MySQLConnection
         let configuration: DatabaseConnection
-        let password: String
         let serverID: UInt64
         var database: String
         var flags: MySQLProtocol.StatusFlags = []
@@ -78,7 +94,7 @@ actor MySQLClient {
             guard let values = result.0.first?.rows.first, let idText = values.first ?? nil, let serverID = UInt64(idText) else {
                 throw DatabaseFailure("No se pudo identificar la sesión MySQL.")
             }
-            let value = Session(connection: connection, configuration: config, password: password, serverID: serverID,
+            let value = Session(connection: connection, configuration: config, serverID: serverID,
                                 database: values.count > 1 ? values[1] ?? "" : "", flags: result.1)
             guard token == epoch else { throw CancellationError() }
             sessions[config.id] = value
@@ -154,18 +170,33 @@ actor MySQLClient {
         return .init(database: session.database, inTransaction: session.flags.contains(.SERVER_STATUS_IN_TRANS))
     }
 
-    func cancel(_ operation: UUID) async {
-        guard let id = jobs[operation] else { return }
+    @discardableResult
+    func cancel(_ operation: UUID) async -> CancelOutcome {
+        guard let id = jobs[operation] else { return .killed }
         cancelled.insert(operation)
-        guard let value = sessions.removeValue(forKey: id) else { return }
-        // Closing a TCP socket alone does not reliably interrupt a long server query.
-        // A second, short-lived connection terminates only this app-owned session.
+        guard let value = sessions.removeValue(forKey: id) else { return .killed }
+        // Cerrar el socket no interrumpe de forma fiable una consulta larga en el
+        // servidor. Una segunda conexión corta termina solo esta sesión, que es de
+        // la app. La contraseña se relee del llavero: la sesión no la guarda.
+        var outcome = CancelOutcome.killed
         do {
-            let control = try await open(value.configuration, password: value.password)
-            do { _ = try await control.simpleQuery("KILL CONNECTION \(value.serverID)").get() } catch {}
+            let configuration = value.configuration
+            let reader = readPassword
+            let password = try await Task.detached(priority: .userInitiated) {
+                try reader(configuration)
+            }.value
+            let control = try await open(configuration, password: password)
+            do {
+                _ = try await control.simpleQuery("KILL CONNECTION \(value.serverID)").get()
+            } catch {
+                outcome = .localOnly(reason: Self.message(error))
+            }
             try? await control.close().get()
-        } catch {}
+        } catch {
+            outcome = .localOnly(reason: Self.message(error))
+        }
         try? await value.connection.close().get()
+        return outcome
     }
 
     func disconnect(_ id: UUID) async {
