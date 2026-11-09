@@ -58,6 +58,10 @@ for scope in ['project', 'app', 'test']:
             'MACOSX_DEPLOYMENT_TARGET': '14.0', 'SWIFT_VERSION': '6.0',
             'CLANG_ENABLE_MODULES': 'YES', 'SDKROOT': 'macosx', 'ONLY_ACTIVE_ARCH': 'YES',
             'CODE_SIGN_IDENTITY': '-', 'CODE_SIGN_STYLE': 'Manual',
+            # Un aviso del compilador rompe el build. La válvula de escape es la
+            # invocación (xcodebuild SWIFT_TREAT_WARNINGS_AS_ERRORS=NO), nunca editar esto.
+            'SWIFT_TREAT_WARNINGS_AS_ERRORS': 'YES',
+            'GCC_TREAT_WARNINGS_AS_ERRORS': 'YES',
         }
         if scope == 'project':
             settings.update({'SWIFT_OPTIMIZATION_LEVEL': '-Onone' if config == 'Debug' else '-O', 'DEBUG_INFORMATION_FORMAT': 'dwarf' if config == 'Debug' else 'dwarf-with-dsym', 'ENABLE_TESTABILITY': 'YES' if config == 'Debug' else 'NO', 'SWIFT_ACTIVE_COMPILATION_CONDITIONS': 'DEBUG' if config == 'Debug' else '', 'GCC_OPTIMIZATION_LEVEL': '0' if config == 'Debug' else 's'})

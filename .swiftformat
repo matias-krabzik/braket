@@ -1,0 +1,10 @@
+# Configuración de SwiftFormat. Hoy verify.sh la corre en modo informativo:
+# el proyecto todavía no está formateado según estas reglas. C4 hace la pasada
+# mecánica y a partir de ahí pasa a ser bloqueante.
+--maxwidth 140
+--indent 4
+--semicolons never
+--trimwhitespace always
+--commas inline
+--swiftversion 6.0
+--exclude Vendor,.build,Examples

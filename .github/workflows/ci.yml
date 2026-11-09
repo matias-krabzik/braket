@@ -1,0 +1,63 @@
+# Krabzik IDE · verificación continua
+#
+# Todavía no hay remoto configurado (ver docs/specs/C1-repositorio-git.md): este
+# workflow queda listo para cuando exista. Antes de la primera corrida real hay
+# dos cosas que revisar, porque no se pueden verificar sin un runner:
+#
+#   1. La imagen y la versión de Xcode. El proyecto se verificó con Xcode 27.1 /
+#      Swift 6.4 y necesita Swift 6 language mode. El paso "Entorno" imprime lo
+#      que trae el runner; si no alcanza, fijar la imagen y xcode-select.
+#   2. MySQL viene de Homebrew, no de un contenedor de servicio: los `services:`
+#      de GitHub Actions solo funcionan en runners Linux, y en macOS no hay
+#      Docker preinstalado.
+
+name: CI
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Entorno
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Herramientas de estilo
+        run: brew install swiftlint swiftformat
+
+      # Las 6 pruebas de MySQL real cubren el fork local del camino de
+      # autenticación (docs/specs/S7-gobernanza-fork-mysqlnio.md). En CI tienen
+      # que correr siempre, así que el marcador se crea de entrada.
+      - name: MySQL de pruebas
+        run: |
+          brew install mysql@8.4
+          brew services start mysql@8.4
+          for i in $(seq 1 60); do
+            if /opt/homebrew/opt/mysql@8.4/bin/mysqladmin ping -uroot --silent; then
+              echo "servidor listo tras ${i}s"; break
+            fi
+            sleep 1
+          done
+          /opt/homebrew/opt/mysql@8.4/bin/mysql -uroot -e 'CREATE DATABASE IF NOT EXISTS krabzik_qa;'
+          mkdir -p .build
+          printf '3306\n' > .build/mysql-test-port
+
+      - name: Verificación
+        run: scripts/verify.sh
+
+      - name: Logs en caso de fallo
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs
+          path: |
+            .build/Logs
+            .build/TestResults
+          if-no-files-found: ignore

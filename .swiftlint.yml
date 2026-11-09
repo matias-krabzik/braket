@@ -1,0 +1,35 @@
+# Conjunto chico y acordado, no el catálogo completo de SwiftLint: una lista larga
+# generaría cientos de avisos y terminaría desactivada. Las reglas de estilo del
+# proyecto están en docs/specs/C4-legibilidad.md.
+only_rules:
+  - line_length
+  - force_unwrapping
+  - force_try
+  - empty_count
+  - unused_import
+  - redundant_optional_initialization
+  - trailing_whitespace
+  - vertical_whitespace
+
+line_length:
+  warning: 140
+  # El umbral objetivo es 180, pero hoy la línea más larga del proyecto tiene 468
+  # columnas (el patrón de palabras clave de SyntaxStyler) y hay 6 por encima de 200.
+  # Ponerlo en 180 ahora haría fallar el lint sobre el árbol limpio. Queda como
+  # trinquete: impide empeorar. C4 lo baja a 180 cuando parta las líneas largas.
+  error: 470
+  ignores_comments: false
+  ignores_urls: true
+
+force_unwrapping:
+  # 1 caso conocido: MySQLClient.eventLoop(). C4 lo reescribe.
+  severity: warning
+
+force_try:
+  # 1 caso conocido: SyntaxStyler.literals, cubierto por una prueba en C4.
+  severity: warning
+
+excluded:
+  - Vendor
+  - .build
+  - Examples

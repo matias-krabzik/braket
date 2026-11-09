@@ -80,11 +80,17 @@ El script necesita red; en CI eso está bien, y localmente se puede saltar con u
 En el workflow (C3):
 
 ```yaml
-services: … mysql:8.4 con MYSQL_ALLOW_EMPTY_PASSWORD y MYSQL_DATABASE=krabzik_qa
 steps:
-  - run: printf '3306\n' > .build/mysql-test-port
-  - run: xcodebuild … test
+  - run: brew install mysql@8.4 && brew services start mysql@8.4   # + espera a mysqladmin ping
+  - run: mkdir -p .build && printf '3306\n' > .build/mysql-test-port
+  - run: scripts/verify.sh
 ```
+
+> **Corregido el 2026-11-09 al implementar C3.** La versión anterior de este punto usaba un contenedor de
+> servicio (`services: mysql:8.4`). No funciona: los `services:` de GitHub Actions **solo existen en
+> runners Linux**, y en los de macOS —que son los que hacen falta para compilar con Xcode— no hay Docker
+> preinstalado. MySQL tiene que venir de Homebrew en el propio runner. Para el desarrollo local el
+> contenedor desechable del README sigue siendo la mejor opción, y es el que se usó para verificar C2.
 
 El mecanismo de salto por `.build/mysql-test-port` se conserva para el desarrollo local —es una buena
 decisión, y el README ya explica cómo levantar la instancia desechable— pero en CI el archivo se crea

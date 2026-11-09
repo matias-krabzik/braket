@@ -20,16 +20,38 @@
 ## Antes de commitear
 
 ```sh
-xcodebuild -project Krabzik.xcodeproj -scheme Krabzik \
-  -destination 'platform=macOS' -derivedDataPath .build \
-  -parallel-testing-enabled NO test
+scripts/verify.sh
 ```
 
-Las 6 pruebas de MySQL real se saltan sin el marcador `.build/mysql-test-port`; el README explica cómo
-levantar una instancia desechable para habilitarlas.
+Corre lo mismo que CI: trinquetes de estilo, lint, integridad del vendoring, compilación y pruebas.
+Distingue pasos **bloqueantes** de **informativos**, y omite con aviso lo que todavía no existe
+(`swiftlint`, `swiftformat`, el `--check` del generador, `check_vendor.sh`). Con `--no-tests` salta la
+compilación, útil para una pasada rápida.
 
-Cuando exista `scripts/verify.sh` ([C3](specs/C3-ci-lint-warnings.md)), ese comando reemplaza al anterior y
-agrega lint, chequeo del `.pbxproj` y verificación del vendoring.
+Las 6 pruebas de MySQL real se saltan sin el marcador `.build/mysql-test-port`; el README explica cómo
+levantar una instancia desechable para habilitarlas. En CI el marcador se crea siempre, así que ahí
+corren las 38.
+
+Un aviso del compilador rompe el build: `SWIFT_TREAT_WARNINGS_AS_ERRORS` está en `YES`. Si el SDK o el
+compilador introducen avisos en código que no tocaste, la válvula de escape es la invocación
+(`xcodebuild SWIFT_TREAT_WARNINGS_AS_ERRORS=NO`), nunca editar el proyecto.
+
+### Trinquetes
+
+`verify.sh` tiene topes para cantidades que hoy existen en el código y que solo pueden bajar: líneas de
+más de 140 columnas, líneas con varias sentencias separadas por `;`, y bloques `catch` vacíos. No son
+objetivos: impiden empeorar mientras [C4](specs/C4-legibilidad.md) y [C6](specs/C6-logging-y-errores.md)
+no estén hechos. Al bajar una cantidad, bajar también el tope en el script.
+
+### Hook opcional
+
+Si querés que corra solo antes de cada commit:
+
+```sh
+printf '#!/bin/sh\nexec scripts/verify.sh --no-tests\n' > .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+```
+
+No se instala automáticamente: forzar hooks en el repositorio de otra persona es invasivo.
 
 ## Especificaciones
 
