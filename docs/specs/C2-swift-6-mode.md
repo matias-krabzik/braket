@@ -155,3 +155,58 @@ corriendo en CI para que no se pierda.
   punto 1 como red de seguridad, o una prueba que recorra los caminos de cierre.
 - Swift 6 puede volverse más estricto en versiones futuras del compilador y aparecer avisos nuevos. Con C3
   activo eso se detecta en CI, que es el objetivo.
+
+## Resuelto
+
+**2026-11-09** · commit `1c648ab`.
+
+`SWIFT_VERSION` pasó de `5.0` a `6.0` en las seis configuraciones de
+`scripts/generate_project.py`, y el `.pbxproj` se regeneró.
+
+### Lo que hizo falta
+
+Exactamente lo que el diagnóstico medido anticipaba: 85 líneas agregadas y 12 quitadas en 8 archivos.
+
+- **Los dos errores de `EditorSurface.deinit`.** Se tomó la opción de `teardown()` explícito, no
+  `nonisolated(unsafe)`, y se le sumó la red de seguridad: el observador de scroll se guarda en
+  `ObserverToken`, una clase que lo quita en su propio `deinit`. El resultado es **mejor que el código
+  original**, porque antes la limpieza dependía de que el `deinit` de la vista corriera y ahora la garantiza
+  ARC. `EditorSurface` ya no tiene `deinit`.
+- **`EditorDocument.releaseEditor()`** llama `teardown()` y suelta `editorStorage`. Lo invocan los tres
+  sitios donde se descartan documentos: `closeDocument`, `closeWorkspace` e `install`, los dos últimos a
+  través del helper `releaseEditors()`.
+- **Los dos avisos de `pid`**: copiado a `spawnedPID` después de `posix_spawn`, en `ProcessRunner` y en
+  `CodexTransport`.
+- **Las tres promesas `@unchecked Sendable`** (`ObserverToken`, `OutputBatch`, `MySQLTextCommand`) quedaron
+  justificadas por escrito, que es el mínimo ahora que el compilador no opina sobre ellas.
+
+### Criterios verificados
+
+| # | Criterio | Resultado |
+|---|---|---|
+| 1 | Compila en Swift 6 | `TEST SUCCEEDED` |
+| 2 | Cero errores y avisos propios | 0 bajo `Krabzik/` y `KrabzikTests/` |
+| 3 | Las pruebas pasan | **38 ejecutadas, 0 fallos.** Sin servidor: 7 saltadas. Con instancia MySQL desechable en el puerto 23307: **1 saltada** (solo la de Codex con suscripción), con las 6 de MySQL real en verde |
+| 4 | `generate_project.py` dice `6.0` y el `.pbxproj` coincide | sí; regenerar no produce diferencias |
+| 5 | Sin `@preconcurrency` ni `nonisolated(unsafe)` sin justificar | ninguno de los dos aparece en el repositorio |
+| 6 | El editor no deja observadores colgados | cubierto por las dos pruebas nuevas |
+
+Las 6 pruebas de MySQL real se corrieron a propósito: son las que ejercitan el actor `MySQLClient` y el
+`@unchecked Sendable` de `MySQLTextCommand`, que es la parte del código con más riesgo bajo las reglas
+nuevas. El contenedor desechable y el marcador `.build/mysql-test-port` se limpiaron después.
+
+### Pruebas nuevas
+
+- `testEditorSurfaceTeardownIsIdempotentAndStopsObserving`
+- `testClosingDocumentReleasesItsEditorSurface`
+
+Ambas se apoyan en un accesor interno nuevo, `EditorSurface.isObservingScroll`, para que la verificación sea
+determinista en vez de depender del momento en que ARC libera la vista.
+
+### Nota para C3
+
+El aviso de `@preconcurrency import` del módulo `ObjectiveC` que aparecía en el diagnóstico desapareció al
+arreglar el error 1, tal como decía el punto 3 del diseño. No hizo falta silenciar nada.
+
+Con Swift 6 activo, **ya se puede activar `SWIFT_TREAT_WARNINGS_AS_ERRORS`** sin mezclar dos problemas:
+es el punto 1 de [C3](C3-ci-lint-warnings.md).

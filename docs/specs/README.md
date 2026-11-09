@@ -51,7 +51,7 @@ Dos hallazgos de la auditoría se resolvieron durante esa ventana y los specs ya
 | Spec | Título | Severidad | Estado |
 |---|---|---|---|
 | [C1](C1-repositorio-git.md) | Inicializar el control de versiones | Crítica | **resuelto** |
-| [C2](C2-swift-6-mode.md) | Migrar a Swift 6 language mode | Alta | pendiente |
+| [C2](C2-swift-6-mode.md) | Migrar a Swift 6 language mode | Alta | **resuelto** |
 | [C3](C3-ci-lint-warnings.md) | CI, linter y warnings como errores | Alta | pendiente |
 | [C4](C4-legibilidad.md) | Legibilidad: estilo, nombres y constantes con nombre | Media | pendiente |
 | [C5](C5-dividir-workspacecontroller.md) | Dividir `WorkspaceController` | Media | pendiente |
@@ -83,5 +83,9 @@ C1 ──> C2 ──> C3 ──┬──> C8
 **C1 resuelto** el 2026-11-09 (commits `1785260` y `8883bba`): el proyecto ya está bajo control de versiones,
 así que el resto de los specs se puede implementar con diffs revisables y reversibles.
 
-Los otros 17 están sin implementar. Al cerrar uno, marcarlo en la tabla de este índice y dejar en el propio
+**C2 resuelto** el 2026-11-09 (commit `1c648ab`): el proyecto compila en Swift 6 language mode con cero
+avisos propios, así que las garantías de concurrencia que el código ya asumía ahora las comprueba el
+compilador. Habilita el punto 1 de C3.
+
+Los otros 16 están sin implementar. Al cerrar uno, marcarlo en la tabla de este índice y dejar en el propio
 spec una sección `## Resuelto` con la fecha, los commits y los criterios verificados.
