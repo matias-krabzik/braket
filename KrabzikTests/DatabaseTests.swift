@@ -72,6 +72,70 @@ final class DatabaseTests: XCTestCase {
         XCTAssertEqual(document.sqlToExecute.text, text)
     }
 
+    func testLoopbackDetectionCoversAliasesAndRanges() {
+        var config = DatabaseConnection()
+        let locales = ["127.0.0.1", "127.1.2.3", "127.0.0.255", "::1", "[::1]",
+                       "localhost", "LOCALHOST", "api.localhost"]
+        let remotos = ["localhost.attacker.example", "0.0.0.0", "192.168.1.10",
+                       "127.malicioso.example", "127.0.0", "db.interno.example", ""]
+        for host in locales {
+            config.host = host
+            XCTAssertTrue(config.isLoopbackHost, "\(host) debería ser local")
+        }
+        for host in remotos {
+            config.host = host
+            XCTAssertFalse(config.isLoopbackHost, "\(host) no debería ser local")
+        }
+    }
+
+    func testDisabledTLSRejectedForNonLoopbackHostOnSave() throws {
+        var config = DatabaseConnection()
+        config.host = "db.interno.example"
+        config.tls = .disabled
+        XCTAssertThrowsError(try config.validated()) { error in
+            XCTAssertTrue(MySQLClient.message(error).contains("conexiones locales"))
+        }
+        // El mismo perfil con TLS verificado es válido, y en loopback también sin TLS.
+        config.tls = .verified
+        XCTAssertNoThrow(try config.validated())
+        config.tls = .disabled
+        config.host = "127.0.0.1"
+        XCTAssertNoThrow(try config.validated())
+    }
+
+    func testWorkspaceWithRemoteInsecureConnectionStillLoads() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("krabzik-s3-\(UUID())")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        var config = DatabaseConnection()
+        config.host = "db.interno.example"
+        config.tls = .disabled
+        let url = directory.appendingPathComponent("remoto.krabzik")
+        var workspace = Workspace(name: "remoto")
+        workspace.connections = [config]
+        try workspace.write(to: url)
+        // Leer no rechaza: rechazar dejaría el proyecto inabrible.
+        let read = try Workspace.read(from: url)
+        XCTAssertEqual(read.connections.first?.host, "db.interno.example")
+        XCTAssertEqual(read.connections.first?.tls, .disabled)
+    }
+
+    func testDisabledTLSRejectedWhenResolvedAddressIsNotLoopback() async throws {
+        // IP literal: no hace falta DNS ni red, y el rechazo ocurre antes de conectar.
+        var config = DatabaseConnection()
+        config.host = "93.184.216.34"
+        config.tls = .disabled
+        let client = MySQLClient()
+        do {
+            try await client.test(config, password: "")
+            XCTFail("Debe rechazar un extremo no local sin TLS")
+        } catch {
+            XCTAssertTrue(MySQLClient.message(error).contains("no es una dirección local"))
+        }
+        await client.shutdown()
+    }
+
     private func configuration() throws -> DatabaseConnection {
         let marker = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent(".build/mysql-test-port")

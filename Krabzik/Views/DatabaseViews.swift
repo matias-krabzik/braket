@@ -110,17 +110,28 @@ struct ConnectionSheet: View {
                         ForEach(DatabaseConnection.TLSMode.allCases, id: \.self) { mode in Text(mode.label).tag(mode) }
                     }.labelsHidden()
                 }
+                if connection.tls == .disabled {
+                    GridRow {
+                        Text("")
+                        Text(insecureRemote
+                             ? "Sin TLS solo se permite para conexiones locales."
+                             : "Sin cifrado. Aceptable solo porque el servidor es local.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(insecureRemote ? Color.orange : .secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }.textFieldStyle(.roundedBorder).disabled(busy)
             if let message {
                 Text(message).font(.system(size: 11)).foregroundStyle(succeeded ? Color.green : .red)
                     .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             }
             HStack {
-                Button("Probar") { test() }.disabled(busy)
+                Button("Probar") { test() }.disabled(busy || insecureRemote)
                 if busy { ProgressView().controlSize(.small) }
                 Spacer()
                 Button("Cancelar") { dismiss() }.keyboardShortcut(.cancelAction).disabled(busy)
-                Button("Guardar") { save() }.keyboardShortcut(.defaultAction).disabled(busy)
+                Button("Guardar") { save() }.keyboardShortcut(.defaultAction).disabled(busy || insecureRemote)
             }
         }
         .padding(24).frame(width: 470)
@@ -132,6 +143,10 @@ struct ConnectionSheet: View {
         .onChange(of: password) { _, _ in message = nil }
         .interactiveDismissDisabled(busy)
     }
+
+    /// Sin TLS contra un extremo que no es local: se avisa y se bloquea antes de
+    /// intentar nada. Se deriva del estado para que cambie en vivo al escribir el host.
+    private var insecureRemote: Bool { connection.tls == .disabled && !connection.isLoopbackHost }
 
     private func row<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
         GridRow { Text(label).font(.system(size: 12)).foregroundStyle(.secondary); content() }

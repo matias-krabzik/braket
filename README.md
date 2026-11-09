@@ -43,7 +43,7 @@ La integración se verificó con Codex CLI `0.167.0-alpha.3.2`, una cuenta ChatG
 
 1. Abrí o creá un proyecto. Puede contener únicamente conexiones y scripts.
 2. En **Bases de datos**, pulsá **+**, completá servidor, puerto, usuario y contraseña. La base es opcional. **Probar** verifica el acceso; **Guardar** conserva la configuración.
-3. TLS verifica el certificado por defecto. **Sin TLS** permite una conexión local sin cifrar. No se aceptan certificados inválidos ni se cambia a texto plano automáticamente.
+3. TLS verifica el certificado por defecto. **Sin TLS** se admite **solo contra un extremo local**: `127.0.0.0/8`, `::1`, `localhost` o un subdominio `.localhost`. No alcanza con que el host lo parezca: al conectar se comprueba la dirección resuelta, así que un nombre que resuelva a una IP pública se rechaza. No se aceptan certificados inválidos ni se cambia a texto plano automáticamente. Un proyecto guardado con una conexión remota sin TLS se abre igual, pero no conecta hasta corregirla.
 4. Abrí o creá un `.sql` desde **SQL +**. Los scripts independientes quedan asociados al proyecto.
 5. Elegí la conexión y pulsá **▶** o **⌘↩**. Si hay texto seleccionado se ejecuta esa selección; de lo contrario, el archivo completo. Los cambios sin guardar también se pueden ejecutar.
 6. Los resultados aparecen abajo, con un selector cuando hay varias respuestas. El botón **■** cancela la consulta y cierra su sesión MySQL. El menú contextual de la conexión permite editarla o desconectarla.

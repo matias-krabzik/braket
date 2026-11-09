@@ -17,7 +17,30 @@ struct DatabaseConnection: Identifiable, Codable, Equatable, Sendable {
 
     var destination: String { "\(host):\(port)" + (database.isEmpty ? "" : " / \(database)") }
 
-    func validated() throws -> Self {
+    /// Nivel de exigencia. `validated()` se usa en dos contextos distintos y no
+    /// pueden compartir reglas: al GUARDAR desde la hoja hay que rechazar lo
+    /// inválido, pero al LEER un `.krabzik` existente rechazar significaría que
+    /// el proyecto deja de abrirse. Ver docs/specs/S3-tls-solo-loopback.md.
+    enum ValidationLevel {
+        /// Guardar y conectar: aplica todas las reglas.
+        case strict
+        /// Leer un proyecto: solo lo que haría imposible usar la conexión.
+        case lenient
+    }
+
+    /// `true` solo para extremos locales: 127.0.0.0/8, ::1, `localhost` y
+    /// subdominios `.localhost`. `localhost.ejemplo.com` es `false`.
+    var isLoopbackHost: Bool {
+        let value = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if value == "localhost" || value.hasSuffix(".localhost") { return true }
+        if value == "::1" || value == "[::1]" { return true }
+        guard value.hasPrefix("127.") else { return false }
+        // Que empiece con "127." no alcanza: "127.malicioso.example" no es una IP.
+        let parts = value.split(separator: ".", omittingEmptySubsequences: false)
+        return parts.count == 4 && parts.allSatisfy { UInt8($0) != nil }
+    }
+
+    func validated(_ level: ValidationLevel = .strict) throws -> Self {
         var value = self
         value.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         value.host = host.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -28,6 +51,11 @@ struct DatabaseConnection: Identifiable, Codable, Equatable, Sendable {
         }
         guard ![value.host, value.username, value.database].contains(where: { $0.contains("\0") || $0.contains("\n") }) else {
             throw DatabaseFailure("La conexión contiene caracteres no válidos.")
+        }
+        if level == .strict, value.tls == .disabled, !value.isLoopbackHost {
+            throw DatabaseFailure(
+                "Sin TLS solo se permite para conexiones locales (127.0.0.1, ::1 o localhost)."
+            )
         }
         return value
     }

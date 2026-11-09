@@ -5,6 +5,19 @@ import NIOCore
 import NIOPosix
 import NIOSSL
 
+extension SocketAddress {
+    /// `true` solo para 127.0.0.0/8 y ::1, incluida la forma IPv4 mapeada.
+    /// Un socket Unix no aplica y devuelve `false`.
+    var isLoopbackAddress: Bool {
+        guard let ip = ipAddress?.lowercased() else { return false }
+        if ip == "::1" || ip == "0:0:0:0:0:0:0:1" { return true }
+        let v4 = ip.hasPrefix("::ffff:") ? String(ip.dropFirst(7)) : ip
+        guard v4.hasPrefix("127.") else { return false }
+        let parts = v4.split(separator: ".", omittingEmptySubsequences: false)
+        return parts.count == 4 && parts.allSatisfy { UInt8($0) != nil }
+    }
+}
+
 struct DatabaseSessionInfo: Sendable {
     var database: String
     var inTransaction: Bool
@@ -33,6 +46,11 @@ actor MySQLClient {
 
     private func open(_ config: DatabaseConnection, password: String) async throws -> MySQLConnection {
         let address = try await Task.detached { try SocketAddress.makeAddressResolvingHost(config.host, port: config.port) }.value
+        // La comparación textual del host no alcanza: un nombre arbitrario puede
+        // resolver a una IP pública. Sin TLS se exige que el extremo REAL sea local.
+        if config.tls == .disabled, !address.isLoopbackAddress {
+            throw DatabaseFailure("\(config.host) no es una dirección local: activá TLS para conectar.")
+        }
         let loop = eventLoop()
         var logger = Logger(label: "com.krabzik.mysql")
         logger.logLevel = .critical

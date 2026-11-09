@@ -74,7 +74,9 @@ struct Workspace: Codable, Equatable {
             throw WorkspaceError.duplicateProject
         }
         guard Set(value.connections.map(\.id)).count == value.connections.count else { throw WorkspaceError.duplicateProject }
-        for connection in value.connections { _ = try connection.validated() }
+        // Nivel lenient: un proyecto existente con una conexión remota sin TLS se
+        // abre; el rechazo llega al intentar conectar, con un mensaje accionable.
+        for connection in value.connections { _ = try connection.validated(.lenient) }
         return value
     }
 
