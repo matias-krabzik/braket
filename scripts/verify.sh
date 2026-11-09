@@ -10,10 +10,10 @@ cd "${0:A:h:h}"
 
 # Trinquetes: cantidades que hoy existen en el código y que solo pueden BAJAR.
 # No son objetivos, son topes para no empeorar mientras C4 y C6 no estén hechos.
-BASE_LONG_LINES=64      # líneas de más de 140 columnas        -> C4 las baja a 0
+BASE_LONG_LINES=57      # líneas de más de 140 columnas        -> C4 las baja a 0
 BASE_SEMICOLONS=159     # líneas con varias sentencias y ';'   -> C4 las baja a 0
-BASE_EMPTY_CATCH=10     # bloques catch vacíos                 -> C6 los baja a 0
-BASE_LINT=66            # avisos de SwiftLint                   -> C4 los baja a 0
+BASE_EMPTY_CATCH=8     # bloques catch vacíos                 -> C6 los baja a 0
+BASE_LINT=60            # avisos de SwiftLint                   -> C4 los baja a 0
 
 failures=0
 skipped=()
@@ -125,7 +125,10 @@ else
     ok "$(grep -E 'Executed [0-9]+ tests' "$log" | tail -1 | sed 's/^[[:space:]]*//')"
   else
     fail "las pruebas no pasaron; log en $log"
-    grep -E "error:|failed" "$log" | head -10 | sed 's/^/      /'
+    # Solo fallos de XCTest y errores del compilador: el log trae mucho ruido del
+    # sistema que matchea "error" y tapa el fallo real.
+    grep -E "^[^ ]+\.swift:[0-9]+: error:|' failed \(|^.*: error: unable to" "$log" \
+      | sed 's|.*/KrabzikTests/|KrabzikTests/|' | head -10 | sed 's/^/      /'
   fi
 fi
 

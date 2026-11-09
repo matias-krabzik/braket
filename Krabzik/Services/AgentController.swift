@@ -20,6 +20,12 @@ final class AgentController {
     var loginPending = false
     var connected = false
     var missingExecutable = false
+    /// Candidato encontrado que el usuario todavía no aprobó. Mientras esté puesto,
+    /// NO se lanza ningún proceso. Ver docs/specs/S2-verificar-ejecutable-codex.md.
+    var pendingCandidate: CodexCandidate?
+    /// Raíces del proyecto abierto: un repositorio no puede aportar su propio `codex`.
+    @ObservationIgnored var excludedRoots: [URL] = []
+    @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored let transport = CodexTransport()
     @ObservationIgnored var onFilesChanged: ((AgentScope) -> Void)?
     @ObservationIgnored private var threadID: String?
@@ -33,7 +39,8 @@ final class AgentController {
     @ObservationIgnored private var commentaryIDs: Set<String> = []
     @ObservationIgnored private var proposedChanges: [String: [AgentFileChange]] = [:]
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         transport.onMessage = { [weak self] in self?.receive($0) }
         transport.onDisconnect = { [weak self] reason in
             guard let self else { return }
@@ -57,11 +64,23 @@ final class AgentController {
         let token = connectionGeneration
         defer { if token == connectionGeneration { isConnecting = false } }
         do {
-            guard let executable = CodexExecutable.locate(override: UserDefaults.standard.string(forKey: "codexExecutable")) else {
+            let search = CodexExecutable.search(override: defaults.string(forKey: "codexExecutable"),
+                                                excludedRoots: excludedRoots)
+            guard let candidate = search.candidates.first else {
                 missingExecutable = true
-                throw AgentFailure("No se encontró Codex en esta Mac.")
+                let descartes = search.rejected.map { "\($0.path): \($0.reason)" }.joined(separator: "; ")
+                throw AgentFailure(descartes.isEmpty
+                                   ? "No se encontró Codex en esta Mac."
+                                   : "No se encontró un Codex utilizable. Descartados: \(descartes)")
             }
-            try transport.start(executable: executable)
+            // Sin aprobación no se lanza nada: el binario corre con el entorno completo
+            // del usuario, así que el usuario tiene que ver cuál es.
+            guard approvedIdentity == candidate.identity else {
+                pendingCandidate = candidate
+                return
+            }
+            pendingCandidate = nil
+            try transport.start(executable: candidate.url)
             _ = try await transport.request("initialize", .object([
                 "clientInfo": .object(["name": .string("krabzik_ide"), "title": .string("Krabzik IDE"),
                                        "version": .string(Self.clientVersion)]),
@@ -113,13 +132,37 @@ final class AgentController {
         loginPending = false; loginID = nil
     }
 
+    /// Identidad del binario que el usuario aprobó, si hay alguna.
+    var approvedIdentity: BinaryIdentity? {
+        guard let data = defaults.data(forKey: "approvedCodexBinary") else { return nil }
+        return try? JSONDecoder().decode(BinaryIdentity.self, from: data)
+    }
+
+    /// `true` si el candidato pendiente reemplaza a uno aprobado antes: el diálogo
+    /// tiene que decir "el ejecutable cambió", no el texto de primera aprobación.
+    var replacesApprovedBinary: Bool {
+        guard let approved = approvedIdentity, let pending = pendingCandidate else { return false }
+        return approved != pending.identity
+    }
+
+    func approve(_ candidate: CodexCandidate) {
+        if let data = try? JSONEncoder().encode(candidate.identity) {
+            defaults.set(data, forKey: "approvedCodexBinary")
+        }
+        pendingCandidate = nil
+        Task { await connect() }
+    }
+
     func chooseExecutable() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = false; panel.canChooseFiles = true
         panel.prompt = "Seleccionar Codex"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         guard FileManager.default.isExecutableFile(atPath: url.path) else { error = "Seleccioná el ejecutable de Codex."; return }
-        UserDefaults.standard.set(url.path, forKey: "codexExecutable")
+        defaults.set(url.path, forKey: "codexExecutable")
+        // Elegir un ejecutable no lo aprueba: se vuelve a pedir confirmación.
+        defaults.removeObject(forKey: "approvedCodexBinary")
+        pendingCandidate = nil
         transport.stop(); connected = false; threadID = nil
         Task { await connect() }
     }

@@ -40,7 +40,8 @@ final class AgentTests: XCTestCase {
         defer { agent.shutdown() }
         try agent.transport.start(executable: URL(fileURLWithPath: "/usr/bin/python3"),
                                   arguments: ["-u", script.path])
-        agent.connected = true; agent.account = "ChatGPT"
+        agent.connected = true
+        agent.account = "ChatGPT"
         agent.send("Cambiar el archivo", scope: AgentScope(names: ["Test"], roots: [base]))
         try await until { !agent.requests.isEmpty }
         agent.answer(agent.requests[0], accept: true)
@@ -49,6 +50,71 @@ final class AgentTests: XCTestCase {
         let hostile = try XCTUnwrap(agent.changes.last)
         XCTAssertEqual(hostile.path, "api/evil.swift")
         XCTAssertEqual(hostile.diff, "-a\n+b\n")
+    }
+
+    func testSearchRejectsWorldWritableAndInWorkspaceCandidates() throws {
+        let base = try fixture()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let fm = FileManager.default
+
+        func executable(_ url: URL, mode: Int16) throws {
+            try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("#!/bin/sh\n".utf8).write(to: url)
+            try fm.setAttributes([.posixPermissions: NSNumber(value: mode)], ofItemAtPath: url.path)
+        }
+
+        // Escribible por otros: se descarta con motivo.
+        let abierto = base.appendingPathComponent("abierto/codex")
+        try executable(abierto, mode: 0o777)
+        var search = CodexExecutable.search(override: abierto.path, searchPath: "", excludedRoots: [], known: [])
+        XCTAssertTrue(search.candidates.isEmpty)
+        XCTAssertEqual(search.rejected.first?.reason, "lo puede escribir el grupo u otros usuarios")
+
+        // Dentro del proyecto abierto: tampoco se ofrece.
+        let interno = base.appendingPathComponent("proyecto/bin/codex")
+        try executable(interno, mode: 0o755)
+        search = CodexExecutable.search(override: interno.path, searchPath: "",
+                                        excludedRoots: [base.appendingPathComponent("proyecto")],
+                                        known: [])
+        XCTAssertTrue(search.candidates.isEmpty)
+        XCTAssertEqual(search.rejected.first?.reason, "está dentro del proyecto abierto")
+
+        // Fuera del proyecto y con permisos sanos: se ofrece.
+        let bueno = base.appendingPathComponent("sano/codex")
+        try executable(bueno, mode: 0o755)
+        search = CodexExecutable.search(override: bueno.path, searchPath: "", excludedRoots: [], known: [])
+        XCTAssertEqual(search.candidates.first?.url.path, bueno.resolvingSymlinksInPath().path)
+        XCTAssertEqual(search.candidates.first?.signature, .unsigned)
+    }
+
+    @MainActor func testPanelDoesNotSpawnWithoutApprovedBinary() async throws {
+        let base = try fixture()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let script = base.appendingPathComponent("codex")
+        try Data("#!/bin/sh\nsleep 30\n".utf8).write(to: script)
+        try FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)],
+                                              ofItemAtPath: script.path)
+        let suite = "krabzik-s2-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        addTeardownBlock { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        defaults.set(script.path, forKey: "codexExecutable")
+
+        let agent = AgentController(defaults: defaults)
+        defer { agent.shutdown() }
+        await agent.connect()
+        // Encontró el binario, pero no lanzó nada: espera aprobación.
+        XCTAssertNotNil(agent.pendingCandidate)
+        XCTAssertFalse(agent.transport.running)
+        XCTAssertFalse(agent.connected)
+        XCTAssertFalse(agent.replacesApprovedBinary, "es la primera aprobación, no un cambio")
+
+        // Aprobar guarda la identidad; tocar el binario la invalida.
+        let candidate = try XCTUnwrap(agent.pendingCandidate)
+        agent.approve(candidate)
+        XCTAssertEqual(agent.approvedIdentity, candidate.identity)
+        try Data("#!/bin/sh\nsleep 31\n".utf8).write(to: script)
+        let despues = try XCTUnwrap(CodexExecutable.identity(of: script.path))
+        XCTAssertNotEqual(despues, candidate.identity, "cambiar el binario debe cambiar su identidad")
     }
 
     func testJSONLinesPreserveUnicodeAndSplitMessages() throws {

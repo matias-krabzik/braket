@@ -125,6 +125,8 @@ final class WorkspaceController {
         database.install(project.connections)
         agent.clearConversation()
         agent.selectedProjectID = nil
+        // Para que un repositorio no pueda aportar su propio ejecutable de Codex.
+        agent.excludedRoots = project.projects.map { $0.directory(relativeTo: url) }
         agent.draft = ""
         for item in project.projects { _ = runner.state(for: item.id) }
         selectedProjectID = runnableProjects.first?.id

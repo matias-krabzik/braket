@@ -1,17 +1,6 @@
 import Darwin
 import Foundation
 
-enum CodexExecutable {
-    static func locate(override: String? = nil) -> URL? {
-        let paths = [override,
-            "/opt/homebrew/bin/codex", "/usr/local/bin/codex",
-            "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
-            "/Applications/Codex.app/Contents/Resources/codex"]
-        let search = paths.compactMap { $0 } + (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":").map { String($0) + "/codex" }
-        return search.first { FileManager.default.isExecutableFile(atPath: $0) }.map { URL(fileURLWithPath: $0) }
-    }
-}
-
 /// One child process, JSONL pipes, no sockets and no periodic polling.
 /// Parsing runs off the main thread; callbacks retain their original wire order.
 @MainActor final class CodexTransport {

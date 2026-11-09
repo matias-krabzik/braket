@@ -23,7 +23,14 @@ struct AgentPanel: View {
                     if agent.loginPending {
                         Text("Continuá en el navegador").font(.system(size: 12)).foregroundStyle(.secondary)
                         Button("Cancelar", action: agent.cancelLogin)
-                    } else if agent.missingExecutable { Button("Seleccionar Codex…", action: agent.chooseExecutable) }
+                    } else if let candidate = agent.pendingCandidate {
+                        approval(candidate, replaces: agent.replacesApprovedBinary, agent: agent)
+                    } else if agent.missingExecutable {
+                        Text(agent.error ?? "No se encontró Codex en esta Mac.")
+                            .font(.system(size: 11)).foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center).padding(.horizontal, 20)
+                        Button("Seleccionar Codex…", action: agent.chooseExecutable)
+                    }
                     else if !agent.connected { Button("Conectar Codex") { Task { await agent.connect() } } }
                     else { Button("Iniciar sesión con ChatGPT", action: agent.login) }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -105,6 +112,34 @@ struct AgentPanel: View {
                 }
             }.frame(width: 780, height: 520)
         }
+    }
+
+    /// Antes de lanzar nada, el usuario ve qué binario se va a ejecutar.
+    @ViewBuilder private func approval(_ candidate: CodexCandidate, replaces: Bool,
+                                       agent: AgentController) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(replaces ? "El ejecutable de Codex cambió" : "Confirmá el ejecutable de Codex")
+                .font(.system(size: 12, weight: .semibold))
+            Text(replaces
+                 ? "El binario no es el que aprobaste antes. Revisá la ruta antes de continuar."
+                 : "Krabzik va a ejecutar este programa con tu entorno completo.")
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(candidate.url.path).textSelection(.enabled)
+                Text(candidate.signature.label)
+                Text(ByteCountFormatter.string(fromByteCount: candidate.identity.size, countStyle: .file))
+            }
+            .font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(8).background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 5))
+            HStack {
+                Button("Elegir otro…", action: agent.chooseExecutable)
+                Spacer()
+                Button("Usar este ejecutable") { agent.approve(candidate) }
+            }.controlSize(.small)
+        }
+        .padding(16).frame(maxWidth: 420)
     }
 }
 
