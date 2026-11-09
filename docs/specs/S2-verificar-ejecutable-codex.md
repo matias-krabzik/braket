@@ -137,3 +137,50 @@ workspace, un `FileManager`) para poder probarse sin tocar el sistema real.
 - Si Codex se actualiza solo (Homebrew, la app de ChatGPT), la pregunta reaparece. Es el comportamiento
   buscado, pero conviene que el diálogo diga «el ejecutable cambió desde la última vez» en lugar del texto
   de primera aprobación, para que no parezca un error.
+
+## Resuelto
+
+**2026-11-09** · commit `62675e6`.
+
+`CodexExecutable` pasó a `Krabzik/Services/CodexExecutable.swift`: creció lo suficiente para no seguir
+viviendo dentro de `CodexTransport.swift`.
+
+| # | Criterio | Resultado |
+|---|---|---|
+| 1 | Un `codex` en un directorio del PATH escribible por otros no se ofrece, y el motivo queda | ✓ `testSearchRejectsWorldWritableAndInWorkspaceCandidates` |
+| 2 | Un `codex` dentro del proyecto abierto tampoco | ✓ misma prueba |
+| 3 | Abrir el panel sin binario aprobado no crea ningún proceso | ✓ `testPanelDoesNotSpawnWithoutApprovedBinary` verifica `transport.running == false` |
+| 4 | Aprobar y reiniciar conecta sin volver a preguntar | ✓ la identidad se guarda en `UserDefaults` |
+| 5 | Tocar o reemplazar el binario vuelve a pedir aprobación | ✓ la prueba comprueba que `identity` cambia al reescribirlo |
+| 6 | Una firma presente que no valida se descarta | ✓ `CodexSignature.invalid` no es `isOfferable` |
+| 7 | Un `codex` ad hoc de Homebrew se puede aprobar, con aviso | ✓ la firma se informa, no se exige |
+
+### Decisiones
+
+- **El PATH va último.** Era el núcleo del problema: cualquier directorio del `PATH` heredado podía aportar
+  el binario. Ahora primero el override del usuario, después las rutas absolutas conocidas, y recién
+  entonces el `PATH`.
+- **La firma informa, no decide.** Rechazar lo ad hoc rompería el caso más común (Homebrew). Lo que sí
+  descarta es `invalid`: dice estar firmado y no valida, o sea fue alterado. El diálogo muestra la etiqueta
+  (`firmado por Developer ID (equipo …)`, `firma ad hoc, sin Developer ID`, `sin firma`).
+- **La identidad es barata a propósito.** Ruta, tamaño, mtime e inode; no hash. Son decenas de MB y habría
+  que leerlos en cada arranque, mientras que esto detecta igual que el binario cambió.
+- **Los descartes se informan.** Cuando no queda ningún candidato, el mensaje de error enumera lo descartado
+  con su motivo, en vez de un «no se encontró Codex» que no deja investigar nada.
+- **`excludedRoots` viene de `WorkspaceController`**, que es quien conoce el proyecto; `AgentController` solo
+  lo recibe.
+- **`AgentController(defaults:)`**, como `WorkspaceController`, para no tocar `UserDefaults.standard` en las
+  pruebas.
+
+### Error cometido
+
+La primera versión de la prueba fallaba con dos aserciones: `search()` incluía siempre `knownPaths` y
+encontraba el `codex` real de Homebrew instalado en esta máquina, así que `candidates` nunca quedaba vacío.
+La lista pasó a ser un parámetro inyectable (`known:`), que además es el diseño correcto: una función que
+mira el sistema real no es probable si no se le puede decir qué mirar.
+
+### Efecto lateral medido
+
+Reescribir `AgentRequestView` y el bloque de aprobación bajó tres trinquetes de [C3](C3-ci-lint-warnings.md):
+líneas de más de 140 columnas 64 → 57, bloques `catch` vacíos 10 → 8, avisos de SwiftLint 66 → 60. Los topes
+se bajaron al nuevo nivel.
