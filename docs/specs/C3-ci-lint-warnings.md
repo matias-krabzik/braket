@@ -187,3 +187,72 @@ cerrarlo.
 - Dos pruebas (`testEditorHasVisibleTextGeometry`, y las de `ProcessRunner`) crean ventanas y lanzan
   procesos. En CI sin sesión gráfica pueden comportarse distinto; si aparece inestabilidad, la solución es
   marcarlas y ejecutarlas en un job aparte, no quitarlas.
+
+## Implementado · verificación parcial
+
+**2026-11-09** · commit `7696e36`.
+
+Lo que el spec pedía construir está construido y funcionando. Cuatro de los siete criterios **no se pueden
+verificar todavía**, y no por una falta de la implementación: dependen de specs que no están hechos o de un
+remoto que no existe. Se listan abajo con quién los desbloquea, en vez de darlos por buenos.
+
+### Entregado
+
+| Pieza | Estado |
+|---|---|
+| `SWIFT_TREAT_WARNINGS_AS_ERRORS` y `GCC_TREAT_WARNINGS_AS_ERRORS` en `YES` | en las 6 configuraciones |
+| `scripts/verify.sh` | 119 líneas, pasos bloqueantes e informativos separados |
+| `.swiftlint.yml` | `only_rules` con 8 reglas |
+| `.swiftformat` | informativo hasta C4 |
+| `.github/workflows/ci.yml` | listo, sin remoto donde correr |
+| `docs/contributing.md` | `verify.sh` reemplaza al comando de pruebas; trinquetes y hook documentados |
+
+### Criterios
+
+| # | Criterio | Resultado |
+|---|---|---|
+| 1 | `verify.sh` pasa en el árbol limpio y falla si algún paso falla | **✓ verificado**: exit 0 en limpio, exit 1 con un fallo inyectado |
+| 2 | Un aviso del compilador rompe el build | **✓ verificado**: una variable sin usar dio `error: initialization of immutable value 'avisoDePrueba' was never used` y el build falló |
+| 3 | Agregar un `.swift` sin regenerar hace fallar `verify.sh` | **pendiente de C8.** El paso existe pero se omite: `generate_project.py` no tiene `--check`. Ojo: hoy el script **ignora los argumentos y regenera**, así que llamarlo con `--check` reescribiría el `.pbxproj` en silencio. Por eso `verify.sh` detecta la capacidad con `grep -q -- "--check"` antes de invocarlo |
+| 4 | Una línea de 200 columnas falla; una de 150 avisa | **desviado** (ver abajo) |
+| 5 | En CI corren las 38 pruebas (`0 tests skipped`) | **no verificable**: no hay remoto ni runner. El workflow crea el marcador `.build/mysql-test-port`, que es lo que lo haría cierto |
+| 6 | El workflow es válido | **parcial**: estructura y claves comprobadas con un chequeo propio; sin `actionlint` ni corrida real |
+| 7 | `swiftformat --lint` sin diferencias | **pendiente de C4**, que es quien formatea |
+
+### Desviaciones del diseño
+
+**1. El umbral de `line_length` y el trinquete.** El diseño fijaba `warning: 140, error: 180` y el criterio 4
+pedía que una línea de 200 columnas falle. Medido sobre el código real: la línea más larga tiene **468
+columnas** (el patrón de palabras clave de `SyntaxStyler`) y hay **6 por encima de 200**. Con `error: 180`
+el lint fallaría sobre el árbol limpio, que contradice el criterio 1 del mismo spec. El spec declaraba
+depender de C1 y C2; **le faltaba declarar C4**, que es quien parte las líneas largas.
+
+Resolución: `error: 470` como tope que impide empeorar, y un trinquete en `verify.sh` que es el gate real
+—falla si la **cantidad** de líneas de más de 140 columnas sube de 64—. Comprobado: una línea de 250
+columnas lleva la cuenta a 65 y `verify.sh` devuelve 1. Cuando C4 baje las líneas, se baja el tope del
+script y el umbral de `line_length` a 180.
+
+**2. `swiftlint --strict` no se usa.** Con `--strict` los avisos cuentan como errores, así que una línea de
+150 columnas haría fallar el lint, lo que también contradice el criterio 1 con el código de hoy. Queda
+`swiftlint lint` a secas; C4 habilita `--strict`.
+
+**3. Trinquetes que el diseño no tenía.** Además de las líneas largas, `verify.sh` pone tope a las líneas
+con varias sentencias separadas por `;` (159) y a los bloques `catch` vacíos (10). Son los gates que hacen
+verificables C4 y C6 de forma incremental en lugar de todo al final. Nota: los 159 y los 10 cuentan
+`Krabzik/` **y** `KrabzikTests/`; C4 y C6 medían solo `Krabzik/` (120 y 2 respectivamente).
+
+**4. MySQL en CI viene de Homebrew, no de un contenedor.** Los `services:` de GitHub Actions solo existen en
+runners Linux, y en los de macOS —necesarios para Xcode— no hay Docker preinstalado. El workflow instala
+`mysql@8.4` con brew y espera a `mysqladmin ping`. [S7](S7-gobernanza-fork-mysqlnio.md) quedó corregido en
+el mismo commit, porque arrastraba el mismo error.
+
+**5. `swiftlint` y `swiftformat` no están instalados** en esta máquina, así que sus pasos se omiten con
+aviso y las reglas que escriben los archivos de configuración **no se ejercitaron**. Instalarlos
+(`brew install swiftlint swiftformat`) es lo que falta para cerrar de verdad los criterios 4 y 7.
+
+### Lo que falta para cerrar C3
+
+1. Instalar `swiftlint` y `swiftformat` y ajustar lo que reporten.
+2. C8, para que el paso del `.pbxproj` deje de omitirse (criterio 3).
+3. C4, para bajar los umbrales y pasar `swiftformat` a bloqueante (criterios 4 y 7).
+4. Un remoto, para el criterio 5.
