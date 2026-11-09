@@ -57,7 +57,7 @@ Dos hallazgos de la auditoría se resolvieron durante esa ventana y los specs ya
 | [C5](C5-dividir-workspacecontroller.md) | Dividir `WorkspaceController` | Media | pendiente |
 | [C6](C6-logging-y-errores.md) | Logging real y errores no silenciados | Media | pendiente |
 | [C7](C7-validacion-formato-krabzik.md) | Validar y acotar el formato `.krabzik` | Media | pendiente |
-| [C8](C8-pbxproj-sincronizado.md) | Garantizar que el `.pbxproj` generado esté al día | Media | pendiente |
+| [C8](C8-pbxproj-sincronizado.md) | Garantizar que el `.pbxproj` generado esté al día | Media | **resuelto** |
 | [C9](C9-cobertura-pruebas.md) | Cerrar los huecos de cobertura que quedan | Media | pendiente |
 | [C10](C10-version-unica.md) | Una sola fuente de verdad para la versión | Baja | pendiente |
 | [C11](C11-rendimiento-editor.md) | Rendimiento del editor y arquitecturas del Release | Baja | pendiente |

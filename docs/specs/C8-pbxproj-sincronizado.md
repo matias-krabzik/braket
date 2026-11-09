@@ -129,3 +129,37 @@ python3 scripts/generate_project.py && python3 scripts/generate_project.py --che
   disco y regenerar. Conviene que el mensaje lo diga para que no se interprete como un bug del script.
 - El `.gitattributes` de C1 marca `*.pbxproj -merge`, así que un conflicto se resuelve regenerando. Las dos
   piezas se apoyan.
+
+## Resuelto
+
+**2026-11-09** · commit en el mismo cambio que este archivo.
+
+### Criterios verificados
+
+Todos con `scripts/tests/test_generate_project.sh`, que queda versionado:
+
+| # | Criterio | Resultado |
+|---|---|---|
+| 1 | `--check` devuelve 0 sobre el árbol sincronizado | ✓ |
+| 2 | Crear un `.swift` y correr `--check` devuelve 1 y lo nombra | ✓ `fuente nueva sin registrar: Krabzik/Views/__TempCheck.swift` |
+| 3 | Borrar un `.swift` sin regenerar devuelve 1 y lo nombra | ✓ `registrada pero ya no existe: …` |
+| 4 | Dos corridas producen bytes idénticos | ✓ |
+| 5 | `build.sh` falla temprano con el mensaje del generador | ✓ |
+| 6 | El modo sin argumentos hace lo de siempre | ✓ y la salida es **byte-idéntica** a la del script anterior |
+
+### Notas de implementación
+
+- La comparación es doble: diferencia de conjuntos sobre las rutas `.swift` (que es la información útil
+  cuando alguien se olvidó de regenerar) **y** comparación del texto completo contra lo que produce
+  `render()` (que detecta cambios de ajustes de build, no solo de archivos).
+- Un argumento desconocido devuelve 2, no 0. Antes el script **ignoraba los argumentos y regeneraba**: por
+  eso `verify.sh` lo invocaba con un `grep -q -- "--check"` de guardia. Esa guardia se puede quitar, pero se
+  deja: no molesta y protege de una regresión.
+- El invariante de determinismo quedó escrito en el docstring, porque `--check` entero depende de él.
+
+### Error cometido y cómo se detectó
+
+Al convertir el cuerpo del script en `render()`, indentar el f-string triple del esquema **agregó 4 espacios
+a cada línea del contenido** del `.xcscheme`. No lo detectó ninguna prueba del proyecto: lo detectó la
+comparación byte a byte contra una copia de referencia tomada antes del refactor. Vale como recordatorio de
+que un refactor de un generador se verifica comparando su salida, no leyéndolo.
