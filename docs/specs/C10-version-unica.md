@@ -116,3 +116,31 @@ lea como una medición y no como una promesa permanente.
 - Si `Bundle.main` no tiene `CFBundleShortVersionString` (nunca debería: el `Info.plist` lo define), el
   respaldo `"0"` haría que Codex registre una versión inútil. Es preferible a un crash y la prueba del punto
   anterior lo detecta.
+
+## Resuelto
+
+**2026-11-09** · commit `2e74d4e`.
+
+Se tomó la **opción A**: el README no repite el número. Es la que elimina la deriva en vez de verificarla, y
+era la preferida del propio spec.
+
+| # | Criterio | Resultado |
+|---|---|---|
+| 1 | `0.3.0` aparece una sola vez | ✓ solo `scripts/generate_project.py:29` |
+| 2 | `AgentController` sin literal de versión | ✓ `Self.clientVersion` lee el bundle |
+| 3 | La app declara a Codex lo mismo que el bundle | ✓ `testClientVersionComesFromBundle` |
+| 4 | Chequeo del README | **no aplica**: con la opción A no hay número que verificar |
+| 5 | Sección **Entorno verificado** con fecha | ✓ con tabla de lo comprobado el 2026-11-09 |
+
+`MARKETING_VERSION` y `BUILD_NUMBER` quedaron como constantes al principio del generador, con el comentario
+que dice quién las deriva. Regenerar después del cambio produce un `.pbxproj` idéntico, así que el refactor
+no alteró el proyecto.
+
+El título del README ya decía `0.3` cuando se implementó esto —había cambiado desde la auditoría, que lo
+encontró en `0.2`—, lo que confirma el problema que el spec describía.
+
+### Nota del trinquete de C3
+
+Reemplazar el literal por `Self.clientVersion` llevó la línea del `clientInfo` de 133 a 145 columnas y el
+trinquete de `verify.sh` lo rechazó (65 líneas largas contra un tope de 64). Se partió la línea en vez de
+subir el tope, que es exactamente para lo que está el trinquete.
