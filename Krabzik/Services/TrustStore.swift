@@ -6,11 +6,14 @@ import Foundation
 /// al agente, hasta que el usuario lo apruebe viendo qué aprueba.
 /// Ver docs/specs/S1-proyecto-no-confiable.md.
 @MainActor final class TrustStore {
+    /// Si el usuario ya dijo que confía en este proyecto.
     enum Trust: Equatable {
         case trusted
         case untrusted
     }
 
+    /// Claves de `UserDefaults`. Juntas para que se vea qué persiste el modelo de
+    /// confianza: nada más que rutas confiadas y hashes de comandos aprobados.
     private enum Keys {
         static let workspaces = "trustedWorkspaces"
         static let commands = "approvedCommands"
@@ -94,6 +97,7 @@ struct TrustPrompt: Sendable {
     let connectionCount: Int
 }
 
+/// Lo que el usuario decidió sobre un proyecto que no había abierto antes.
 enum TrustDecision: Sendable {
     case cancel
     case readOnly
@@ -107,6 +111,7 @@ struct CommandPrompt: Sendable {
     let directory: String
 }
 
+/// Lo que el usuario decidió sobre un comando que nunca se ejecutó en este proyecto.
 enum CommandDecision: Sendable {
     case cancel
     case once

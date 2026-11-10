@@ -63,6 +63,9 @@ private let ellipsis = "…"
 /// `activate` y `handle` solo los llama MySQLNIO desde ese loop, y quien lee
 /// `results`/`status` lo hace con `eventLoop.submit`. De ahí `@unchecked Sendable`.
 final class MySQLTextCommand: MySQLCommand, @unchecked Sendable {
+    /// Dónde está la decodificación de la respuesta. El servidor manda cabecera,
+    /// definiciones de columna, un fin de metadatos (solo sin `CLIENT_DEPRECATE_EOF`) y
+    /// después las filas.
     private enum Phase { case header, columns(Int), metadataEnd, rows }
     private var phase = Phase.header
     private var columnNames: [String] = []

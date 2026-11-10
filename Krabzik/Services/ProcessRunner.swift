@@ -2,6 +2,7 @@ import Darwin
 import Foundation
 import Observation
 
+/// En qué estado está el proceso de un subproyecto, con su etiqueta para la interfaz.
 enum RunStatus: Equatable {
     case idle, running, stopping, exited(Int32), failed(String)
 
@@ -17,6 +18,11 @@ enum RunStatus: Equatable {
     }
 }
 
+/// El proceso de un subproyecto y su salida acumulada.
+///
+/// `generation` descarta la salida de un proceso anterior que todavía esté llegando
+/// cuando se reinicia el mismo subproyecto. `output` tiene tope (ver `append`).
+/// Confinado al main actor; `processID` y `generation` no disparan repintados.
 @MainActor @Observable
 final class ProjectRun: Identifiable {
     let id: UUID
@@ -70,6 +76,11 @@ private final class OutputBatch: @unchecked Sendable {
     }
 }
 
+/// Decodifica UTF-8 que llega partido entre lecturas.
+///
+/// Una lectura de la tubería puede cortar un carácter de varios bytes por la mitad.
+/// Guarda la cola incompleta y la antepone a la próxima, así un acento o un emoji no
+/// aparecen como basura. No es `Sendable`: vive en el hilo que lee.
 struct UTF8StreamDecoder {
     private var remaining = Data()
 
@@ -90,6 +101,11 @@ struct UTF8StreamDecoder {
     }
 }
 
+/// Lanza y detiene los procesos de los subproyectos, uno por subproyecto.
+///
+/// Cada hijo arranca en su **propio grupo de procesos**, así que detenerlo alcanza
+/// también a lo que él lanzó (npm, php). Confinado al main actor; la lectura de las
+/// tuberías ocurre en colas de fondo y vuelve por `OutputBatch`.
 @MainActor @Observable
 final class ProcessRunner {
     var runs: [UUID: ProjectRun] = [:]

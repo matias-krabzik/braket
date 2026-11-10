@@ -1,6 +1,18 @@
 import AppKit
 import Observation
 
+/// Dueño de la conversación con Codex: el estado que ve el panel y el protocolo.
+///
+/// Habla por `CodexTransport` (un proceso hijo, JSONL por tuberías) y traduce sus
+/// mensajes a estado observable. Tres cosas que no son obvias:
+///
+/// - **nada se lanza sin aprobación**: el ejecutable se le muestra al usuario con su
+///   firma y su hash antes del primer arranque (S2);
+/// - **todo lo que viene del modelo pasa por `ModelText`** antes de llegar al estado:
+///   es contenido de terceros y no puede hacerse pasar por interfaz de la app (S5);
+/// - `generation` y `operationID` descartan lo que llegue tarde de un turno anterior.
+///
+/// Confinado al main actor.
 @MainActor @Observable
 final class AgentController {
     var visible = false

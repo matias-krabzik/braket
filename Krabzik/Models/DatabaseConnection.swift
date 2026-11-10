@@ -1,6 +1,11 @@
 import Foundation
 import Observation
 
+/// Un perfil de conexión a MySQL, tal como se guarda en el `.krabzik`.
+///
+/// **La contraseña no está acá y no se serializa nunca**: vive en el llavero, con una
+/// cuenta que incluye id, host, puerto, usuario y modo de TLS (ver `CredentialStore`), así
+/// que cambiar el extremo invalida la credencial en vez de redirigirla.
 struct DatabaseConnection: Identifiable, Codable, Equatable, Sendable {
     var id = UUID()
     var name = "MySQL local"
@@ -10,6 +15,9 @@ struct DatabaseConnection: Identifiable, Codable, Equatable, Sendable {
     var database = ""
     var tls: TLSMode = .verified
 
+    /// Cómo se cifra la conexión. `disabled` solo se acepta contra un extremo de
+    /// loopback, y eso se comprueba sobre la dirección resuelta, no sobre el nombre
+    /// (ver docs/specs/S3-tls-solo-loopback.md).
     enum TLSMode: String, Codable, CaseIterable, Sendable {
         case verified, disabled
         var label: String { self == .verified ? "Verificar certificado" : "Sin TLS" }
@@ -59,12 +67,19 @@ struct DatabaseConnection: Identifiable, Codable, Equatable, Sendable {
     }
 }
 
+/// Error de base de datos con un mensaje ya redactado para mostrarle al usuario.
 struct DatabaseFailure: LocalizedError, Sendable {
     let message: String
     init(_ message: String) { self.message = message }
     var errorDescription: String? { message }
 }
 
+/// El resultado de **una** sentencia: columnas, filas retenidas y lo que el servidor
+/// contó.
+///
+/// `rowCount` es lo que devolvió el servidor y `rows.count` lo que se guardó: cuando no
+/// coinciden, `truncated` es `true`. Los topes están en `MySQLTextCommand` y no limitan
+/// la consulta, solo la memoria.
 struct SQLResult: Identifiable, Sendable {
     let id = UUID()
     var statement: Int
@@ -87,6 +102,10 @@ struct SQLResult: Identifiable, Sendable {
     }
 }
 
+/// El estado visible de ejecutar un script en el panel de resultados.
+///
+/// Una por documento SQL abierto. Confinada al main actor: la escribe
+/// `DatabaseController` al avanzar la ejecución y la lee la vista.
 @MainActor @Observable
 final class SQLExecution {
     var results: [SQLResult] = []
@@ -105,8 +124,14 @@ final class SQLExecution {
     var selectedResult: SQLResult? { results.first { $0.id == selectedResultID } ?? results.last }
 }
 
+/// El estado visible de una conexión en la barra lateral.
+///
+/// Una por `DatabaseConnection` instalada. `busy` es lo que impide editar o quitar una
+/// conexión mientras tiene trabajo en curso. Confinada al main actor.
 @MainActor @Observable
 final class DatabaseState {
+    /// Dónde está la conexión. No hay estado de error: el error se guarda aparte para
+    /// poder mostrarlo junto a `disconnected`.
     enum Status { case disconnected, connecting, connected }
     var status: Status = .disconnected
     var error: String?

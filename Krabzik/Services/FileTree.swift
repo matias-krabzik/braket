@@ -1,6 +1,11 @@
 import AppKit
 import SwiftUI
 
+/// Un nodo del explorador: una carpeta o un archivo.
+///
+/// `children == nil` significa «todavía no se leyó», no «está vacía»: la carga es
+/// perezosa y esa distinción es la que decide si hay que leer el disco. `watcher`
+/// mantiene la carpeta al día y se cancela en `deinit`. Confinado al main actor.
 @MainActor final class FileNode: NSObject {
     let url: URL
     let name: String
@@ -20,6 +25,10 @@ import SwiftUI
     deinit { watcher?.cancel() }
 }
 
+/// El explorador de archivos: un `NSOutlineView` nativo dentro de SwiftUI.
+///
+/// Es AppKit y no una `List` de SwiftUI porque la carga perezosa, el menú contextual y
+/// miles de filas se resuelven ahí sin pelear con el framework.
 struct FileTree: NSViewRepresentable {
     let workspace: Workspace
     let workspaceURL: URL
@@ -62,6 +71,12 @@ struct FileTree: NSViewRepresentable {
         context.coordinator.update(workspace, at: workspaceURL, revision: revision)
     }
 
+    /// Dueño del árbol: qué nodos hay, cuándo se leen y qué se observa.
+    ///
+    /// `generation` cambia al cambiar de proyecto y con eso se descartan las lecturas en
+    /// vuelo del anterior. Las carpetas generadas (`node_modules`, `.git`, …) no se listan,
+    /// y un symlink a directorio se muestra como hoja: seguirlo podría dar vueltas o salir
+    /// del proyecto. Confinado al main actor; las lecturas de disco van a una cola propia.
     @MainActor final class Coordinator: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate, NSMenuDelegate {
         weak var outline: NSOutlineView?
         let controller: WorkspaceController

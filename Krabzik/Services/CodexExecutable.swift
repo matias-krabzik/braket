@@ -40,6 +40,8 @@ enum CodexSignature: Equatable, Sendable {
     var isOfferable: Bool { self != .invalid }
 }
 
+/// Un ejecutable de Codex que pasó los rechazos y se le puede ofrecer al usuario,
+/// con su firma y su identidad para que vea qué va a aprobar.
 struct CodexCandidate: Equatable, Sendable {
     let url: URL
     let signature: CodexSignature
@@ -52,6 +54,10 @@ struct CodexRejection: Equatable, Sendable {
     let reason: String
 }
 
+/// Encuentra el ejecutable de Codex y decide cuáles se pueden ofrecer.
+///
+/// Sin estado: todo son funciones puras sobre el sistema de archivos, inyectables para
+/// poder probarlas sin tocar el Codex real de la máquina (ver docs/specs/S2).
 enum CodexExecutable {
     /// Rutas absolutas conocidas. El `PATH` se consulta **al final**, porque cualquier
     /// directorio que esté ahí puede aportar el binario que después se ejecuta con el

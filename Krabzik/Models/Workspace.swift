@@ -1,5 +1,7 @@
 import Foundation
 
+/// Qué clase de subproyecto es, y con eso el comando que se propone al agregarlo.
+/// `detect(at:)` mira el disco: no es un dato que el usuario tenga que elegir.
 enum ProjectKind: String, Codable, CaseIterable {
     case laravel = "Laravel", php = "PHP", angular = "Angular", astro = "Astro"
     case node = "Node", files = "Archivos"
@@ -86,6 +88,11 @@ extension String {
     }
 }
 
+/// Un subproyecto dentro del `.krabzik`: una carpeta y, opcionalmente, un comando.
+///
+/// `path` puede ser relativo al `.krabzik` o absoluto. Un relativo que salga de la
+/// carpeta se rechaza al leer (C7); un absoluto se admite y queda clasificado como
+/// externo, que es lo que el modelo de confianza mira antes de montarlo (S1).
 struct CodeProject: Identifiable, Codable, Equatable {
     var id: UUID = UUID()
     var name: String
@@ -107,6 +114,11 @@ struct CodeProject: Identifiable, Codable, Equatable {
     }
 }
 
+/// El contenido de un archivo `.krabzik`: nombre, subproyectos, conexiones y scripts.
+///
+/// Es un formato de entrada de terceros —se puede recibir por mail o clonar— así que
+/// `read(from:)` tiene contrato: topes, texto admisible y rutas que no salgan de la
+/// carpeta. Las contraseñas nunca se serializan acá.
 struct Workspace: Codable, Equatable {
     var version = 1
     var name: String
@@ -120,6 +132,7 @@ struct Workspace: Codable, Equatable {
         self.connections = connections
     }
 
+    /// Explícitas para que agregar una propiedad no cambie el formato sin querer.
     private enum CodingKeys: String, CodingKey { case version, name, projects, connections, scripts }
 
     init(from decoder: Decoder) throws {
@@ -265,6 +278,9 @@ struct Workspace: Codable, Equatable {
     }
 }
 
+/// Todo lo que puede salir mal abriendo un proyecto o un archivo, con el mensaje que
+/// ve el usuario. Los cuatro casos de C7 llevan el campo en el mensaje porque el
+/// `.krabzik` es JSON legible y se puede corregir a mano.
 enum WorkspaceError: LocalizedError {
     case unsupportedVersion, duplicateProject, binaryFile, largeFile, externalChange, missingFolder
     /// Los tres de C7 llevan el campo y el subproyecto en el mensaje: el `.krabzik` es
@@ -290,6 +306,7 @@ enum WorkspaceError: LocalizedError {
     }
 }
 
+/// Comillas para pasar una ruta a zsh sin que el shell la interprete.
 enum Shell {
     static func quote(_ value: String) -> String { "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'" }
 }

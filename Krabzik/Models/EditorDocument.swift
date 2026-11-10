@@ -1,6 +1,12 @@
 import Foundation
 import Observation
 
+/// Un archivo abierto en el editor.
+///
+/// El texto **no** se mantiene actualizado en cada tecla: `text` se relee de la vista
+/// nativa cuando alguien lo pide (ver su documentación y C11). `originalData` es lo que
+/// se leyó del disco y es con lo que se compara al guardar, para no pisar un cambio
+/// externo. Confinado al main actor.
 @MainActor @Observable
 final class EditorDocument: Identifiable {
     let id: URL
@@ -93,6 +99,8 @@ final class EditorDocument: Identifiable {
     }
 }
 
+/// Leer y escribir archivos del editor, con los dos límites que importan: 5 MB de
+/// tamaño y la comprobación de que el archivo en disco sigue siendo el que se leyó.
 enum DocumentIO {
     static func read(_ url: URL) throws -> Data {
         let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0

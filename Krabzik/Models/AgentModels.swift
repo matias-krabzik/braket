@@ -1,6 +1,12 @@
 import Foundation
 import Observation
 
+/// Un valor JSON cualquiera, para hablar el protocolo del agente sin tipos generados.
+///
+/// Codex cambia su protocolo entre versiones y la app solo usa una parte: un árbol
+/// genérico con accesores que no lanzan envejece mejor que un `Codable` por mensaje.
+/// Lo que la app sí fija es el límite de tamaño (`JSONLineFramer`) y el saneado de lo
+/// que viene del modelo (`ModelText`).
 indirect enum JSONValue: Codable, Equatable, Sendable {
     case object([String: JSONValue]), array([JSONValue]), string(String), number(Double), bool(Bool), null
 
@@ -106,12 +112,18 @@ enum ModelText {
     }
 }
 
+/// Error del agente con un mensaje ya redactado para mostrarle al usuario.
 struct AgentFailure: LocalizedError, Sendable {
     let message: String
     init(_ message: String) { self.message = message }
     var errorDescription: String? { message }
 }
 
+/// Un mensaje JSON-RPC del protocolo de Codex: pedido, respuesta o notificación.
+///
+/// Los cinco campos son opcionales porque el mismo tipo sirve para los tres: con `id` y
+/// `method` es un pedido, con `id` y `result`/`error` una respuesta, y con `method` solo
+/// una notificación.
 struct RPCMessage: Codable, Sendable {
     var id: JSONValue?
     var method: String?
@@ -120,6 +132,11 @@ struct RPCMessage: Codable, Sendable {
     var error: JSONValue?
 }
 
+/// Corta un flujo de bytes en líneas JSON, acumulando lo que llega partido.
+///
+/// Es el límite de confianza con el proceso hijo: una línea que pase de `limit` (8 MiB
+/// por defecto) lanza en vez de crecer sin techo. No es `Sendable`: vive en el hilo que
+/// lee la tubería.
 struct JSONLineFramer {
     private var buffer = Data()
     let limit: Int
@@ -138,6 +155,12 @@ struct JSONLineFramer {
     }
 }
 
+/// Las carpetas que el agente puede leer y escribir en un turno.
+///
+/// `roots[0]` es el directorio de trabajo. `contains(_:)` resuelve symlinks —incluso de
+/// un archivo que todavía no existe— porque un enlace que apunte afuera no puede colarse
+/// como si estuviera adentro. Lo construye `make(workspace:url:projectID:allowExternal:)`,
+/// que es quien aplica el modelo de confianza de S1.
 struct AgentScope: Equatable, Sendable {
     let names: [String]
     let roots: [URL]
@@ -195,6 +218,11 @@ struct AgentScope: Equatable, Sendable {
     }
 }
 
+/// Un mensaje de la conversación, del usuario o del modelo.
+///
+/// Es clase y no struct porque el texto del modelo llega por partes (`delta`) y se
+/// agrega sobre el mismo objeto; `@Observable` hace que la vista repinte solo ese
+/// mensaje. Confinado al main actor.
 @MainActor @Observable
 final class AgentMessage: Identifiable {
     let id: String
@@ -207,6 +235,8 @@ final class AgentMessage: Identifiable {
     }
 }
 
+/// Un archivo que el agente cambió, con su diff. La ruta y el diff ya pasaron por
+/// `ModelText`: vienen del modelo, así que no se muestran crudos.
 struct AgentFileChange: Identifiable, Equatable {
     var id: String { path }
     let path: String
@@ -214,6 +244,11 @@ struct AgentFileChange: Identifiable, Equatable {
     let diff: String
 }
 
+/// Algo que el modelo pide y que el usuario tiene que aprobar o contestar: ejecutar un
+/// comando, cambiar un archivo o responder una pregunta.
+///
+/// `rpcID` es el id del pedido JSON-RPC, y hay que devolverlo tal cual para que Codex
+/// sepa a qué contesta.
 struct AgentRequest: Identifiable {
     let id: String
     let rpcID: JSONValue

@@ -6,6 +6,17 @@ extension UTType {
     static let krabzikProject = UTType(exportedAs: "com.krabzik.project", conformingTo: .json)
 }
 
+/// El estado de la ventana: qué proyecto está abierto, qué documentos, y los servicios
+/// que dependen de eso.
+///
+/// Es el objeto más grande de la app y lo sabe: C5 propone partirlo en
+/// `RecentProjectsStore`, `DocumentStore`, `ScriptLibrary` y `ErrorCenter`.
+///
+/// Lo que no se puede perder al partirlo: **abrir un proyecto no ejecuta nada**. Un
+/// `.krabzik` que no se abrió antes entra en solo lectura, y de ahí dependen
+/// `runnableProjects`, `mountedProjects`, `scriptURL(_:)` y el gate del agente (S1).
+///
+/// Confinado al main actor.
 @MainActor @Observable
 final class WorkspaceController {
     var workspace: Workspace?

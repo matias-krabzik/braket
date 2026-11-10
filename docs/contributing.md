@@ -64,3 +64,8 @@ aceptación verificables.
   el hash del commit, y la fila correspondiente actualizada en [docs/specs/README.md](specs/README.md).
 - Si el código se movió desde que se escribió el spec, se actualiza el spec en el mismo commit que lo
   implementa.
+
+## Estilo
+
+Las reglas de estilo están en [style.md](style.md): qué comprueba `verify.sh`, qué se
+revisa al leer, y qué estilo compacto se conserva a propósito.

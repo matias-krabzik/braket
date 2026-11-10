@@ -18,11 +18,21 @@ extension SocketAddress {
     }
 }
 
+/// Lo que la interfaz necesita saber de una sesión viva: base actual y si hay una
+/// transacción abierta.
 struct DatabaseSessionInfo: Sendable {
     var database: String
     var inTransaction: Bool
 }
 
+/// El cliente de MySQL: una sesión persistente por conexión.
+///
+/// Es un `actor` porque el estado —sesiones, trabajos en curso, cancelaciones— se toca
+/// desde la interfaz y desde las tareas de ejecución. La sesión es persistente a
+/// propósito: conserva tablas temporales, variables y transacciones entre ejecuciones,
+/// que es lo que hace útil un script SQL por partes.
+///
+/// No guarda la contraseña: la relee del llavero cuando hace falta (S4).
 actor MySQLClient {
     /// Resultado de cancelar. `localOnly` significa que se cerró el socket pero el
     /// servidor pudo no haber recibido el KILL: la consulta puede seguir corriendo.
@@ -41,6 +51,8 @@ actor MySQLClient {
         self.readPassword = readPassword
     }
 
+    /// Una conexión viva con lo que hay que recordar de ella. `serverID` es el id de
+    /// sesión del servidor, lo único con lo que se puede matar esta consulta y no otra.
     private struct Session {
         let connection: MySQLConnection
         let configuration: DatabaseConnection
