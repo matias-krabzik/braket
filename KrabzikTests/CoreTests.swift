@@ -108,6 +108,34 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(document.text, "SELECT 1;\n", "sin vista, la caché es exacta")
     }
 
+    // MARK: - Credenciales ligadas al extremo (C4)
+
+    /// El predicado que decide si la credencial del perfil anterior quedó huérfana.
+    /// Estaba escrito como una condición de tres líneas dentro de `saveConnection`, donde
+    /// la insensibilidad a mayúsculas del host no se veía.
+    @MainActor func testEndpointChangeDetection() {
+        var base = DatabaseConnection()
+        base.host = "Db.Example.COM"
+        base.port = 3306
+        base.username = "krabzik"
+        base.tls = .verified
+
+        func cambiando(_ ajuste: (inout DatabaseConnection) -> Void) -> Bool {
+            var otra = base
+            ajuste(&otra)
+            return WorkspaceController.endpointChanged(from: base, to: otra)
+        }
+
+        XCTAssertFalse(cambiando { _ in }, "el mismo perfil no cambia nada")
+        XCTAssertFalse(cambiando { $0.host = "db.example.com" }, "el host no distingue mayúsculas")
+        XCTAssertFalse(cambiando { $0.name = "otro nombre" }, "el nombre no es parte del extremo")
+        XCTAssertFalse(cambiando { $0.database = "otra_base" }, "la base tampoco")
+        XCTAssertTrue(cambiando { $0.host = "otro.example.com" })
+        XCTAssertTrue(cambiando { $0.port = 3307 })
+        XCTAssertTrue(cambiando { $0.username = "otro" })
+        XCTAssertTrue(cambiando { $0.tls = .disabled })
+    }
+
     // MARK: - Contrato del formato (C7)
 
     /// Escribe el `.krabzik` tal cual, sin pasar por `Workspace.write`: estas pruebas

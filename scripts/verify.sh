@@ -8,12 +8,12 @@
 set -uo pipefail
 cd "${0:A:h:h}"
 
-# Trinquetes: cantidades que hoy existen en el código y que solo pueden BAJAR.
-# No son objetivos, son topes para no empeorar mientras C4 y C6 no estén hechos.
-BASE_LONG_LINES=57      # líneas de más de 140 columnas        -> C4 las baja a 0
-BASE_SEMICOLONS=159     # líneas con varias sentencias y ';'   -> C4 las baja a 0
-BASE_EMPTY_CATCH=0      # bloques catch vacíos en Krabzik/      -> C6 los bajó a 0
-BASE_LINT=60            # avisos de SwiftLint                   -> C4 los baja a 0
+# Trinquetes: cantidades que solo pueden BAJAR. C4 y C6 los dejaron todos en 0, así que
+# hoy no son topes sino reglas: cualquier aparición falla. Si alguna vez hay un motivo
+# para subir uno, va con el motivo escrito acá al lado.
+BASE_LONG_LINES=0       # líneas de más de 140 columnas (C4)
+BASE_EMPTY_CATCH=0      # bloques catch vacíos en Krabzik/ (C6)
+BASE_LINT=0             # avisos de SwiftLint, con --strict (C4)
 
 failures=0
 skipped=()
@@ -67,11 +67,13 @@ else
   ok "líneas de más de 140 columnas: $long_lines (tope $BASE_LONG_LINES)"
 fi
 
-semicolons=$(grep -rn '; ' --include='*.swift' Krabzik KrabzikTests | grep -v 'for ' | grep -v '//' | wc -l | tr -d ' ')
-if (( semicolons > BASE_SEMICOLONS )); then
-  fail "líneas con varias sentencias separadas por ';': $semicolons (tope $BASE_SEMICOLONS)"
+# El `grep '; '` de antes no distinguía una sentencia de un punto y coma dentro de una
+# cadena: media docena de pruebas tienen SQL o Python, y SQL sin punto y coma no es SQL.
+if sentencias=$(python3 scripts/check_style.py); then
+  ok "una sentencia por línea"
 else
-  ok "líneas con ';': $semicolons (tope $BASE_SEMICOLONS)"
+  fail "hay líneas con más de una sentencia"
+  print -- "$sentencias" | sed 's/^/      /'
 fi
 
 # Solo el código de producción: en una prueba, `do { ... XCTFail() } catch {}` es la
@@ -91,10 +93,12 @@ else
 fi
 
 # ------------------------------------------------------------------------- lint
-step "SwiftLint (BLOQUEANTE: sin errores, y los avisos no crecen)"
+# --strict: C4 dejó el conteo en 0, así que un aviso nuevo es un error y no una deuda
+# que se acumula sin que nadie la mire.
+step "SwiftLint (BLOQUEANTE: --strict, cero avisos)"
 if command -v swiftlint >/dev/null; then
   lint_log=$(mktemp -t krabzik-lint)
-  swiftlint lint --quiet > "$lint_log" 2>&1
+  swiftlint lint --strict --quiet > "$lint_log" 2>&1
   lint_status=$?
   lint_count=$(grep -cE ':[0-9]+:[0-9]+: ' "$lint_log")
   if (( lint_status != 0 )); then
@@ -105,7 +109,7 @@ if command -v swiftlint >/dev/null; then
   else
     ok "sin errores · avisos: $lint_count (tope $BASE_LINT)"
   fi
-  # Resumen por regla en vez de volcar 66 líneas en cada corrida.
+  # Resumen por regla en vez de volcar el log entero en cada corrida.
   grep -oE '\(([a-z_]+)\)$' "$lint_log" | sort | uniq -c | sort -rn | sed 's/^/      /'
   (( lint_count > 0 )) && info "detalle: swiftlint lint --quiet"
   rm -f "$lint_log"

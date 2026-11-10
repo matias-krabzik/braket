@@ -124,8 +124,10 @@ actor MySQLClient {
             guard token == epoch else { throw CancellationError() }
             sessions[config.id] = value
             return value
-        } catch { try? await connection.close().get()
-        throw error }
+        } catch {
+            try? await connection.close().get()
+            throw error
+        }
     }
 
     func connect(_ config: DatabaseConnection, password: String) async throws -> DatabaseSessionInfo {

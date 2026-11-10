@@ -205,8 +205,10 @@ final class DatabaseTests: XCTestCase {
             let next = try await execute("SELECT COUNT(*) FROM sample", client: client, config: config)
             XCTAssertEqual(next[0].rows[0][0], "2")
             await client.shutdown()
-        } catch { await client.shutdown()
-        throw error }
+        } catch {
+            await client.shutdown()
+            throw error
+        }
     }
 
     func testMySQLTransactionRollbackAndStopOnFirstError() async throws {
@@ -230,8 +232,10 @@ final class DatabaseTests: XCTestCase {
             let rows = try await execute("SELECT id FROM tx", client: client, config: config)
             XCTAssertEqual(rows[0].rows, [["2"]])
             await client.shutdown()
-        } catch { await client.shutdown()
-        throw error }
+        } catch {
+            await client.shutdown()
+            throw error
+        }
     }
 
     func testMySQLBoundsResultsAndPreservesDuplicateColumnNames() async throws {
@@ -246,8 +250,10 @@ final class DatabaseTests: XCTestCase {
             XCTAssertEqual(results[1].rows.count, 1000)
             XCTAssertTrue(results[1].truncated)
             await client.shutdown()
-        } catch { await client.shutdown()
-        throw error }
+        } catch {
+            await client.shutdown()
+            throw error
+        }
     }
 
     func testMySQLCancellationClosesActualServerSession() async throws {
@@ -268,9 +274,11 @@ final class DatabaseTests: XCTestCase {
             XCTAssertEqual(rows[0].rows[0][0], "0")
             await client.shutdown()
             await observer.shutdown()
-        } catch { await client.shutdown()
-        await observer.shutdown()
-        throw error }
+        } catch {
+            await client.shutdown()
+            await observer.shutdown()
+            throw error
+        }
     }
 
     /// Cubre el parche 0001 del vendoring (rechazar TLS que el servidor no anuncia).
@@ -425,7 +433,9 @@ final class DatabaseTests: XCTestCase {
                 try await server.close().get()
             }
             try await group.shutdownGracefully()
-        } catch { try? await group.shutdownGracefully()
-        throw error }
+        } catch {
+            try? await group.shutdownGracefully()
+            throw error
+        }
     }
 }

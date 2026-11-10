@@ -109,8 +109,10 @@ final class DatabaseController {
                     state.status = .connected
                     state.currentDatabase = info.database
                     state.inTransaction = info.inTransaction
-                } else { state.status = .disconnected
-                state.inTransaction = false }
+                } else {
+                    state.status = .disconnected
+                    state.inTransaction = false
+                }
             }
         }
     }

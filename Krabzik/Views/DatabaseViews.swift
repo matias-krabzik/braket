@@ -191,8 +191,10 @@ struct ConnectionSheet: View {
                 try await controller.database.client.test(value, password: password)
                 succeeded = true
                 message = "Conexión correcta"
-            } catch { succeeded = false
-            message = MySQLClient.message(error) }
+            } catch {
+                succeeded = false
+                message = MySQLClient.message(error)
+            }
         }
     }
 
@@ -216,6 +218,15 @@ struct ConnectionSheet: View {
 struct SQLToolbar: View {
     let document: EditorDocument
     @Bindable var controller: WorkspaceController
+
+    /// Se puede ejecutar si hay una conexión elegida y no está ocupada ni conectándose.
+    /// Estaba escrito como una condición de tres líneas dentro del `.disabled`, donde
+    /// había que leerla al revés.
+    private var canExecute: Bool {
+        guard let connection = controller.selectedDatabase else { return false }
+        let state = controller.database.states[connection.id]
+        return state?.busy != true && state?.status != .connecting
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -241,9 +252,7 @@ struct SQLToolbar: View {
                     .disabled(document.sqlExecution.isCancelling).help("Cancelar consulta").accessibilityLabel("Cancelar consulta")
             } else {
                 Button(action: controller.executeSQL) { Image(systemName: "play.fill") }
-                    .disabled(controller.selectedDatabase == nil || controller.selectedDatabase
-                        .map { controller.database.states[$0.id]?.busy == true || controller.database.states[$0.id]?.status == .connecting
-                        } == true)
+                    .disabled(!canExecute)
                     .help("Ejecutar selección o script (⌘↩)").accessibilityLabel("Ejecutar SQL")
             }
         }

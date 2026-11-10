@@ -267,8 +267,23 @@ final class WorkspaceController {
             for item in updated.projects { _ = runner.state(for: item.id) }
             treeRevision += 1
             return true
-        } catch { show(error)
-        return false }
+        } catch {
+            show(error)
+            return false
+        }
+    }
+
+    /// Si la credencial guardada del perfil anterior ya no sirve para el nuevo.
+    ///
+    /// La cuenta del llavero incluye host, puerto, usuario y modo de TLS (ver
+    /// `CredentialStore`), así que cambiar cualquiera de los cuatro deja la contraseña
+    /// vieja huérfana. El host se compara sin distinguir mayúsculas porque los nombres de
+    /// dominio no las distinguen, y el llavero guarda el host ya en minúsculas.
+    static func endpointChanged(from previous: DatabaseConnection, to connection: DatabaseConnection) -> Bool {
+        previous.host.lowercased() != connection.host.lowercased()
+            || previous.port != connection.port
+            || previous.username != connection.username
+            || previous.tls != connection.tls
     }
 
     var selectedDatabase: DatabaseConnection? {
@@ -291,9 +306,7 @@ final class WorkspaceController {
             try? CredentialStore.save(oldPassword, for: connection)
             throw error
         }
-        if let previous,
-           previous.host.lowercased() != connection.host.lowercased() || previous.port != connection.port || previous.username != connection
-           .username || previous.tls != connection.tls {
+        if let previous, Self.endpointChanged(from: previous, to: connection) {
             do {
                 try CredentialStore.remove(for: previous)
             } catch {
@@ -411,8 +424,10 @@ final class WorkspaceController {
             document.originalData = data
             document.isDirty = Data(document.text.utf8) != data
             return true
-        } catch { show(error)
-        return false }
+        } catch {
+            show(error)
+            return false
+        }
     }
 
     func saveCopy() {

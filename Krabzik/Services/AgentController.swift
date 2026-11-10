@@ -145,8 +145,10 @@ final class AgentController {
                     throw AgentFailure("Codex no devolvió una dirección de inicio de sesión válida.")
                 }
                 guard NSWorkspace.shared.open(url) else { throw AgentFailure("No se pudo abrir el navegador.") }
-            } catch { self.error = error.localizedDescription
-            loginPending = false }
+            } catch {
+                self.error = error.localizedDescription
+                loginPending = false
+            }
         }
     }
 
@@ -443,14 +445,7 @@ final class AgentController {
         if let eventTurn = p["turnId"].string, let turnID, eventTurn != turnID { return }
         switch method {
         case "turn/started": turnID = p["turn"]["id"].string
-        case "turn/completed":
-            let turn = p["turn"]
-            guard turnID == nil || turn["id"].string == turnID else { return }
-            let status = turn["status"].string
-            let failure = ModelText.display(turn["error"]["message"].string ?? "La tarea falló.", limit: 2_000)
-            finishTurn(error: status == "failed" ? failure
-                              : status == "interrupted" ? "Tarea detenida. Los cambios realizados se conservaron."
-                              : nil)
+        case "turn/completed": finishTurn(from: p["turn"])
         case "error":
             if !p["willRetry"].bool {
                 error = ModelText.display(p["error"]["message"].string ?? "Error de Codex.", limit: 2_000)
@@ -464,38 +459,71 @@ final class AgentController {
                 message.text += ModelText.display(p["delta"].string ?? "", limit: 4_000)
             }
         case "item/started", "item/completed":
-            let item = p["item"], completed = method == "item/completed"
-            guard let id = item["id"].string else { return }
-            switch item["type"].string {
-            case "agentMessage":
-                if item["phase"].string == "commentary" {
-                    commentaryIDs.insert(id)
-                    if completed { activity = ModelText.display(item["text"].string ?? "Trabajando…", limit: 160) }
-                } else if completed {
-                    agentMessage(id).text = ModelText.display(item["text"].string ?? "", limit: 120_000)
-                }
-            case "commandExecution":
-                if !completed { activity = "Ejecutando…" }
-            case "fileChange":
-                let files = item["changes"].array.compactMap { value -> AgentFileChange? in
-                    guard let path = value["kind"]["move_path"].string ?? value["path"].string else { return nil }
-                    return AgentFileChange(path: ModelText.display(path, limit: 1_024),
-                                           kind: value["kind"]["type"].string ?? "update",
-                                           diff: ModelText.display(value["diff"].string ?? "", limit: 100_000))
-                }
-                if completed { proposedChanges.removeValue(forKey: id) }
-                else { proposedChanges[id] = files }
-                if completed, item["status"].string == "completed" {
-                    for file in files {
-                        if let index = changes.firstIndex(where: { $0.path == file.path }) { changes[index] = file }
-                        else if changes.count < 500 { changes.append(file) }
-                    }
-                    if let scope { onFilesChanged?(scope) }
-                } else if !completed { activity = "Editando archivos…" }
-            default: break
-            }
+            handle(item: p["item"], completed: method == "item/completed")
         default: break
         }
+    }
+
+    /// Fin de turno. El estado decide si fue un fallo, una interrupción o un final normal;
+    /// el mensaje de error viene del modelo, así que pasa por `ModelText`.
+    private func finishTurn(from turn: JSONValue) {
+        guard turnID == nil || turn["id"].string == turnID else { return }
+        let status = turn["status"].string
+        let failure = ModelText.display(turn["error"]["message"].string ?? "La tarea falló.", limit: 2_000)
+        finishTurn(error: status == "failed" ? failure
+            : status == "interrupted" ? "Tarea detenida. Los cambios realizados se conservaron."
+            : nil)
+    }
+
+    /// Un ítem del turno, empezado o terminado. El mismo evento llega dos veces —una al
+    /// empezar y otra al terminar— y `completed` es lo que distingue qué hacer: al empezar
+    /// se muestra actividad, al terminar se guarda el resultado.
+    private func handle(item: JSONValue, completed: Bool) {
+        guard let id = item["id"].string else { return }
+        switch item["type"].string {
+        case "agentMessage":
+            handle(message: item, id: id, completed: completed)
+        case "commandExecution":
+            if !completed { activity = "Ejecutando…" }
+        case "fileChange":
+            handle(fileChange: item, id: id, completed: completed)
+        default:
+            break
+        }
+    }
+
+    /// Un mensaje del modelo. Los de fase `commentary` no son respuesta: son el relato de
+    /// lo que está haciendo, y van a `activity` en vez de a la conversación.
+    private func handle(message item: JSONValue, id: String, completed: Bool) {
+        if item["phase"].string == "commentary" {
+            commentaryIDs.insert(id)
+            if completed { activity = ModelText.display(item["text"].string ?? "Trabajando…", limit: 160) }
+        } else if completed {
+            agentMessage(id).text = ModelText.display(item["text"].string ?? "", limit: 120_000)
+        }
+    }
+
+    /// Archivos que el modelo propone o ya cambió. Mientras el ítem no está completo los
+    /// cambios quedan en `proposedChanges`, que es lo que el diálogo de aprobación muestra;
+    /// al completarse pasan a `changes` y se avisa para refrescar el árbol.
+    private func handle(fileChange item: JSONValue, id: String, completed: Bool) {
+        let files = item["changes"].array.compactMap { value -> AgentFileChange? in
+            guard let path = value["kind"]["move_path"].string ?? value["path"].string else { return nil }
+            return AgentFileChange(path: ModelText.display(path, limit: 1_024),
+                                   kind: value["kind"]["type"].string ?? "update",
+                                   diff: ModelText.display(value["diff"].string ?? "", limit: 100_000))
+        }
+        if completed { proposedChanges.removeValue(forKey: id) }
+        else { proposedChanges[id] = files }
+        guard completed, item["status"].string == "completed" else {
+            if !completed { activity = "Editando archivos…" }
+            return
+        }
+        for file in files {
+            if let index = changes.firstIndex(where: { $0.path == file.path }) { changes[index] = file }
+            else if changes.count < 500 { changes.append(file) }
+        }
+        if let scope { onFilesChanged?(scope) }
     }
 
     func proposedDiff(for request: AgentRequest) -> String {
