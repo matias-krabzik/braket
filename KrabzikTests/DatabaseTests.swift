@@ -309,6 +309,49 @@ final class DatabaseTests: XCTestCase {
         }
     }
 
+    /// Editar el extremo de una conexión tiene que borrar la credencial vieja: si no, en
+    /// el llavero queda una contraseña que el usuario cree que ya no está. Es el camino de
+    /// `saveConnection` que antes se tragaba el error con `try?` (C6, C9).
+    @MainActor func testEditingEndpointRemovesTheOldCredential() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("krabzik-cred-\(UUID())")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let suite = "krabzik-cred-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        var vieja = DatabaseConnection()
+        vieja.name = "local"
+        vieja.host = "127.0.0.1"
+        vieja.port = 3306
+        vieja.username = "krabzik_qa"
+        vieja.tls = .disabled
+        var nueva = vieja
+        nueva.port = 3307
+        addTeardownBlock {
+            try? CredentialStore.remove(for: vieja)
+            try? CredentialStore.remove(for: nueva)
+            try? FileManager.default.removeItem(at: directory)
+            UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+        }
+
+        let url = directory.appendingPathComponent("Proyecto.krabzik")
+        var workspace = Workspace(name: "Proyecto")
+        workspace.connections = [vieja]
+        try workspace.write(to: url)
+        let controller = WorkspaceController(defaults: defaults)
+        controller.confirmTrust = { _ in .trust }
+        await controller.openWorkspace(url)
+        XCTAssertEqual(controller.workspace?.connections.count, 1)
+
+        try CredentialStore.save("secreto-de-prueba", for: vieja)
+        XCTAssertEqual(try CredentialStore.read(for: vieja), "secreto-de-prueba")
+
+        try await controller.saveConnection(nueva, password: "secreto-de-prueba")
+
+        XCTAssertEqual(try CredentialStore.read(for: vieja), "",
+                       "la credencial del extremo anterior no puede quedar en el llavero")
+        XCTAssertEqual(try CredentialStore.read(for: nueva), "secreto-de-prueba")
+        XCTAssertNil(controller.errorMessage)
+    }
+
     func testCredentialsStayBoundToEndpointAndTLS() throws {
         let config = DatabaseConnection()
         defer { try? CredentialStore.remove(for: config) }
