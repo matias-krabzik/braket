@@ -27,6 +27,37 @@ private extension ByteBuffer {
     }
 }
 
+/// Números del protocolo de texto de MySQL que este decodificador necesita.
+/// Ver docs/specs/C4-legibilidad.md.
+private enum Wire {
+    /// `#` antes del SQLSTATE en un paquete de error, cuando el servidor lo manda.
+    static let sqlStateMarker: UInt8 = 35
+    /// El charset 63 es `binary`: lo que viene en esa columna no es texto.
+    static let binaryCharset: UInt16 = 63
+    /// Tipos de campo que, con charset binario, se muestran en hexadecimal: los BLOB y
+    /// sus variantes, más `GEOMETRY` (255) y `BIT` (16).
+    static let binaryFieldTypes: Set<UInt8> = [249, 250, 251, 252, 253, 254, 255, 16]
+    /// Un paquete de 16 MiB menos uno es el máximo del protocolo; por debajo de eso, un
+    /// 0xFE inicial es fin de resultado y no una fila con un campo enorme.
+    static let maxPayload = 0xFF_FFFF
+    /// Tope defensivo de columnas: una cabecera que diga más es un archivo o un servidor
+    /// que no estamos entendiendo.
+    static let maxColumns: UInt64 = 4096
+}
+
+/// Topes de lo que se retiene en memoria por resultado. No limitan la consulta: lo que
+/// sobra se recibe y se descarta, y el resultado queda marcado como truncado.
+private enum Retained {
+    static let rowsPerResult = 1000
+    static let bytesPerCell = 16_384
+    /// Costo que se le cobra a una celda vacía o nula, para que un millón de ellas también
+    /// llegue al límite.
+    static let bytesPerCellOverhead = 16
+}
+
+/// Marca de corte que se le agrega a una celda truncada.
+private let ellipsis = "…"
+
 /// Text protocol keeps decimal precision, zero dates and SQL NULL intact. All
 /// mutable members of a command are confined to the connection's event loop:
 /// `activate` y `handle` solo los llama MySQLNIO desde ese loop, y quien lee
@@ -63,7 +94,7 @@ final class MySQLTextCommand: MySQLCommand, @unchecked Sendable {
             packet.payload.moveReaderIndex(forwardBy: 1)
             let code = packet.payload.readInteger(endianness: .little, as: UInt16.self) ?? 0
             var state = ""
-            if packet.payload.getInteger(at: packet.payload.readerIndex, as: UInt8.self) == 35 {
+            if packet.payload.getInteger(at: packet.payload.readerIndex, as: UInt8.self) == Wire.sqlStateMarker {
                 packet.payload.moveReaderIndex(forwardBy: 1)
                 state = packet.payload.readString(length: 5) ?? ""
             }
@@ -73,7 +104,7 @@ final class MySQLTextCommand: MySQLCommand, @unchecked Sendable {
         switch phase {
         case .header:
             if packet.isOK { return try finish(&packet, capabilities: capabilities) }
-            guard let count = packet.payload.readSQLLength(), count > 0, count <= 4096 else {
+            guard let count = packet.payload.readSQLLength(), count > 0, count <= Wire.maxColumns else {
                 throw DatabaseFailure("Respuesta MySQL no válida.")
             }
             columnNames = []
@@ -89,7 +120,7 @@ final class MySQLTextCommand: MySQLCommand, @unchecked Sendable {
                   packet.payload.readInteger(endianness: .little, as: UInt32.self) != nil,
                   let type = packet.payload.readInteger(as: UInt8.self) else { throw MySQLError.protocolError }
             columnNames.append(name)
-            binaryColumns.append(charset == 63 && [UInt8(249), 250, 251, 252, 253, 254, 255, 16].contains(type))
+            binaryColumns.append(charset == Wire.binaryCharset && Wire.binaryFieldTypes.contains(type))
             if columnNames.count == count {
                 current.columns = columnNames
                 phase = capabilities.contains(.CLIENT_DEPRECATE_EOF) ? .rows : .metadataEnd
@@ -100,18 +131,18 @@ final class MySQLTextCommand: MySQLCommand, @unchecked Sendable {
         case .rows:
             // A text row can begin with 0x00 (empty string) or with 0xFE for a
             // very large field. EOF/OK has 0xFE and a payload below 16 MiB.
-            if packet.isEOF && packet.payload.readableBytes < 0xFF_FFFF {
+            if packet.isEOF && packet.payload.readableBytes < Wire.maxPayload {
                 return try finish(&packet, capabilities: capabilities)
             }
             let row = try MySQLProtocol.TextResultSetRow.decode(from: &packet, columnCount: columnNames.count)
             current.rowCount += 1
-            guard current.rows.count < 1000, storedBytes < byteLimit else {
+            guard current.rows.count < Retained.rowsPerResult, storedBytes < byteLimit else {
                 current.truncated = true
                 return .init()
             }
             var values: [String?] = []
             for (index, buffer) in row.values.enumerated() {
-                storedBytes += 16 // Include storage for NULL and empty cells.
+                storedBytes += Retained.bytesPerCellOverhead
                 guard storedBytes <= byteLimit else {
                     current.truncated = true
                     return .init()
@@ -120,15 +151,15 @@ final class MySQLTextCommand: MySQLCommand, @unchecked Sendable {
                     values.append(nil)
                     continue
                 }
-                let bytes = buffer.readableBytesView.prefix(16_384)
+                let bytes = buffer.readableBytesView.prefix(Retained.bytesPerCell)
                 let truncated = buffer.readableBytes > bytes.count
                 let value: String
                 if binaryColumns[index] || String(bytes: bytes, encoding: .utf8) == nil {
                     value = "0x" + bytes.map { String(format: "%02X", $0) }.joined()
                 } else { value = String(decoding: bytes, as: UTF8.self) }
-                storedBytes += value.utf8.count + (truncated ? 3 : 0)
+                storedBytes += value.utf8.count + (truncated ? ellipsis.utf8.count : 0)
                 current.truncated = current.truncated || truncated
-                values.append(value + (truncated ? "…" : ""))
+                values.append(value + (truncated ? ellipsis : ""))
             }
             if storedBytes <= byteLimit { current.rows.append(values) }
             else { current.truncated = true }

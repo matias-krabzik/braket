@@ -1,12 +1,39 @@
 import Foundation
 
+/// Una sentencia del script, con la línea donde empieza para poder señalar el error en
+/// el editor.
 struct SQLStatement: Sendable {
     let text: String
     let line: Int
 }
 
-/// Splits only at delimiters outside strings and comments. It is a cursor so the
-/// server's NO_BACKSLASH_ESCAPES flag can be applied after each statement.
+/// Bytes que el parser reconoce. Con los números a la vista, cada comparación de este
+/// archivo había que traducirla mentalmente. Ver docs/specs/C4-legibilidad.md.
+private enum Byte {
+    static let newline: UInt8 = 10
+    static let carriageReturn: UInt8 = 13
+    static let space: UInt8 = 32
+    /// `/*!` marca un comentario ejecutable: es SQL, no decoración.
+    static let exclamation: UInt8 = 33
+    static let doubleQuote: UInt8 = 34
+    static let hash: UInt8 = 35
+    static let singleQuote: UInt8 = 39
+    static let asterisk: UInt8 = 42
+    static let hyphen: UInt8 = 45
+    static let slash: UInt8 = 47
+    static let backslash: UInt8 = 92
+    static let backtick: UInt8 = 96
+}
+
+/// Corta un script en sentencias, solo en los delimitadores que están fuera de cadenas y
+/// comentarios.
+///
+/// Es un **cursor** y no una función que devuelva un arreglo: el servidor puede cambiar
+/// `NO_BACKSLASH_ESCAPES` en medio del script, y entonces lo que es un escape y lo que es
+/// una comilla cambia para las sentencias que siguen. Quien lo usa pasa el valor vigente
+/// en cada llamada a `next(noBackslashEscapes:)`.
+///
+/// No es `Sendable`: el estado de posición y línea es de quien lo recorre.
 struct SQLScript {
     private let bytes: [UInt8]
     private var position = 0
@@ -22,17 +49,17 @@ struct SQLScript {
         var start = position, startLine = line
         var quote: UInt8?
         var blockComment = false, lineComment = false, hasSQL = false
-        var atLineStart = position == 0 || bytes[max(0, position - 1)] == 10
+        var atLineStart = position == 0 || bytes[max(0, position - 1)] == Byte.newline
 
         func matches(_ token: [UInt8], at index: Int) -> Bool {
             index + token.count <= bytes.count && bytes[index..<(index + token.count)].elementsEqual(token)
         }
 
         while position < bytes.count {
-            let c = bytes[position]
-            let next = position + 1 < bytes.count ? bytes[position + 1] : 0
+            let byte = bytes[position]
+            let following = position + 1 < bytes.count ? bytes[position + 1] : 0
             if atLineStart && quote == nil && !blockComment && !lineComment && !hasSQL {
-                let end = bytes[position...].firstIndex(of: 10) ?? bytes.count
+                let end = bytes[position...].firstIndex(of: Byte.newline) ?? bytes.count
                 let directive = String(decoding: bytes[position..<end], as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
                 if directive.uppercased().hasPrefix("DELIMITER ") || directive.uppercased().hasPrefix("DELIMITER\t") {
                     let value = directive.dropFirst(9).trimmingCharacters(in: .whitespaces)
@@ -50,23 +77,24 @@ struct SQLScript {
                 }
             }
             if lineComment {
-                if c == 10 { lineComment = false }
+                if byte == Byte.newline { lineComment = false }
             } else if blockComment {
-                if c == 42 && next == 47 {
+                if byte == Byte.asterisk && following == Byte.slash {
                     blockComment = false
                     position += 2
                     atLineStart = false
                     continue
                 }
             } else if let active = quote {
-                if c == 92 && active != 96 && !noBackslashEscapes && position + 1 < bytes.count {
-                    if next == 10 { line += 1 }
+                if byte == Byte.backslash, active != Byte.backtick, !noBackslashEscapes,
+                   position + 1 < bytes.count {
+                    if following == Byte.newline { line += 1 }
                     position += 2
                     atLineStart = false
                     continue
                 }
-                if c == active {
-                    if next == active {
+                if byte == active {
+                    if following == active {
                         position += 2
                         continue
                     }
@@ -83,26 +111,29 @@ struct SQLScript {
                 start = position
                 startLine = line
                 continue
-            } else if c == 35 || (c == 45 && next == 45 && (position + 2 == bytes.count || bytes[position + 2] <= 32)) {
+            } else if byte == Byte.hash
+                || (byte == Byte.hyphen && following == Byte.hyphen
+                    && (position + 2 == bytes.count || bytes[position + 2] <= Byte.space)) {
                 lineComment = true
-            } else if c == 47 && next == 42 {
+            } else if byte == Byte.slash && following == Byte.asterisk {
                 blockComment = true
-                // Versioned executable comments (/*! ... */) are SQL, not decoration.
-                if position + 2 < bytes.count && bytes[position + 2] == 33 { hasSQL = true }
+                if position + 2 < bytes.count, bytes[position + 2] == Byte.exclamation { hasSQL = true }
                 position += 2
                 atLineStart = false
                 continue
-            } else if c == 39 || c == 34 || c == 96 {
+            } else if byte == Byte.singleQuote || byte == Byte.doubleQuote || byte == Byte.backtick {
                 if !hasSQL { startLine = line }
-                quote = c
+                quote = byte
                 hasSQL = true
-            } else if c > 32 {
+            } else if byte > Byte.space {
                 if !hasSQL { startLine = line }
                 hasSQL = true
             }
-            if c == 10 {
+            if byte == Byte.newline {
                 line += 1
-                atLineStart = true } else if c != 13 { atLineStart = false
+                atLineStart = true
+            } else if byte != Byte.carriageReturn {
+                atLineStart = false
             }
             position += 1
         }
