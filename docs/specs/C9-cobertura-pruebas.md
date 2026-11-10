@@ -159,3 +159,45 @@ spec al cerrarlo; una prueba que no falla ante un error real no cubre nada.
 - La prueba del watcher de archivos puede ser inestable en CI. Si lo es, se aísla en un job aparte; no se
   borra.
 - Versionar fixtures del agente añade archivos al repositorio. Son chicos y hacen la suite reproducible.
+
+## Resuelto
+
+**2026-11-10**, commit `7086e7f`.
+
+La suite pasó de 65 a 97 pruebas, y de 57 a 89 que corren **sin** servidor MySQL ni sesión de ChatGPT.
+
+| Criterio | Cómo se verificó |
+|---|---|
+| 1 · sin `.build/mysql-test-port` corren pruebas de `MySQLTextCommand`, `FileTree` y `SyntaxStyler`, y las que no necesitan servidor pasan de 30 a 45 o más | 89 corren sin servidor: 14 de protocolo, 8 del explorador y 9 del resaltado son nuevas |
+| 2 · las pruebas nuevas no usan red ni servidor | ninguna abre un socket: los paquetes se arman en memoria y el explorador trabaja en directorios temporales |
+| 3 · `KrabzikTests/Fixtures` versionado y referenciado por ruta | `hostil.krabzik` (de C7) y un `README.md` que explica qué hay y qué no. Se leen con `#filePath` |
+| 4 · `.build/agent-fixture`, `.build/codex-schema` y `.build/probe-codex.py` ya no son necesarios | ya no lo eran: ninguna prueba los referencia. La prueba en vivo del agente construye su propio proyecto en un directorio temporal. `probe-codex.py` pasó a `scripts/` con una cabecera que dice qué es |
+| 5 · una regresión en `readSQLLength` hace fallar alguna prueba | comprobado: tratando el prefijo `253` como dos bytes, `testColumnNamesDecodeWithTwoAndThreeByteLengths` falla y las otras 13 siguen pasando |
+| 6 · las pruebas que ya existían pasan sin cambios | sí; las de `DatabaseTests` solo ganaron un comentario que las liga a su parche del vendoring (S7) |
+
+### Lo que encontraron las pruebas nuevas
+
+- **Una palabra clave en mayúsculas sale con el color de un tipo.** `SyntaxStyler` aplica sus reglas en
+  orden y cada una repinta, así que `\b[A-Z][A-Za-z0-9_]*\b` —pensada para nombres de tipo— gana sobre la
+  de palabras clave. En SQL, que por convención se escribe en mayúsculas, eso significa que `SELECT` no
+  sale con el color de palabra clave. Y en minúsculas no sale coloreada en absoluto, porque las palabras de
+  SQL están en la lista solo en mayúsculas y la expresión distingue mayúsculas. Las pruebas fijan el
+  comportamiento **actual**: cambiarlo es cambiar el tema del editor, que no es lo que cubre este spec.
+- **La llegada del evento del observador de archivos no se puede comprobar desde XCTest acá.** Con el
+  observador instalado y un archivo nuevo en la carpeta, el handler no corre: ni con `Task.sleep` ni
+  esperando 10 s con una `XCTNSPredicateExpectation`, que sí mueve el run loop. En la app funciona. La
+  prueba comprueba lo que sí es verificable —que el observador se instale al cargar cada carpeta— y lo deja
+  anotado.
+
+### Decisiones
+
+- **Los esquemas JSON del protocolo de Codex no se versionan.** Son 4,5 MB y ninguna prueba los usa: el
+  protocolo se ejercita con el servidor falso en Python de `AgentTests`. Versionarlos sería cargar el
+  repositorio con material que nadie comprueba. El README de `Fixtures/` dice de dónde salen.
+- **Los dos marcadores de `.build` se quedan donde están.** `mysql-test-port` y `codex-live-tests` no son
+  fixtures: son interruptores que el desarrollador crea para habilitar las pruebas que necesitan un
+  servidor o una sesión. Versionarlos sería activarlas siempre.
+- **El fin del conjunto de filas se arma como un paquete OK que empieza con `0xFE`.** Es lo que manda el
+  servidor con `CLIENT_DEPRECATE_EOF`, y es justamente la ambigüedad que el código documenta. La primera
+  versión de estas pruebas lo armaba con `0x00` y siete fallaban: el error estaba en las pruebas, no en el
+  decodificador.

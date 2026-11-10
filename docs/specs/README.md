@@ -58,7 +58,7 @@ Dos hallazgos de la auditoría se resolvieron durante esa ventana y los specs ya
 | [C6](C6-logging-y-errores.md) | Logging real y errores no silenciados | Media | **resuelto** |
 | [C7](C7-validacion-formato-krabzik.md) | Validar y acotar el formato `.krabzik` | Media | **resuelto** |
 | [C8](C8-pbxproj-sincronizado.md) | Garantizar que el `.pbxproj` generado esté al día | Media | **resuelto** |
-| [C9](C9-cobertura-pruebas.md) | Cerrar los huecos de cobertura que quedan | Media | pendiente |
+| [C9](C9-cobertura-pruebas.md) | Cerrar los huecos de cobertura que quedan | Media | **resuelto** |
 | [C10](C10-version-unica.md) | Una sola fuente de verdad para la versión | Baja | **resuelto** |
 | [C11](C11-rendimiento-editor.md) | Rendimiento del editor y arquitecturas del Release | Baja | **resuelto** |
 
@@ -117,6 +117,11 @@ bloqueantes corren.
 **C11 resuelto** el 2026-11-10 (commit `101c1ce`): la pulsación sobre un archivo de 5 MB pasó de 8,39 a
 0,83 ms. El diagnóstico del spec estaba equivocado —el costo no era copiar el texto, era reconstruir el
 índice de líneas— y el spec lo deja escrito con los números medidos.
+
+**C9 resuelto** el 2026-11-10 (commit `7086e7f`): la suite pasó de 65 a 97 pruebas y de 57 a 89 que corren
+sin servidor. `MySQLTextCommand`, `FileTree.Coordinator` y `SyntaxStyler` pasaron de cero pruebas a 31 entre
+los tres, y las dos cosas que encontraron —el color de las palabras clave en mayúsculas y el evento del
+observador que no llega en el host de pruebas— quedaron escritas en el spec.
 
 Al cerrar un spec, marcarlo en la tabla de este índice y dejar en el propio spec una sección `## Resuelto`
 con la fecha, los commits y los criterios verificados.
