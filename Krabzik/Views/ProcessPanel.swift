@@ -31,7 +31,7 @@ struct ProcessPanel: View {
                 .frame(width: 210).background(Theme.bar)
                 Rectangle().fill(Theme.border).frame(width: 1)
                 if let project = controller.selectedProject, let run = controller.runner.runs[project.id] {
-                    ConsoleView(run: run).id(project.id)
+                    ConsoleView(run: run, theme: AppSettings.shared.theme).id(project.id)
                 } else { Theme.background }
             }
         }
@@ -77,7 +77,7 @@ private struct ProcessRow: View {
             .accessibilityLabel(run.status.active ? "Detener \(project.name)" : "Iniciar \(project.name)")
         }
         .padding(.horizontal, 10).frame(height: 32)
-        .background(selected ? Theme.blue.opacity(0.16) : .clear, in: RoundedRectangle(cornerRadius: 5))
+        .background(selected ? Theme.accent.opacity(0.16) : .clear, in: RoundedRectangle(cornerRadius: 5))
         .help(run.status.label)
     }
 }

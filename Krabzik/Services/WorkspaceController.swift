@@ -20,6 +20,10 @@ import Observation
 /// Confinado al main actor. Ver docs/specs/C5-dividir-workspacecontroller.md.
 @MainActor @Observable
 final class WorkspaceController {
+    let settings: AppSettings
+    @ObservationIgnored let restoration: SessionRestoration
+    private(set) var isRestoringSession = false
+    @ObservationIgnored private(set) var requestedWorkspaceURL: URL?
     var selectedProjectID: UUID?
     var sidebarVisible = true
     var processesVisible = true
@@ -65,7 +69,9 @@ final class WorkspaceController {
         runnableProjects.first { $0.id == selectedProjectID } ?? runnableProjects.first
     }
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, settings: AppSettings? = nil) {
+        self.settings = settings ?? AppSettings(defaults: defaults)
+        restoration = SessionRestoration(defaults: defaults)
         trust = TrustStore(defaults: defaults)
         agent = AgentController(defaults: defaults)
         recents = RecentProjectsStore(defaults: defaults)
@@ -83,7 +89,22 @@ final class WorkspaceController {
         started = true
         if let index = arguments.firstIndex(of: "--workspace"), arguments.indices.contains(index + 1) {
             await openWorkspace(URL(fileURLWithPath: arguments[index + 1]))
+            return
         }
+        guard requestedWorkspaceURL == nil, settings.restoreLastState, let state = restoration.load() else { return }
+        isRestoringSession = true
+        await restoreSession(state)
+        isRestoringSession = false
+        if let requestedWorkspaceURL {
+            await openWorkspace(requestedWorkspaceURL)
+        }
+    }
+
+    /// Un archivo abierto desde Finder tiene prioridad sobre la sesión guardada.
+    func requestWorkspace(_ url: URL) {
+        requestedWorkspaceURL = url
+        guard !isRestoringSession else { return }
+        Task { await openWorkspace(url) }
     }
 
     // MARK: - Abrir, crear y cerrar un proyecto
@@ -128,6 +149,7 @@ final class WorkspaceController {
         commandProject = nil
         connections.install([])
         session.close()
+        restoration.clear()
     }
 
     /// Recablea los servicios para el proyecto que se acaba de adoptar. El orden importa:

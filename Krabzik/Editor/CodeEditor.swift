@@ -2,9 +2,16 @@ import AppKit
 import SwiftUI
 
 enum EditorPalette {
-    static let background = NSColor(calibratedRed: 0.105, green: 0.116, blue: 0.137, alpha: 1)
-    static let text = NSColor(calibratedRed: 0.83, green: 0.86, blue: 0.90, alpha: 1)
-    static let muted = NSColor(calibratedRed: 0.38, green: 0.42, blue: 0.49, alpha: 1)
+    @MainActor static var background: NSColor {
+        background(for: AppSettings.shared.theme)
+    }
+    static func background(for theme: AppTheme) -> NSColor {
+        theme == .graphite
+            ? NSColor(srgbRed: 0.122, green: 0.125, blue: 0.137, alpha: 1)
+            : NSColor(calibratedRed: 0.105, green: 0.116, blue: 0.137, alpha: 1)
+    }
+    static let text = NSColor(srgbRed: 0.89, green: 0.90, blue: 0.92, alpha: 1)
+    static let muted = NSColor(srgbRed: 0.53, green: 0.55, blue: 0.59, alpha: 1)
     static let blue = NSColor(calibratedRed: 0.49, green: 0.72, blue: 0.97, alpha: 1)
     static let purple = NSColor(calibratedRed: 0.76, green: 0.61, blue: 0.93, alpha: 1)
     static let green = NSColor(calibratedRed: 0.60, green: 0.77, blue: 0.65, alpha: 1)
@@ -13,6 +20,7 @@ enum EditorPalette {
 
 struct CodeEditor: NSViewRepresentable {
     let document: EditorDocument
+    let theme: AppTheme
 
     func makeNSView(context: Context) -> EditorSurface {
         if let existing = document.editorStorage as? EditorSurface { return existing }
@@ -21,7 +29,9 @@ struct CodeEditor: NSViewRepresentable {
         return surface
     }
 
-    func updateNSView(_ view: EditorSurface, context: Context) {}
+    func updateNSView(_ view: EditorSurface, context: Context) {
+        view.applyTheme(theme)
+    }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: EditorSurface, context: Context) -> CGSize? {
         CGSize(width: proposal.width ?? 700, height: proposal.height ?? 400)
@@ -63,6 +73,7 @@ private final class ObserverToken: @unchecked Sendable {
     private var editRevision = 0
     private var highlightedRevision = -1
     private var highlightedRange = NSRange(location: NSNotFound, length: 0)
+    private var appliedTheme: AppTheme?
 
     init(document: EditorDocument) {
         self.document = document
@@ -137,6 +148,14 @@ private final class ObserverToken: @unchecked Sendable {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func applyTheme(_ theme: AppTheme) {
+        guard appliedTheme != theme else { return }
+        appliedTheme = theme
+        scrollView.backgroundColor = EditorPalette.background(for: theme)
+        textView.backgroundColor = EditorPalette.background(for: theme)
+        gutter.needsDisplay = true
+    }
 
     func reloadFromDocument() {
         guard let document else { return }

@@ -1,13 +1,5 @@
 import SwiftUI
 
-enum Theme {
-    static let background = Color(nsColor: EditorPalette.background)
-    static let sidebar = Color(red: 0.135, green: 0.147, blue: 0.169)
-    static let bar = Color(red: 0.123, green: 0.135, blue: 0.157)
-    static let border = Color.white.opacity(0.07)
-    static let blue = Color(red: 0.47, green: 0.67, blue: 0.91)
-}
-
 struct WorkspaceView: View {
     @Bindable var controller: WorkspaceController
 
@@ -41,10 +33,17 @@ struct WorkspaceView: View {
             }
         }
         .background(Theme.background)
+        .tint(Theme.accent)
+        .disabled(controller.isRestoringSession)
         .preferredColorScheme(.dark)
-        .frame(minWidth: 900, minHeight: 580)
+        .frame(minWidth: controller.workspace == nil ? 760 : 900, minHeight: controller.workspace == nil ? 420 : 580)
         .toolbar {
             if controller.workspace != nil {
+                ToolbarItem(placement: .primaryAction) {
+                    SettingsLink { Image(systemName: "gearshape") }
+                        .help("Configuración")
+                        .accessibilityLabel("Configuración")
+                }
                 ToolbarItem(placement: .navigation) {
                     Button { Task { await controller.closeWorkspace() } } label: { Image(systemName: "house") }
                         .help("Cerrar proyecto y volver al inicio")
@@ -150,7 +149,7 @@ struct WorkspaceView: View {
             .padding(.horizontal, 15).padding(.top, 15).padding(.bottom, 9)
             if workspace.projects.isEmpty {
                 Button("Agregar carpeta…", action: controller.projects.addFolders)
-                    .buttonStyle(.plain).foregroundStyle(Theme.blue)
+                    .buttonStyle(.plain).foregroundStyle(Theme.accent)
                     .padding(.top, 16)
                 Spacer()
             } else {
@@ -193,7 +192,7 @@ struct WorkspaceView: View {
                     }.font(.system(size: 11)).padding(.horizontal, 18).padding(.vertical, 6)
                 }
                 if document.language == "SQL" { SQLToolbar(document: document, controller: controller) }
-                CodeEditor(document: document).id(document.id)
+                CodeEditor(document: document, theme: AppSettings.shared.theme).id(document.id)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 VStack(spacing: 14) {
@@ -263,7 +262,7 @@ private struct DocumentTab: View {
         }
         .padding(.horizontal, 14).frame(height: 39)
         .background(selected ? Theme.background : Theme.bar)
-        .overlay(alignment: .top) { if selected { Rectangle().fill(Theme.blue.opacity(0.8)).frame(height: 2) } }
+        .overlay(alignment: .top) { if selected { Rectangle().fill(Theme.accent.opacity(0.8)).frame(height: 2) } }
         .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 1) }
         .help(document.url.path)
     }

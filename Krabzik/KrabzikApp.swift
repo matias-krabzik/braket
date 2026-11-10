@@ -9,10 +9,10 @@ struct KrabzikApp: App {
     var body: some Scene {
         Window("Krabzik IDE", id: "workspace") {
             WorkspaceView(controller: controller)
-                .background(WindowBridge(delegate: delegate, projectURL: controller.workspaceURL))
+                .background(WindowBridge(delegate: delegate, projectURL: controller.workspaceURL, theme: controller.settings.theme))
                 .onAppear { delegate.controller = controller }
         }
-        .defaultSize(width: 900, height: 580)
+        .defaultSize(width: 760, height: 420)
         .windowToolbarStyle(.unifiedCompact)
         .commands {
             CommandGroup(replacing: .newItem) {
@@ -60,6 +60,9 @@ struct KrabzikApp: App {
                 }.keyboardShortcut("f").disabled(controller.selectedDocument == nil)
             }
         }
+        Settings {
+            SettingsView(settings: controller.settings)
+        }
     }
 }
 
@@ -99,7 +102,7 @@ struct KrabzikApp: App {
     private func openPendingProject() {
         guard let controller, let url = pendingProjectURL else { return }
         pendingProjectURL = nil
-        Task { await controller.openWorkspace(url) }
+        controller.requestWorkspace(url)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
@@ -108,9 +111,11 @@ struct KrabzikApp: App {
         guard let controller else { return .terminateNow }
         guard !checkingTermination else { return .terminateCancel }
         checkingTermination = true
+        let lastState = controller.captureSessionState()
         Task {
             let allowed = await controller.prepareToLeave()
             if allowed {
+                controller.saveSessionState(lastState)
                 controller.runner.terminateImmediately()
                 await controller.database.client.shutdown()
             }
@@ -137,10 +142,12 @@ struct KrabzikApp: App {
 private struct WindowBridge: NSViewRepresentable {
     let delegate: AppDelegate
     let projectURL: URL?
+    let theme: AppTheme
 
     func makeNSView(context: Context) -> WindowView { WindowView() }
 
     func updateNSView(_ view: WindowView, context: Context) {
+        view.window?.backgroundColor = EditorPalette.background
         view.appDelegate = delegate
         view.projectURL = projectURL
         view.scheduleLayout()
@@ -183,12 +190,12 @@ private struct WindowBridge: NSViewRepresentable {
             let available = screen.visibleFrame
             let chromeWidth = window.frame.width - window.contentLayoutRect.width
             let chromeHeight = window.frame.height - window.contentLayoutRect.height
-            let compact = NSSize(width: 900 + chromeWidth, height: 580 + chromeHeight)
+            let compact = NSSize(width: 760 + chromeWidth, height: 420 + chromeHeight)
             let size: NSSize
             if projectURL != nil {
                 // Use one scale for both axes to retain the screen's aspect ratio.
                 let display = screen.frame.size
-                let minimumScale = max(compact.width / display.width, compact.height / display.height)
+                let minimumScale = max((900 + chromeWidth) / display.width, (580 + chromeHeight) / display.height)
                 let maximumScale = min(available.width / display.width, available.height / display.height)
                 let scale = min(max(0.75, minimumScale), maximumScale)
                 size = NSSize(width: display.width * scale, height: display.height * scale)

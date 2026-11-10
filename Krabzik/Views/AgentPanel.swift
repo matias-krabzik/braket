@@ -75,7 +75,7 @@ struct AgentPanel: View {
                             Text("\(agent.changes.count) archivos modificados").font(.system(size: 10)).foregroundStyle(.secondary)
                             Spacer()
                             Button("Ver cambios") { showingDiff = true }.buttonStyle(.plain).font(.system(size: 11))
-                                .foregroundStyle(Theme.blue)
+                                .foregroundStyle(Theme.accent)
                         }
                         ScrollView {
                             VStack(alignment: .leading, spacing: 5) {
@@ -83,7 +83,7 @@ struct AgentPanel: View {
                                     Button { controller.bridge.openFile(change.path) } label: {
                                         HStack(spacing: 7) {
                                             Text(change.kind == "add" ? "+" : change.kind == "delete" ? "−" : "M")
-                                                .foregroundStyle(change.kind == "delete" ? Color.red : Theme.blue)
+                                                .foregroundStyle(change.kind == "delete" ? Color.red : Theme.accent)
                                                 .font(.system(size: 10, design: .monospaced))
                                             Text(controller.bridge.label(change.path)).lineLimit(1).truncationMode(.middle)
                                         }.font(.system(size: 11))
@@ -99,7 +99,8 @@ struct AgentPanel: View {
                 }
                 Divider()
                 VStack(spacing: 8) {
-                    AgentComposer(text: $agent.draft, enabled: !agent.isRunning, send: controller.bridge.send).frame(height: 82)
+                    AgentComposer(text: $agent.draft, enabled: !agent.isRunning, theme: AppSettings.shared.theme,
+                                  send: controller.bridge.send).frame(height: 82)
                         .overlay(alignment: .topLeading) {
                             if agent.draft
                                 .isEmpty {
@@ -197,7 +198,7 @@ private struct AgentMessageView: View {
     var body: some View {
         Text(message.text).font(.system(size: 12)).textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading).padding(message.isUser ? 10 : 0)
-            .background(message.isUser ? Theme.blue.opacity(0.09) : .clear, in: RoundedRectangle(cornerRadius: 7))
+            .background(message.isUser ? Theme.accent.opacity(0.09) : .clear, in: RoundedRectangle(cornerRadius: 7))
     }
 }
 
@@ -222,7 +223,7 @@ private struct AgentRequestView: View {
             Text(request.isQuestion ? "Codex pregunta" : "Codex pide permiso")
                 .font(.system(size: 11, weight: .semibold))
             Spacer()
-        }.foregroundStyle(Theme.blue)
+        }.foregroundStyle(Theme.accent)
     }
 
     private var questions: some View {
@@ -319,6 +320,7 @@ private struct AgentRequestView: View {
 private struct AgentComposer: NSViewRepresentable {
     @Binding var text: String
     let enabled: Bool
+    let theme: AppTheme
     let send: () -> Void
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSScrollView {
@@ -329,7 +331,7 @@ private struct AgentComposer: NSViewRepresentable {
         view.isAutomaticTextReplacementEnabled = false
         view.font = .systemFont(ofSize: 12)
         view.textColor = EditorPalette.text
-        view.backgroundColor = EditorPalette.background
+        view.backgroundColor = EditorPalette.background(for: theme)
         view.textContainerInset = NSSize(width: 1, height: 5)
         view.isVerticallyResizable = true
         view.isHorizontallyResizable = false
@@ -348,6 +350,7 @@ private struct AgentComposer: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.owner = self
         guard let view = scroll.documentView as? ComposerTextView else { return }
+        view.backgroundColor = EditorPalette.background(for: theme)
         if view.string != text { view.string = text }
         view.isEditable = enabled
         view.send = send

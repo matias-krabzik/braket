@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ConsoleView: NSViewRepresentable {
     let run: ProjectRun
+    let theme: AppTheme
 
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView()
@@ -13,7 +14,7 @@ struct ConsoleView: NSViewRepresentable {
         text.isEditable = false
         text.isSelectable = true
         text.isRichText = false
-        text.backgroundColor = EditorPalette.background
+        text.backgroundColor = EditorPalette.background(for: theme)
         text.textColor = EditorPalette.text
         text.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         text.textContainerInset = NSSize(width: 16, height: 12)
@@ -28,6 +29,7 @@ struct ConsoleView: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         let _ = run.revision
         guard let text = scroll.documentView as? NSTextView else { return }
+        text.backgroundColor = EditorPalette.background(for: theme)
         let wasAtBottom = scroll.contentView.bounds.maxY >= text.bounds.height - 35
         let newOutput = run.output
         let oldOutput = text.string

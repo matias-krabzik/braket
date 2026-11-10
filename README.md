@@ -25,6 +25,19 @@ El archivo `.icon` está integrado en los recursos del target y configurado como
 
 Los SVG originales están en `Design/Icon/Source/`; para actualizar sus formas, usá **Image → Replace** en cada capa. `Design/Icon/Krabzik-Icon-Preview.png` es una exportación estática de referencia; el archivo editable es `Krabzik/AppIcon.icon`.
 
+## Configuración
+
+Abrí **Configuración** desde la parte inferior del lateral de inicio, el engranaje del editor o **⌘,**. Incluye:
+
+- **Tema:** Grafito, inspirado en el icono, o Azul noche. Se aplica al instante al inicio,
+  editor, paneles y consola; la elección se conserva al reiniciar.
+- **Abrir último estado:** recupera el proyecto, el orden de las pestañas, la pestaña y el
+  subproyecto seleccionados, y la visibilidad del explorador y los procesos. Está desactivado
+  por defecto. El estado se guarda al confirmar la salida de la app; cerrar el proyecto
+  vuelve al inicio y borra esa sesión. Los procesos, consultas SQL y tareas de Codex no se
+  vuelven a ejecutar. Abrir un archivo `.krabzik` explícitamente tiene prioridad sobre la
+  sesión guardada. Los archivos que ya no estén disponibles se omiten con un aviso.
+
 ## Codex con tu suscripción
 
 El botón **✦** de la barra superior abre el panel **Codex** (también ⌥⌘A). El IDE detecta Codex CLI o el ejecutable incluido en ChatGPT para Mac. Usa el protocolo oficial [Codex App Server](https://learn.chatgpt.com/docs/app-server) y reutiliza su sesión de ChatGPT. Si no hay sesión, **Iniciar sesión con ChatGPT** abre el flujo oficial en el navegador. Krabzik no lee ni copia los tokens de autenticación y no requiere una API key; el uso consume los límites de Codex de tu plan.

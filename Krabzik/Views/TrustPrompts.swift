@@ -87,7 +87,7 @@ extension WorkspaceController {
     /// engancha: ver el comentario de `confirmTrust` en `WorkspaceController` y el de
     /// `WorkspaceSession`, que explica por qué los diálogos viven en la sesión.
     @MainActor static func forApp() -> WorkspaceController {
-        let controller = WorkspaceController()
+        let controller = WorkspaceController(settings: .shared)
         controller.confirmTrust = TrustPrompts.ask
         controller.projects.confirmCommand = TrustPrompts.askCommand
         controller.session.dialogs = .real

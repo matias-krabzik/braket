@@ -97,7 +97,7 @@ private struct DatabaseRow: View {
                                                                                                                                  }
                 }
                 .font(.system(size: 12)).padding(.horizontal, 10).frame(height: 30)
-                .background(selected ? Theme.blue.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 5))
+                .background(selected ? Theme.accent.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 5))
                 .contentShape(Rectangle())
             }.buttonStyle(.plain).help(connection.destination)
             if let error = state.error {
@@ -284,7 +284,7 @@ struct SQLResultsPanel: View {
             }.padding(.horizontal, 15).frame(height: 32).background(Theme.bar)
             Rectangle().fill(Theme.border).frame(height: 1)
             if let result = execution.selectedResult {
-                if !result.columns.isEmpty { SQLResultTable(result: result) }
+                if !result.columns.isEmpty { SQLResultTable(result: result, theme: AppSettings.shared.theme) }
                 else {
                     Text(result.error ?? "\(result.affectedRows) filas afectadas")
                         .font(.system(size: 12, design: .monospaced))
@@ -314,6 +314,7 @@ struct SQLResultsPanel: View {
 
 private struct SQLResultTable: NSViewRepresentable {
     let result: SQLResult
+    let theme: AppTheme
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -322,7 +323,7 @@ private struct SQLResultTable: NSViewRepresentable {
         scroll.hasHorizontalScroller = true
         scroll.autohidesScrollers = true
         let table = NSTableView()
-        table.backgroundColor = EditorPalette.background
+        table.backgroundColor = EditorPalette.background(for: theme)
         table.style = .plain
         table.rowHeight = 25
         table.intercellSpacing = NSSize(width: 12, height: 0)
@@ -337,7 +338,9 @@ private struct SQLResultTable: NSViewRepresentable {
     }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
-        guard let table = scroll.documentView as? NSTableView, context.coordinator.result?.id != result.id else { return }
+        guard let table = scroll.documentView as? NSTableView else { return }
+        table.backgroundColor = EditorPalette.background(for: theme)
+        guard context.coordinator.result?.id != result.id else { return }
         context.coordinator.result = result
         for column in table.tableColumns { table.removeTableColumn(column) }
         for (index, name) in result.columns.enumerated() {
