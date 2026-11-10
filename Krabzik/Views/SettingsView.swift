@@ -2,8 +2,29 @@ import SwiftUI
 
 struct SettingsView: View {
     @Bindable var settings: AppSettings
+    let controller: WorkspaceController
 
     var body: some View {
+        TabView {
+            general.tabItem { Label("General", systemImage: "gearshape") }
+            Group {
+                if let workspace = controller.workspace, let url = controller.workspaceURL {
+                    ProjectSettingsView(controller: controller, workspace: workspace, url: url).id(url)
+                } else {
+                    ContentUnavailableView("No hay un proyecto abierto", systemImage: "folder",
+                                           description: Text("Abrí un proyecto para editar su configuración."))
+                }
+            }
+            .tabItem { Label("Proyecto", systemImage: "folder") }
+        }
+        .padding(12)
+        .frame(width: 580, height: 620)
+        .background(Theme.background)
+        .tint(Theme.accent)
+        .preferredColorScheme(.dark)
+    }
+
+    private var general: some View {
         Form {
             Section("Apariencia") {
                 Picker("Tema", selection: $settings.theme) {
@@ -23,7 +44,6 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
         .padding(12)
-        .frame(width: 480, height: 320)
         .background(Theme.background)
         .tint(Theme.accent)
         .preferredColorScheme(.dark)

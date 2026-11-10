@@ -18,7 +18,7 @@ struct KrabzikApp: App {
             CommandGroup(replacing: .newItem) {
                 Button("Nuevo proyecto…", action: controller.createWorkspace).keyboardShortcut("n", modifiers: [.command, .shift])
                 Button("Abrir proyecto…", action: controller.chooseWorkspace).keyboardShortcut("o")
-                Button("Cerrar proyecto y volver al inicio") { Task { await controller.closeWorkspace() } }
+                Button("Cerrar proyecto") { controller.requestCloseWorkspace() }
                     .keyboardShortcut("w", modifiers: [.command, .shift])
                     .disabled(controller.workspace == nil || controller.isSwitchingWorkspace)
                 Divider()
@@ -61,7 +61,7 @@ struct KrabzikApp: App {
             }
         }
         Settings {
-            SettingsView(settings: controller.settings)
+            SettingsView(settings: controller.settings, controller: controller)
         }
     }
 }
@@ -130,7 +130,7 @@ struct KrabzikApp: App {
         if let controller {
             guard !controller.isSwitchingWorkspace else { return false }
             if controller.workspace != nil {
-                Task { await controller.closeWorkspace() }
+                controller.requestCloseWorkspace()
                 return false
             }
         }

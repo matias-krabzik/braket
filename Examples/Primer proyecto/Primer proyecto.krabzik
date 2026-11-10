@@ -1,27 +1,37 @@
 {
-  "version": 1,
-  "name": "Primer proyecto",
-  "projects": [
+  "connections" : [
+
+  ],
+  "iconStyle" : {
+    "glass" : true,
+    "hex" : "8863D7"
+  },
+  "name" : "Primer proyecto",
+  "projects" : [
     {
-      "id": "F3B7393B-E2E2-47BB-A218-2FB51A930001",
-      "name": "api",
-      "path": "api",
-      "kind": "PHP",
-      "command": "php -S 127.0.0.1:18765"
+      "command" : "php -S 127.0.0.1:18765",
+      "id" : "F3B7393B-E2E2-47BB-A218-2FB51A930001",
+      "kind" : "PHP",
+      "name" : "api",
+      "path" : "api"
     },
     {
-      "id": "F3B7393B-E2E2-47BB-A218-2FB51A930002",
-      "name": "web",
-      "path": "web",
-      "kind": "Node",
-      "command": "npm run dev"
+      "command" : "npm run dev",
+      "id" : "F3B7393B-E2E2-47BB-A218-2FB51A930002",
+      "kind" : "Node",
+      "name" : "web",
+      "path" : "web"
     },
     {
-      "id": "F3B7393B-E2E2-47BB-A218-2FB51A930003",
-      "name": "sql",
-      "path": "sql",
-      "kind": "Archivos",
-      "command": ""
+      "command" : "",
+      "id" : "F3B7393B-E2E2-47BB-A218-2FB51A930003",
+      "kind" : "Archivos",
+      "name" : "sql",
+      "path" : "sql"
     }
-  ]
+  ],
+  "scripts" : [
+
+  ],
+  "version" : 1
 }

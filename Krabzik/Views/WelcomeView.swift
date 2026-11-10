@@ -146,18 +146,16 @@ private struct RecentProjectRow: View {
     let open: () -> Void
     let forget: () -> Void
     @State private var isHovered = false
+    @State private var model: Workspace?
+    private var name: String { model?.name ?? url.deletingPathExtension().lastPathComponent }
 
     var body: some View {
         HStack(spacing: 0) {
             Button(action: open) {
                 HStack(spacing: 18) {
-                    Image(systemName: "folder")
-                        .font(.system(size: 23, weight: .light))
-                        .foregroundStyle(Theme.accent)
-                        .frame(width: 30, height: 38)
-                        .accessibilityHidden(true)
+                    ProjectIcon(name: name, style: model?.iconStyle ?? ProjectIconStyle(), size: 34)
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(url.deletingPathExtension().lastPathComponent)
+                        Text(name)
                             .font(.system(size: 15, weight: .medium)).lineLimit(1).truncationMode(.middle)
                         Text((url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath)
                             .font(.system(size: 12)).foregroundStyle(.secondary)
@@ -170,7 +168,7 @@ private struct RecentProjectRow: View {
             }
             .buttonStyle(.plain)
             .help(url.path)
-            .accessibilityLabel("Abrir \(url.deletingPathExtension().lastPathComponent)")
+            .accessibilityLabel("Abrir \(name)")
             .accessibilityValue(url.path)
             Button(action: forget) {
                 Image(systemName: "xmark")
@@ -182,11 +180,14 @@ private struct RecentProjectRow: View {
             .buttonStyle(.borderless)
             .padding(.trailing, 8)
             .help("Quitar de recientes. Los archivos se conservan.")
-            .accessibilityLabel("Quitar \(url.deletingPathExtension().lastPathComponent) de recientes")
+            .accessibilityLabel("Quitar \(name) de recientes")
             .accessibilityHint("Los archivos se conservan.")
         }
         .background(isHovered ? Theme.sidebar.opacity(0.6) : Color.clear)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
         .onHover { isHovered = $0 }
+        .task(id: url) {
+            model = try? await Task.detached(priority: .utility) { try Workspace.read(from: url) }.value
+        }
     }
 }

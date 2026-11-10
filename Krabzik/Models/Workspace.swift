@@ -132,6 +132,7 @@ struct Workspace: Codable, Equatable {
     var projects: [CodeProject] = []
     var connections: [DatabaseConnection] = []
     var scripts: [String] = []
+    var iconStyle = ProjectIconStyle()
 
     init(name: String, projects: [CodeProject] = [], connections: [DatabaseConnection] = []) {
         self.name = name
@@ -140,7 +141,7 @@ struct Workspace: Codable, Equatable {
     }
 
     /// Explícitas para que agregar una propiedad no cambie el formato sin querer.
-    private enum CodingKeys: String, CodingKey { case version, name, projects, connections, scripts }
+    private enum CodingKeys: String, CodingKey { case version, name, projects, connections, scripts, iconStyle }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -148,6 +149,7 @@ struct Workspace: Codable, Equatable {
         name = try values.decode(String.self, forKey: .name)
         projects = try values.decodeIfPresent([CodeProject].self, forKey: .projects) ?? []
         connections = try values.decodeIfPresent([DatabaseConnection].self, forKey: .connections) ?? []
+        iconStyle = try values.decodeIfPresent(ProjectIconStyle.self, forKey: .iconStyle) ?? ProjectIconStyle()
         scripts = try values.decodeIfPresent([String].self, forKey: .scripts) ?? []
         scripts = Array(NSOrderedSet(array: scripts)) as? [String] ?? []
     }
@@ -170,7 +172,8 @@ struct Workspace: Codable, Equatable {
         return value
     }
 
-    private func checkFormat() throws {
+    func checkFormat() throws {
+        guard iconStyle.isValid else { throw WorkspaceError.invalidText("el color del icono") }
         try checkCounts()
         try checkLengths()
         try checkText()

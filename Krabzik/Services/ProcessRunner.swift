@@ -29,8 +29,11 @@ final class ProjectRun: Identifiable {
     var status: RunStatus = .idle
     var output = ""
     var revision = 0
+    @ObservationIgnored var workspaceURL: URL?
+    @ObservationIgnored var name = ""
     @ObservationIgnored var processID: pid_t = 0
     @ObservationIgnored var generation = UUID()
+    @ObservationIgnored var stopGeneration = UUID()
 
     init(id: UUID) { self.id = id }
 
@@ -128,6 +131,8 @@ final class ProcessRunner {
             run.append("\nNo se encuentra \(directory.path)\n")
             return
         }
+        run.workspaceURL = workspaceURL.standardizedFileURL
+        run.name = project.name
         run.generation = UUID()
         let generation = run.generation
         run.output = "$ \(project.command)\n"
@@ -200,6 +205,8 @@ final class ProcessRunner {
             Darwin.close(readFD)
             var status: Int32 = 0
             while waitpid(spawnedPID, &status, 0) == -1 && errno == EINTR {}
+            // Wait for descendants that redirected their output too.
+            while kill(-spawnedPID, 0) == 0 { usleep(100_000) }
             let exitCode: Int32 = (status & 0x7f) == 0 ? (status >> 8) & 0xff : 128 + (status & 0x7f)
             DispatchQueue.main.async {
                 batch.flush()
@@ -212,16 +219,26 @@ final class ProcessRunner {
         }
     }
 
-    func stop(_ id: UUID) {
+    func stop(_ id: UUID, automaticallyForce: Bool = true) {
         guard let run = runs[id], run.status.active, run.processID > 0 else { return }
         run.status = .stopping
         let pid = run.processID
         let generation = run.generation
+        run.stopGeneration = UUID()
+        let stopGeneration = run.stopGeneration
         kill(-pid, SIGTERM)
+        guard automaticallyForce else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak run] in
-            guard let run, run.generation == generation, run.processID == pid else { return }
+            guard let run, run.generation == generation, run.processID == pid,
+                  run.stopGeneration == stopGeneration else { return }
             kill(-pid, SIGKILL)
         }
+    }
+
+    func forceStop(_ id: UUID) {
+        guard let run = runs[id], run.status.active, run.processID > 0 else { return }
+        run.status = .stopping
+        kill(-run.processID, SIGKILL)
     }
 
     func stopAll() { for id in runs.keys { stop(id) } }

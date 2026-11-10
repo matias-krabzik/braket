@@ -31,12 +31,25 @@ Abrí **Configuración** desde la parte inferior del lateral de inicio, el engra
 
 - **Tema:** Grafito, inspirado en el icono, o Azul noche. Se aplica al instante al inicio,
   editor, paneles y consola; la elección se conserva al reiniciar.
-- **Abrir último estado:** recupera el proyecto, el orden de las pestañas, la pestaña y el
+- **Abrir último estado:** recupera el proyecto, los proyectos abiertos en su orden manual, las pestañas y el
   subproyecto seleccionados, y la visibilidad del explorador y los procesos. Está desactivado
   por defecto. El estado se guarda al confirmar la salida de la app; cerrar el proyecto
   vuelve al inicio y borra esa sesión. Los procesos, consultas SQL y tareas de Codex no se
   vuelven a ejecutar. Abrir un archivo `.krabzik` explícitamente tiene prioridad sobre la
   sesión guardada. Los archivos que ya no estén disponibles se omiten con un aviso.
+
+La barra izquierda del editor muestra únicamente proyectos abiertos. Cada uno se puede cerrar
+con la × que aparece al pasar el mouse; al cerrar el último se vuelve al inicio.
+El cierre pide confirmación y muestra el estado de los procesos mientras se detienen.
+Los que sigan activos se pueden forzar con una confirmación adicional; también se puede
+dejar el proyecto abierto. El orden no cambia al seleccionar otro
+proyecto: arrastrá un icono sobre otro para reordenarlos. Al cambiar se conservan las pestañas,
+con los diálogos habituales para guardar cambios y detener procesos si hace falta.
+
+En **Configuración → Proyecto** podés editar el nombre, elegir un tono predefinido o
+personalizado y activar el efecto glass del icono. También permite agregar, editar y quitar
+subproyectos, y cambiar la ubicación del `.krabzik`. Este traslado conserva las carpetas y
+scripts en su ubicación original y rechaza sobrescribir otro proyecto.
 
 ## Codex con tu suscripción
 

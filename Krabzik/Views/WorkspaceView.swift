@@ -7,24 +7,28 @@ struct WorkspaceView: View {
         VStack(spacing: 0) {
             if let workspace = controller.workspace, let url = controller.workspaceURL {
                 if controller.isReadOnly { readOnlyBanner }
-                HSplitView {
-                    if controller.sidebarVisible {
-                        sidebar(workspace, url: url)
-                            .frame(minWidth: 210, idealWidth: 260, maxWidth: 310)
-                    }
-                    VSplitView {
-                        editor.frame(minWidth: 520, maxWidth: .infinity, minHeight: 240, maxHeight: .infinity)
-                        if let document = controller.selectedDocument, document.language == "SQL", controller.database.resultsVisible,
-                           document.sqlExecution.isRunning || document.sqlExecution.error != nil || !document.sqlExecution.results.isEmpty {
-                            SQLResultsPanel(execution: document.sqlExecution) { controller.database.resultsVisible = false }
-                                .frame(minHeight: 140, idealHeight: 220, maxHeight: 350)
-                        } else if controller.processesVisible && !controller.runnableProjects.isEmpty {
-                            ProcessPanel(controller: controller)
-                                .frame(minHeight: 110, idealHeight: 190, maxHeight: 240)
+                HStack(spacing: 0) {
+                    ProjectRail(controller: controller)
+                    HSplitView {
+                        if controller.sidebarVisible {
+                            sidebar(workspace, url: url)
+                                .frame(minWidth: 210, idealWidth: 260, maxWidth: 310)
                         }
-                    }
-                    if controller.agent.visible {
-                        AgentPanel(controller: controller).frame(minWidth: 300, idealWidth: 350, maxWidth: 460)
+                        VSplitView {
+                            editor.frame(minWidth: 520, maxWidth: .infinity, minHeight: 240, maxHeight: .infinity)
+                            if let document = controller.selectedDocument, document.language == "SQL", controller.database.resultsVisible,
+                               document.sqlExecution.isRunning || document.sqlExecution.error != nil || !document.sqlExecution.results
+                               .isEmpty {
+                                SQLResultsPanel(execution: document.sqlExecution) { controller.database.resultsVisible = false }
+                                    .frame(minHeight: 140, idealHeight: 220, maxHeight: 350)
+                            } else if controller.processesVisible && !controller.runnableProjects.isEmpty {
+                                ProcessPanel(controller: controller)
+                                    .frame(minHeight: 110, idealHeight: 190, maxHeight: 240)
+                            }
+                        }
+                        if controller.agent.visible {
+                            AgentPanel(controller: controller).frame(minWidth: 300, idealWidth: 350, maxWidth: 460)
+                        }
                     }
                 }
                 EditorStatusBar(document: controller.selectedDocument)
@@ -43,34 +47,6 @@ struct WorkspaceView: View {
                     SettingsLink { Image(systemName: "gearshape") }
                         .help("Configuración")
                         .accessibilityLabel("Configuración")
-                }
-                ToolbarItem(placement: .navigation) {
-                    Button { Task { await controller.closeWorkspace() } } label: { Image(systemName: "house") }
-                        .help("Cerrar proyecto y volver al inicio")
-                        .accessibilityLabel("Volver al inicio")
-                        .disabled(controller.isSwitchingWorkspace)
-                }
-                ToolbarItem(placement: .navigation) {
-                    Button { controller.sidebarVisible.toggle() } label: { Image(systemName: "sidebar.left") }
-                        .help("Mostrar explorador")
-                        .disabled(controller.workspace == nil)
-                }
-                ToolbarItem(placement: .navigation) {
-                    Menu {
-                        Button("Crear proyecto…", action: controller.createWorkspace)
-                        Button("Abrir proyecto…", action: controller.chooseWorkspace)
-                        if !controller.recentProjects.isEmpty {
-                            Divider()
-                            ForEach(controller.recentProjects, id: \.self) { url in
-                                Button(url.deletingPathExtension().lastPathComponent) { Task { await controller.openWorkspace(url) } }
-                            }
-                        }
-                    } label: {
-                        Text(controller.workspace?.name ?? "Proyectos").font(.system(size: 13, weight: .medium))
-                    }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
-                    .disabled(controller.isSwitchingWorkspace)
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button { controller.agent.visible.toggle() } label: { Image(systemName: "sparkles") }
@@ -92,6 +68,10 @@ struct WorkspaceView: View {
                         .disabled(controller.runnableProjects.isEmpty && controller.selectedDocument?.language != "SQL")
                 }
             }
+        }
+        .sheet(isPresented: Binding(get: { controller.closingProjectURL != nil },
+                                    set: { if !$0 { controller.closingProjectURL = nil } })) {
+            if let url = controller.closingProjectURL { ProjectCloseSheet(controller: controller, url: url) }
         }
         .sheet(item: $controller.commandProject) { project in
             CommandSheet(project: project) { controller.projects.update($0) }

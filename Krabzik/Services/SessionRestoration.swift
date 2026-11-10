@@ -4,6 +4,7 @@ import Foundation
 /// credenciales, conexiones abiertas ni procesos para ejecutar al iniciar.
 struct SavedWorkspaceState: Codable, Equatable {
     var version = 1
+    var openWorkspaceStates: [SavedWorkspaceState]?
     let workspaceURL: URL
     let openFiles: [URL]
     let selectedFile: URL?
@@ -44,6 +45,14 @@ final class SessionRestoration {
 
 extension WorkspaceController {
     func captureSessionState() -> SavedWorkspaceState? {
+        guard var state = captureCurrentWorkspaceState() else { return nil }
+        state.openWorkspaceStates = openWorkspaceURLs.compactMap { url in
+            url == workspaceURL ? captureCurrentWorkspaceState() : workspaceStates[url]
+        }
+        return state
+    }
+
+    func captureCurrentWorkspaceState() -> SavedWorkspaceState? {
         guard let workspaceURL else { return nil }
         return SavedWorkspaceState(workspaceURL: workspaceURL, openFiles: documents.map(\.url),
                                    selectedFile: selectedDocumentID, selectedProjectID: selectedProjectID,
@@ -55,21 +64,33 @@ extension WorkspaceController {
     }
 
     func restoreSession(_ state: SavedWorkspaceState) async {
+        for other in state.openWorkspaceStates ?? [] {
+            guard requestedWorkspaceURL == nil else { return }
+            await openWorkspace(other.workspaceURL)
+            if workspaceURL == other.workspaceURL.standardizedFileURL {
+                await restoreTabs(other, shouldContinue: { self.requestedWorkspaceURL == nil })
+            }
+        }
+        guard requestedWorkspaceURL == nil else { return }
         await openWorkspace(state.workspaceURL)
         guard workspaceURL == state.workspaceURL.standardizedFileURL, requestedWorkspaceURL == nil else { return }
+        await restoreTabs(state, shouldContinue: { self.requestedWorkspaceURL == nil })
+    }
+
+    func restoreTabs(_ state: SavedWorkspaceState, shouldContinue: @MainActor @escaping () -> Bool = { true }) async {
         var unavailable = 0
         for url in state.openFiles {
-            guard workspaceURL == state.workspaceURL.standardizedFileURL, requestedWorkspaceURL == nil else { return }
+            guard workspaceURL == state.workspaceURL.standardizedFileURL, shouldContinue() else { return }
             if isReadOnly, pathScope(url.path, relativeTo: state.workspaceURL) == .external { continue }
             do {
                 try await docs.open(url) {
-                    self.workspaceURL == state.workspaceURL.standardizedFileURL && self.requestedWorkspaceURL == nil
+                    self.workspaceURL == state.workspaceURL.standardizedFileURL && shouldContinue()
                 }
             } catch {
                 unavailable += 1
             }
         }
-        guard workspaceURL == state.workspaceURL.standardizedFileURL, requestedWorkspaceURL == nil else { return }
+        guard workspaceURL == state.workspaceURL.standardizedFileURL, shouldContinue() else { return }
         if let selected = state.selectedFile, docs.contains(selected) { selectedDocumentID = selected.standardizedFileURL }
         if let selected = state.selectedProjectID, workspace?.projects.contains(where: { $0.id == selected }) == true {
             selectedProjectID = selected

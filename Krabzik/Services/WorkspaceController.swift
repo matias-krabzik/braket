@@ -24,10 +24,14 @@ final class WorkspaceController {
     @ObservationIgnored let restoration: SessionRestoration
     private(set) var isRestoringSession = false
     @ObservationIgnored private(set) var requestedWorkspaceURL: URL?
+    private(set) var openWorkspaceURLs: [URL] = []
+    var openWorkspaceModels: [URL: Workspace] = [:]
+    @ObservationIgnored var workspaceStates: [URL: SavedWorkspaceState] = [:]
     var selectedProjectID: UUID?
     var sidebarVisible = true
     var processesVisible = true
     var commandProject: CodeProject?
+    var closingProjectURL: URL?
     let runner = ProcessRunner()
     let database = DatabaseController()
     let agent: AgentController
@@ -129,21 +133,46 @@ final class WorkspaceController {
 
     /// Se le pregunta por la confianza **antes** de molestar al usuario con lo que tiene
     /// abierto: si cancela ahí, su proyecto actual queda intacto.
-    func openWorkspace(_ url: URL) async {
+    func openWorkspace(_ url: URL, prepared: Bool = false) async {
         guard session.url != url.standardizedFileURL, session.beginSwitch() else { return }
         defer { session.endSwitch() }
         do {
             let project = try await Task.detached(priority: .userInitiated) { try Workspace.read(from: url) }.value
             guard let decided = session.decideTrust(for: project, at: url, ask: confirmTrust) else { return }
-            guard await prepareToLeave() else { return }
+            if !prepared { guard await prepareToLeave() else { return } }
             install(project, at: url, trust: decided)
+            if let state = workspaceStates[url.standardizedFileURL] { await restoreTabs(state) }
         } catch { errors.report(error) }
     }
 
-    func closeWorkspace() async {
+    func requestCloseWorkspace(_ url: URL? = nil) {
+        guard !isSwitchingWorkspace else { return }
+        closingProjectURL = url ?? workspaceURL
+    }
+
+    func closeWorkspace(_ requestedURL: URL? = nil, prepared: Bool = false) async {
+        guard !session.isSwitching, let closing = (requestedURL ?? workspaceURL)?.standardizedFileURL else { return }
+        guard openWorkspaceURLs.contains(closing) else { return }
+        if closing != workspaceURL {
+            openWorkspaceURLs.removeAll { $0 == closing }
+            workspaceStates.removeValue(forKey: closing)
+            openWorkspaceModels.removeValue(forKey: closing)
+            return
+        }
+        if let next = openWorkspaceURLs.first(where: { $0 != closing }) {
+            await openWorkspace(next, prepared: prepared)
+            guard workspaceURL == next else { return }
+            openWorkspaceURLs.removeAll { $0 == closing }
+            workspaceStates.removeValue(forKey: closing)
+            openWorkspaceModels.removeValue(forKey: closing)
+            return
+        }
         guard session.workspace != nil, session.beginSwitch() else { return }
         defer { session.endSwitch() }
-        guard await prepareToLeave() else { return }
+        if !prepared { guard await prepareToLeave() else { return } }
+        openWorkspaceURLs.removeAll { $0 == closing }
+        workspaceStates.removeValue(forKey: closing)
+        openWorkspaceModels.removeValue(forKey: closing)
         docs.closeAll()
         selectedProjectID = nil
         commandProject = nil
@@ -156,8 +185,15 @@ final class WorkspaceController {
     /// las pestañas del proyecto anterior se cierran antes de que la sesión cambie, así
     /// ninguna queda apuntando a un archivo de un proyecto que ya no está abierto.
     private func install(_ project: Workspace, at url: URL, trust decided: TrustStore.Trust) {
+        if let state = captureCurrentWorkspaceState() {
+            workspaceStates[state.workspaceURL] = state
+            openWorkspaceModels[state.workspaceURL] = workspace
+        }
+        let normalized = url.standardizedFileURL
+        if !openWorkspaceURLs.contains(normalized) { openWorkspaceURLs.append(normalized) }
         docs.closeAll()
         session.open(project, at: url, trust: decided)
+        openWorkspaceModels[normalized] = project
         connections.install(project.connections)
         bridge.reset(for: project, at: url, trust: decided)
         projects.warmUp(project.projects)
@@ -168,6 +204,27 @@ final class WorkspaceController {
             · conexiones \(project.connections.count, privacy: .public) \
             · \(decided == .trusted ? "confiable" : "solo lectura", privacy: .public)
             """)
+    }
+
+    func moveOpenWorkspace(_ url: URL, to target: URL) {
+        guard !isSwitchingWorkspace, let source = openWorkspaceURLs.firstIndex(of: url),
+              let destination = openWorkspaceURLs.firstIndex(of: target), source != destination else { return }
+        openWorkspaceURLs.remove(at: source)
+        openWorkspaceURLs.insert(url, at: destination)
+    }
+
+    func adoptRelocatedWorkspace(_ updated: Workspace, from old: URL, to url: URL) {
+        openWorkspaceURLs = openWorkspaceURLs.map { $0 == old ? url : $0 }
+        openWorkspaceModels.removeValue(forKey: old)
+        openWorkspaceModels[url] = updated
+        workspaceStates.removeValue(forKey: old)
+        session.open(updated, at: url, trust: .trusted)
+        connections.install(updated.connections)
+        bridge.reset(for: updated, at: url, trust: .trusted)
+        projects.warmUp(updated.projects)
+        workspaceStates[url] = captureCurrentWorkspaceState()
+        recents.forget(old)
+        recents.remember(url)
     }
 
     /// El orden en que se le pregunta al usuario antes de dejar lo que está abierto:
