@@ -4,7 +4,7 @@ import SwiftUI
 @main
 struct KrabzikApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-    @State private var controller = WorkspaceController()
+    @State private var controller = WorkspaceController.forApp()
 
     var body: some Scene {
         Window("Krabzik IDE", id: "workspace") {
@@ -34,7 +34,7 @@ struct KrabzikApp: App {
                 Button("Mostrar explorador") { controller.sidebarVisible.toggle() }.keyboardShortcut("1", modifiers: [.command, .option])
                 Button("Mostrar procesos") { controller.processesVisible.toggle() }.keyboardShortcut("j")
                 Button("Mostrar Codex") { controller.agent.visible.toggle() }.keyboardShortcut("a", modifiers: [.command, .option])
-                    .disabled(controller.workspace == nil)
+                    .disabled(controller.workspace == nil || controller.isReadOnly)
             }
             CommandMenu("Proyecto") {
                 Button("Iniciar", action: controller.startAll).keyboardShortcut("r").disabled(controller.runnableProjects.isEmpty)

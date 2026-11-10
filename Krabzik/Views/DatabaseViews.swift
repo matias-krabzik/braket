@@ -34,21 +34,33 @@ struct DatabaseSidebar: View {
                 Text("SQL").font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
                 Spacer()
                 Menu {
-                    Button("Nuevo script…") { controller.createFile(in: controller.workspaceURL?.deletingLastPathComponent()) }
+                    Button("Nuevo script…") {
+                        controller.createFile(in: controller.workspaceURL?.deletingLastPathComponent())
+                    }.disabled(controller.isReadOnly)
                     Button("Abrir script…", action: controller.importScripts)
                 } label: { Image(systemName: "plus").font(.system(size: 11)) }
                     .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                     .help("Agregar script SQL")
             }.padding(.horizontal, 15).padding(.top, 12).padding(.bottom, 4)
             ForEach(controller.workspace?.scripts ?? [], id: \.self) { path in
-                let url = controller.scriptURL(path)
-                Button { controller.openFile(url) } label: {
+                if let url = controller.scriptURL(path) {
+                    Button { controller.openFile(url) } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "doc").foregroundStyle(.secondary)
+                            Text(url.lastPathComponent).lineLimit(1)
+                            Spacer()
+                        }.font(.system(size: 12)).padding(.horizontal, 17).frame(height: 28)
+                            .contentShape(Rectangle())
+                    }.buttonStyle(.plain).help(url.path)
+                } else {
                     HStack(spacing: 8) {
-                        Image(systemName: "doc").foregroundStyle(.secondary)
-                        Text(url.lastPathComponent).lineLimit(1)
+                        Image(systemName: "doc").foregroundStyle(.tertiary)
+                        Text((path as NSString).lastPathComponent).lineLimit(1).foregroundStyle(.tertiary)
                         Spacer()
-                    }.font(.system(size: 12)).padding(.horizontal, 17).frame(height: 28).contentShape(Rectangle())
-                }.buttonStyle(.plain).help(url.path)
+                    }
+                    .font(.system(size: 12)).padding(.horizontal, 17).frame(height: 28)
+                    .help("Fuera de la carpeta del proyecto: no disponible en solo lectura.")
+                }
             }
         }.padding(.bottom, 12)
     }

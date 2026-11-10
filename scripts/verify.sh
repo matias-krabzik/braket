@@ -120,8 +120,12 @@ else
     info "sin .build/mysql-test-port: se saltan las 6 pruebas de MySQL real (ver README)"
   fi
   log=$(mktemp -t krabzik-verify)
+  # Tope por prueba: un diálogo modal que se cuele en una prueba cuelga la corrida
+  # indefinidamente. Con el tope falla en 2 minutos y dice cuál fue.
   if xcodebuild -project Krabzik.xcodeproj -scheme Krabzik -destination 'platform=macOS' \
-       -derivedDataPath .build -parallel-testing-enabled NO test > "$log" 2>&1; then
+       -derivedDataPath .build -parallel-testing-enabled NO \
+       -test-timeouts-enabled YES -default-test-execution-time-allowance 120 \
+       -maximum-test-execution-time-allowance 300 test > "$log" 2>&1; then
     ok "$(grep -E 'Executed [0-9]+ tests' "$log" | tail -1 | sed 's/^[[:space:]]*//')"
   else
     fail "las pruebas no pasaron; log en $log"

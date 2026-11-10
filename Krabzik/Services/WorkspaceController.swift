@@ -23,24 +23,52 @@ final class WorkspaceController {
     var openingFiles: Set<URL> = []
     let runner = ProcessRunner()
     let database = DatabaseController()
-    let agent = AgentController()
+    let agent: AgentController
+    @ObservationIgnored let trust: TrustStore
+    /// Confianza del proyecto abierto. En `.untrusted` el proyecto es solo lectura:
+    /// no se ejecuta nada ni se habilita el agente. Ver docs/specs/S1-proyecto-no-confiable.md.
+    private(set) var workspaceTrust: TrustStore.Trust = .trusted
+    /// Quién pregunta por la confianza. El valor por defecto **niega**: la interfaz es la que
+    /// inyecta el diálogo real, con `WorkspaceController.forApp()`. Así un entorno sin interfaz
+    /// —pruebas, CI— nunca queda esperando un modal, y si alguien olvida inyectarlo el proyecto
+    /// queda cerrado en vez de confiado.
+    @ObservationIgnored var confirmTrust: @MainActor (TrustPrompt) -> TrustDecision = { _ in .cancel }
+    @ObservationIgnored var confirmCommand: @MainActor (CommandPrompt) -> CommandDecision = { _ in .cancel }
     @ObservationIgnored private var started = false
     @ObservationIgnored private var pendingOpen: Set<URL> = []
     @ObservationIgnored private let defaults: UserDefaults
 
     var selectedDocument: EditorDocument? { documents.first { $0.id == selectedDocumentID } }
-    var runnableProjects: [CodeProject] { workspace?.projects.filter { !$0.command.isEmpty } ?? [] }
+    /// Vacío en solo lectura: así los botones ▶ y el menú Proyecto quedan deshabilitados
+    /// sin tener que repetir la condición en cada vista.
+    var runnableProjects: [CodeProject] {
+        guard workspaceTrust == .trusted else { return [] }
+        return workspace?.projects.filter { !$0.command.isEmpty } ?? []
+    }
+
+    /// Subproyectos que el explorador monta. En solo lectura se omiten los externos.
+    var mountedProjects: [CodeProject] {
+        guard let workspace, let workspaceURL else { return [] }
+        guard workspaceTrust == .untrusted else { return workspace.projects }
+        return workspace.projects.filter { $0.scope(relativeTo: workspaceURL) == .internalToProject }
+    }
+
+    var isReadOnly: Bool { workspace != nil && workspaceTrust == .untrusted }
     var selectedProject: CodeProject? {
         runnableProjects.first { $0.id == selectedProjectID } ?? runnableProjects.first
     }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        self.trust = TrustStore(defaults: defaults)
+        self.agent = AgentController(defaults: defaults)
         var seen: Set<URL> = []
         recentProjects = Array((defaults.stringArray(forKey: "recentProjects") ?? [])
             .map { URL(fileURLWithPath: $0).standardizedFileURL }
             .filter { seen.insert($0).inserted }.prefix(10))
         agent.onFilesChanged = { [weak self] scope in self?.refreshAgentFiles(scope) }
+        // Lo que el usuario ya venía usando se considera confiable, una sola vez.
+        trust.migrateIfNeeded(recentProjects: recentProjects)
     }
 
     func start(arguments: [String] = ProcessInfo.processInfo.arguments) async {
@@ -78,7 +106,8 @@ final class WorkspaceController {
             do {
                 let project = Workspace(name: url.deletingPathExtension().lastPathComponent)
                 try project.write(to: url)
-                install(project, at: url)
+                trust.markTrusted(url)
+                install(project, at: url, trust: .trusted)
             } catch { show(error) }
         }
     }
@@ -89,8 +118,18 @@ final class WorkspaceController {
         defer { isSwitchingWorkspace = false }
         do {
             let project = try await Task.detached(priority: .userInitiated) { try Workspace.read(from: url) }.value
+            var decided = trust.trust(for: url)
+            if decided == .untrusted {
+                switch confirmTrust(prompt(for: project, at: url)) {
+                case .cancel: return
+                case .readOnly: decided = .untrusted
+                case .trust:
+                    trust.markTrusted(url)
+                    decided = .trusted
+                }
+            }
             guard await prepareToLeave() else { return }
-            install(project, at: url)
+            install(project, at: url, trust: decided)
         } catch { show(error) }
     }
 
@@ -105,6 +144,7 @@ final class WorkspaceController {
         selectedProjectID = nil
         workspace = nil
         workspaceURL = nil
+        workspaceTrust = .trusted
         commandProject = nil
         database.editingConnection = nil
         database.install([])
@@ -116,17 +156,32 @@ final class WorkspaceController {
         defaults.set(recentProjects.map(\.path), forKey: "recentProjects")
     }
 
-    private func install(_ project: Workspace, at url: URL) {
+    /// Qué se le muestra al usuario antes de confiar: carpetas externas y comandos,
+    /// que es exactamente lo que puede hacer daño.
+    private func prompt(for project: Workspace, at url: URL) -> TrustPrompt {
+        let external = project.projects
+            .filter { $0.scope(relativeTo: url) == .external }
+            .map { $0.directory(relativeTo: url).path }
+        let commands = project.projects
+            .filter { !$0.command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .map { "\($0.name): \($0.command)" }
+        return TrustPrompt(name: project.name, path: url.path, externalFolders: external,
+                           commands: commands, connectionCount: project.connections.count)
+    }
+
+    private func install(_ project: Workspace, at url: URL, trust decided: TrustStore.Trust) {
         releaseEditors()
         documents.removeAll()
         selectedDocumentID = nil
         workspace = project
         workspaceURL = url.standardizedFileURL
+        workspaceTrust = decided
         database.install(project.connections)
         agent.clearConversation()
         agent.selectedProjectID = nil
         // Para que un repositorio no pueda aportar su propio ejecutable de Codex.
         agent.excludedRoots = project.projects.map { $0.directory(relativeTo: url) }
+        agent.visible = agent.visible && decided == .trusted
         agent.draft = ""
         for item in project.projects { _ = runner.state(for: item.id) }
         selectedProjectID = runnableProjects.first?.id
@@ -160,6 +215,11 @@ final class WorkspaceController {
                 let directory = project.directory(relativeTo: workspaceURL)
                 if !updated.projects.contains(where: { $0.directory(relativeTo: workspaceURL) == directory }) {
                     updated.projects.append(project)
+                    // La carpeta la eligió el usuario en el panel: su comando detectado
+                    // queda aprobado, para no pedirle confirmación de algo que pidió.
+                    if !project.command.isEmpty {
+                        trust.approve(command: project.command, project: project.id, workspaceURL: workspaceURL)
+                    }
                 }
             }
             persist(updated)
@@ -169,6 +229,10 @@ final class WorkspaceController {
     func updateProject(_ updated: CodeProject) {
         guard var project = workspace, let index = project.projects.firstIndex(where: { $0.id == updated.id }) else { return }
         project.projects[index] = updated
+        // Lo que el usuario acaba de escribir no hace falta volver a confirmárselo.
+        if let workspaceURL, !updated.command.isEmpty {
+            trust.approve(command: updated.command, project: updated.id, workspaceURL: workspaceURL)
+        }
         persist(project)
     }
 
@@ -232,9 +296,15 @@ final class WorkspaceController {
         database.execute(document, connection: connection)
     }
 
-    func scriptURL(_ path: String) -> URL {
+    /// `nil` cuando la ruta no se puede ofrecer: en solo lectura no se resuelven
+    /// rutas externas, que es por donde un `.krabzik` ajeno abriría archivos de cualquier parte.
+    func scriptURL(_ path: String) -> URL? {
+        guard let base = workspaceURL?.deletingLastPathComponent() else { return nil }
+        if workspaceTrust == .untrusted, pathScope(path, relativeTo: base.appendingPathComponent("x")) == .external {
+            return nil
+        }
         if path.hasPrefix("/") { return URL(fileURLWithPath: path) }
-        return (workspaceURL?.deletingLastPathComponent() ?? FileManager.default.temporaryDirectory).appendingPathComponent(path)
+        return base.appendingPathComponent(path)
     }
 
     func importScripts() {
@@ -377,12 +447,18 @@ final class WorkspaceController {
     }
 
     func sendToAgent() {
+        guard workspaceTrust == .trusted else {
+            agent.error = "El proyecto está en solo lectura. Confiá en él para trabajar con Codex."
+            return
+        }
         guard let workspace, let workspaceURL, !agent.isRunning, !isSwitchingWorkspace else { return }
         let prompt = agent.draft
         guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         Task {
             do {
-                let scope = try AgentScope.make(workspace: workspace, url: workspaceURL, projectID: agent.selectedProjectID)
+                let scope = try AgentScope.make(workspace: workspace, url: workspaceURL,
+                                                projectID: agent.selectedProjectID,
+                                                allowExternal: workspaceTrust == .trusted)
                 let dirty = documents.filter { $0.isDirty && scope.contains($0.url) }
                 if !dirty.isEmpty {
                     let alert = NSAlert()
@@ -427,7 +503,9 @@ final class WorkspaceController {
 
     func openAgentFile(_ path: String) {
         guard let workspace, let workspaceURL,
-              let scope = try? AgentScope.make(workspace: workspace, url: workspaceURL, projectID: agent.selectedProjectID) else { return }
+              let scope = try? AgentScope.make(workspace: workspace, url: workspaceURL,
+                                               projectID: agent.selectedProjectID,
+                                               allowExternal: workspaceTrust == .trusted) else { return }
         let url = path.hasPrefix("/") ? URL(fileURLWithPath: path) : scope.cwd.appendingPathComponent(path)
         guard scope.contains(url) else { agent.error = "El archivo no pertenece a los subproyectos seleccionados."; return }
         openFile(url)
@@ -444,7 +522,9 @@ final class WorkspaceController {
 
     func startAll() {
         guard let workspaceURL else { return }
-        for project in runnableProjects { runner.start(project, workspaceURL: workspaceURL) }
+        for project in runnableProjects where allowedToRun(project, workspaceURL: workspaceURL) {
+            runner.start(project, workspaceURL: workspaceURL)
+        }
         processesVisible = true
     }
 
@@ -452,9 +532,45 @@ final class WorkspaceController {
         guard let workspaceURL else { return }
         selectedProjectID = project.id
         let state = runner.state(for: project.id)
-        if state.status.active { runner.stop(project.id) }
-        else { runner.start(project, workspaceURL: workspaceURL) }
+        if state.status.active {
+            runner.stop(project.id)
+        } else {
+            guard allowedToRun(project, workspaceURL: workspaceURL) else { return }
+            runner.start(project, workspaceURL: workspaceURL)
+        }
         processesVisible = true
+    }
+
+    /// La puerta vive acá, no en `ProcessRunner`: el controlador es quien conoce el
+    /// proyecto y su confianza. Un comando se confirma la primera vez, y de nuevo si
+    /// cambia, porque la aprobación se guarda por hash del comando.
+    private func allowedToRun(_ project: CodeProject, workspaceURL: URL) -> Bool {
+        guard workspaceTrust == .trusted else {
+            errorMessage = "El proyecto está en solo lectura. Confiá en él para ejecutar procesos."
+            return false
+        }
+        if trust.isApproved(command: project.command, project: project.id, workspaceURL: workspaceURL) {
+            return true
+        }
+        let directory = project.directory(relativeTo: workspaceURL)
+        switch confirmCommand(CommandPrompt(project: project.name, command: project.command,
+                                            directory: directory.path)) {
+        case .cancel:
+            return false
+        case .once:
+            return true
+        case .always:
+            trust.approve(command: project.command, project: project.id, workspaceURL: workspaceURL)
+            return true
+        }
+    }
+
+    /// Confiar en el proyecto abierto desde la barra de solo lectura.
+    func trustCurrentWorkspace() {
+        guard let workspaceURL, workspaceTrust == .untrusted else { return }
+        trust.markTrusted(workspaceURL)
+        workspaceTrust = .trusted
+        treeRevision += 1
     }
 
     /// Suelta las vistas nativas antes de descartar los documentos: el `deinit` de

@@ -14,6 +14,7 @@ struct WorkspaceView: View {
     var body: some View {
         VStack(spacing: 0) {
             if let workspace = controller.workspace, let url = controller.workspaceURL {
+                if controller.isReadOnly { readOnlyBanner }
                 HSplitView {
                     if controller.sidebarVisible {
                         sidebar(workspace, url: url)
@@ -75,6 +76,7 @@ struct WorkspaceView: View {
                 ToolbarItem(placement: .primaryAction) {
                     Button { controller.agent.visible.toggle() } label: { Image(systemName: "sparkles") }
                         .help("Mostrar Codex").accessibilityLabel("Mostrar Codex")
+                        .disabled(controller.isReadOnly)
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button(action: controller.startAll) { Image(systemName: "play.fill") }
@@ -101,6 +103,24 @@ struct WorkspaceView: View {
             Button("Aceptar") { controller.errorMessage = nil }
         } message: { Text(controller.errorMessage ?? "") }
         .task { await controller.start() }
+    }
+
+    /// Barra persistente: en solo lectura el usuario tiene que saber por qué no puede
+    /// ejecutar nada, y poder confiar en el proyecto desde ahí.
+    private var readOnlyBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "lock").font(.system(size: 11))
+            Text("Proyecto no confiable · solo lectura")
+                .font(.system(size: 11, weight: .medium))
+            Text("No se ejecutan procesos ni se habilita Codex.")
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+            Spacer()
+            Button("Confiar") { controller.trustCurrentWorkspace() }
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 16).frame(height: 32)
+        .background(Color.orange.opacity(0.12))
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
     }
 
     private func sidebar(_ workspace: Workspace, url: URL) -> some View {

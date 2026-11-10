@@ -81,7 +81,8 @@ struct FileTree: NSViewRepresentable {
             lastURL = url
             if !sameWorkspace { generation = UUID() }
             let previous = sameWorkspace ? Dictionary(uniqueKeysWithValues: roots.map { ($0.url, $0) }) : [:]
-            roots = workspace.projects.map { project in
+            // En solo lectura las carpetas externas no se montan (S1).
+            roots = controller.mountedProjects.map { project in
                 let directory = project.directory(relativeTo: url)
                 if let node = previous[directory], node.project == project { return node }
                 return FileNode(url: directory, isDirectory: true, project: project)

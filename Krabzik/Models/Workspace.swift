@@ -31,12 +31,35 @@ enum ProjectKind: String, Codable, CaseIterable {
     }
 }
 
+/// Dónde queda una ruta del `.krabzik` respecto del propio archivo. Las externas no
+/// se rechazan —los proyectos legítimos del usuario suelen tener carpetas afuera—
+/// pero no se confía en ellas hasta que el usuario las vea.
+enum PathScope: Equatable {
+    case internalToProject
+    case external
+}
+
+/// Clasifica una ruta relativa o absoluta respecto del directorio del `.krabzik`.
+/// Resuelve symlinks: uno que apunta afuera cuenta como externo.
+func pathScope(_ path: String, relativeTo workspaceURL: URL) -> PathScope {
+    let base = workspaceURL.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL
+    let target = (path.hasPrefix("/") ? URL(fileURLWithPath: path)
+                                      : base.appendingPathComponent(path))
+        .resolvingSymlinksInPath().standardizedFileURL
+    if target.path == base.path { return .internalToProject }
+    return target.path.hasPrefix(base.path + "/") ? .internalToProject : .external
+}
+
 struct CodeProject: Identifiable, Codable, Equatable {
     var id: UUID = UUID()
     var name: String
     var path: String
     var kind: ProjectKind
     var command: String
+
+    func scope(relativeTo workspaceURL: URL) -> PathScope {
+        pathScope(path, relativeTo: workspaceURL)
+    }
 
     func directory(relativeTo workspaceURL: URL) -> URL {
         if path.hasPrefix("/") { return URL(fileURLWithPath: path).standardizedFileURL }

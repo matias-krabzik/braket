@@ -128,8 +128,17 @@ struct AgentScope: Equatable, Sendable {
         let path = resolved.standardizedFileURL.path
         return roots.contains { path == $0.path || path.hasPrefix($0.path + "/") }
     }
-    static func make(workspace: Workspace, url: URL, projectID: UUID?) throws -> AgentScope {
-        let projects = workspace.projects.filter { projectID == nil || $0.id == projectID }
+    /// `allowExternal: false` descarta las carpetas de fuera del proyecto: así
+    /// `writableRoots` nunca incluye una ruta que el usuario no aprobó viéndola.
+    static func make(workspace: Workspace, url: URL, projectID: UUID?,
+                     allowExternal: Bool = true) throws -> AgentScope {
+        var projects = workspace.projects.filter { projectID == nil || $0.id == projectID }
+        if !allowExternal {
+            projects = projects.filter { $0.scope(relativeTo: url) == .internalToProject }
+            guard !projects.isEmpty else {
+                throw AgentFailure("Confiá en el proyecto para que Codex pueda trabajar en sus carpetas.")
+            }
+        }
         guard !projects.isEmpty else { throw AgentFailure("Agregá un subproyecto para trabajar con Codex.") }
         let roots = projects.map { $0.directory(relativeTo: url).resolvingSymlinksInPath().standardizedFileURL }
         for root in roots {
