@@ -101,10 +101,22 @@ struct WorkspaceView: View {
                              set: { controller.database.editingConnection = $0 })) { connection in
             ConnectionSheet(connection: connection, controller: controller)
         }
+        // Muestra el primero de la cola, no el último: el primero suele ser la causa y
+        // el resto la consecuencia. «Aceptar» pasa al siguiente si hay más.
         .alert("No se pudo completar",
-               isPresented: Binding(get: { controller.errorMessage != nil }, set: { if !$0 { controller.errorMessage = nil } })) {
-            Button("Aceptar") { controller.errorMessage = nil }
-        } message: { Text(controller.errorMessage ?? "") }
+               isPresented: Binding(get: { controller.errors.current != nil },
+                                    set: { if !$0 { controller.errors.dismissFirst() } })) {
+            Button(controller.errors.pending == 0 ? "Aceptar" : "Siguiente") {
+                controller.errors.dismissFirst()
+            }
+            if controller.errors.pending > 0 {
+                Button("Descartar todos", role: .cancel) { controller.errors.dismissAll() }
+            }
+        } message: {
+            let pendientes = controller.errors.pending
+            Text((controller.errors.current?.message ?? "")
+                + (pendientes == 0 ? "" : "\n\n(y \(pendientes) más)"))
+        }
         .task { await controller.start() }
     }
 

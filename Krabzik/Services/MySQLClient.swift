@@ -265,12 +265,9 @@ actor MySQLClient {
         }
     }
 
-    nonisolated static func message(_ error: Error) -> String {
-        if let error = error as? DatabaseFailure { return error.message }
-        if error is CancellationError { return "Ejecución cancelada. La conexión se cerró." }
-        if let error = error as? MySQLError { return error.description }
-        return error.localizedDescription
-    }
+    /// Se conserva como nombre porque lo usan las vistas de base de datos, pero la regla
+    /// está en un solo lugar: `AppError.describe(_:)`.
+    nonisolated static func message(_ error: Error) -> String { AppError.describe(error) }
 
     nonisolated private static func useDatabase(in sql: String) -> String? {
         let pattern = #"(?is)^\s*(?:/\*.*?\*/\s*|--[^\n]*\n\s*|#[^\n]*\n\s*)*USE\s+(?:`((?:``|[^`])+)`|([\p{L}\p{N}_$]+))\s*$"#

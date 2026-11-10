@@ -150,7 +150,7 @@ final class FileTreeTests: XCTestCase {
         _ = coordinator.outlineView(NSOutlineView(), shouldExpandItem: node)
         try await until({ node.children != nil }, 5, "el intento de carga")
         XCTAssertEqual(node.children?.count, 0)
-        XCTAssertNotNil(host.errorMessage, "el error tiene que llegar a la interfaz")
+        XCTAssertNotNil(host.errors.current, "el error tiene que llegar a la interfaz")
     }
 
     func testChangingWorkspaceInvalidatesLoadsInFlight() async throws {

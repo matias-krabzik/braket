@@ -390,7 +390,7 @@ final class DatabaseTests: XCTestCase {
         XCTAssertEqual(try CredentialStore.read(for: vieja), "",
                        "la credencial del extremo anterior no puede quedar en el llavero")
         XCTAssertEqual(try CredentialStore.read(for: nueva), "secreto-de-prueba")
-        XCTAssertNil(controller.errorMessage)
+        XCTAssertNil(controller.errors.current)
     }
 
     func testCredentialsStayBoundToEndpointAndTLS() throws {

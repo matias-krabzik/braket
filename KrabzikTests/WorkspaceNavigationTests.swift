@@ -285,15 +285,15 @@ final class WorkspaceNavigationTests: XCTestCase {
 
         await controller.openWorkspace(missing)
         XCTAssertNil(controller.workspace)
-        XCTAssertNotNil(controller.errorMessage)
+        XCTAssertNotNil(controller.errors.current)
         XCTAssertEqual(controller.recentProjects, [missing])
         XCTAssertFalse(controller.isSwitchingWorkspace)
 
         await controller.openWorkspace(url)
-        controller.errorMessage = nil
+        controller.errors.dismissAll()
         await controller.openWorkspace(missing)
         XCTAssertEqual(controller.workspaceURL, url)
-        XCTAssertNotNil(controller.errorMessage)
+        XCTAssertNotNil(controller.errors.current)
         XCTAssertEqual(controller.recentProjects, [url, missing])
     }
 }

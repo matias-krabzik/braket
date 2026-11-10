@@ -27,7 +27,6 @@ final class WorkspaceController {
     private(set) var isSwitchingWorkspace = false
     var sidebarVisible = true
     var processesVisible = true
-    var errorMessage: String?
     var commandProject: CodeProject?
     var treeRevision = 0
     var openingFiles: Set<URL> = []
@@ -36,6 +35,7 @@ final class WorkspaceController {
     let agent: AgentController
     @ObservationIgnored let trust: TrustStore
     @ObservationIgnored let recents: RecentProjectsStore
+    @ObservationIgnored let errors = ErrorCenter()
     /// Confianza del proyecto abierto. En `.untrusted` el proyecto es solo lectura:
     /// no se ejecuta nada ni se habilita el agente. Ver docs/specs/S1-proyecto-no-confiable.md.
     private(set) var workspaceTrust: TrustStore.Trust = .trusted
@@ -601,7 +601,7 @@ final class WorkspaceController {
     /// cambia, porque la aprobación se guarda por hash del comando.
     private func allowedToRun(_ project: CodeProject, workspaceURL: URL) -> Bool {
         guard workspaceTrust == .trusted else {
-            errorMessage = "El proyecto está en solo lectura. Confiá en él para ejecutar procesos."
+            errors.report(message: "El proyecto está en solo lectura. Confiá en él para ejecutar procesos.")
             return false
         }
         if trust.isApproved(command: project.command, project: project.id, workspaceURL: workspaceURL) {
@@ -634,5 +634,8 @@ final class WorkspaceController {
         for document in documents { document.releaseEditor() }
     }
 
-    func show(_ error: Error) { errorMessage = error.localizedDescription }
+    /// Reporta un error para que la ventana lo muestre y el log lo guarde.
+    func show(_ error: Error, context: StaticString = #function) {
+        errors.report(error, context: context)
+    }
 }
