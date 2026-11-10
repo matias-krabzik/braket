@@ -112,9 +112,14 @@ final class AgentTests: XCTestCase {
         let candidate = try XCTUnwrap(agent.pendingCandidate)
         agent.approve(candidate)
         XCTAssertEqual(agent.approvedIdentity, candidate.identity)
+        // Reemplazo del peor caso: mismo tamaño, sobrescrito en el lugar (mismo inode) y
+        // dentro del mismo segundo de mtime. Solo el contenido lo distingue.
         try Data("#!/bin/sh\nsleep 31\n".utf8).write(to: script)
         let despues = try XCTUnwrap(CodexExecutable.identity(of: script.path))
+        XCTAssertEqual(despues.size, candidate.identity.size, "el reemplazo tiene el mismo tamaño")
+        XCTAssertNotEqual(despues.digest, candidate.identity.digest)
         XCTAssertNotEqual(despues, candidate.identity, "cambiar el binario debe cambiar su identidad")
+        XCTAssertNotEqual(agent.approvedIdentity, despues, "la aprobación anterior no debe valer")
     }
 
     func testJSONLinesPreserveUnicodeAndSplitMessages() throws {

@@ -128,7 +128,8 @@ struct AgentPanel: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(candidate.url.path).textSelection(.enabled)
                 Text(candidate.signature.label)
-                Text(ByteCountFormatter.string(fromByteCount: candidate.identity.size, countStyle: .file))
+                Text(ByteCountFormatter.string(fromByteCount: candidate.identity.size, countStyle: .file)
+                    + " · sha256 " + candidate.identity.shortDigest)
             }
             .font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)

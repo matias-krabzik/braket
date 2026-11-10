@@ -1,13 +1,20 @@
+import CryptoKit
 import Foundation
 import Security
 
-/// Identidad barata de un binario, suficiente para detectar que cambió sin leerlo
-/// entero: son decenas de MB y habría que hacerlo en cada arranque.
+/// Identidad de un binario: la ruta y el **contenido**. El contenido es lo único que
+/// quien reemplaza el archivo no puede falsificar. El tamaño se puede igualar, y `mtime`
+/// e inode los controla quien escribe: sobrescribir en el lugar conserva el inode, y
+/// `mtime` se fija con `touch`. Leer el archivo entero cuesta ~10 ms cada 20 MB, una vez
+/// por conexión, así que la identidad barata no se justificaba.
 struct BinaryIdentity: Codable, Equatable, Sendable {
     let path: String
     let size: Int64
-    let modified: Date
-    let inode: UInt64
+    /// SHA-256 del contenido, en hexadecimal.
+    let digest: String
+
+    /// Prefijo para mostrar en el diálogo de aprobación.
+    var shortDigest: String { String(digest.prefix(16)) }
 }
 
 /// Estado de firma. **No se rechaza por ser ad hoc**: el `codex` de Homebrew suele
@@ -117,11 +124,20 @@ enum CodexExecutable {
 
     static func identity(of path: String) -> BinaryIdentity? {
         var info = stat()
-        guard stat(path, &info) == 0 else { return nil }
-        return BinaryIdentity(path: path,
-                              size: Int64(info.st_size),
-                              modified: Date(timeIntervalSince1970: TimeInterval(info.st_mtimespec.tv_sec)),
-                              inode: UInt64(info.st_ino))
+        guard stat(path, &info) == 0, let digest = digest(of: path) else { return nil }
+        return BinaryIdentity(path: path, size: Int64(info.st_size), digest: digest)
+    }
+
+    /// SHA-256 leyendo por bloques: el binario puede tener decenas de MB y no hay
+    /// motivo para tenerlo entero en memoria.
+    static func digest(of path: String) -> String? {
+        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while let chunk = try? handle.read(upToCount: 1 << 20), !chunk.isEmpty {
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     static func signature(of path: String) -> CodexSignature {
