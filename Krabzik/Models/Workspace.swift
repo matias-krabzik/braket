@@ -106,6 +106,7 @@ struct CodeProject: Identifiable, Codable, Equatable {
     var path: String
     var kind: ProjectKind
     var command: String
+    var icon: CodeProjectIcon?
 
     func scope(relativeTo workspaceURL: URL) -> PathScope {
         pathScope(path, relativeTo: workspaceURL)
@@ -133,6 +134,7 @@ struct Workspace: Codable, Equatable {
     var connections: [DatabaseConnection] = []
     var scripts: [String] = []
     var iconStyle = ProjectIconStyle()
+    var codeIconMonochrome = true
 
     init(name: String, projects: [CodeProject] = [], connections: [DatabaseConnection] = []) {
         self.name = name
@@ -141,7 +143,7 @@ struct Workspace: Codable, Equatable {
     }
 
     /// Explícitas para que agregar una propiedad no cambie el formato sin querer.
-    private enum CodingKeys: String, CodingKey { case version, name, projects, connections, scripts, iconStyle }
+    private enum CodingKeys: String, CodingKey { case version, name, projects, connections, scripts, iconStyle, codeIconMonochrome }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -150,6 +152,7 @@ struct Workspace: Codable, Equatable {
         projects = try values.decodeIfPresent([CodeProject].self, forKey: .projects) ?? []
         connections = try values.decodeIfPresent([DatabaseConnection].self, forKey: .connections) ?? []
         iconStyle = try values.decodeIfPresent(ProjectIconStyle.self, forKey: .iconStyle) ?? ProjectIconStyle()
+        codeIconMonochrome = try values.decodeIfPresent(Bool.self, forKey: .codeIconMonochrome) ?? true
         scripts = try values.decodeIfPresent([String].self, forKey: .scripts) ?? []
         scripts = Array(NSOrderedSet(array: scripts)) as? [String] ?? []
     }
@@ -211,6 +214,7 @@ struct Workspace: Codable, Equatable {
     private func checkText() throws {
         guard name.isValidProjectText() else { throw WorkspaceError.invalidText("el nombre del proyecto") }
         for project in projects {
+            guard project.icon?.isValid != false else { throw WorkspaceError.invalidText("el icono de «\(project.shortName)»") }
             guard project.name.isValidProjectText() else {
                 throw WorkspaceError.invalidText("el nombre de «\(project.shortName)»")
             }

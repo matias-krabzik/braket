@@ -13,6 +13,9 @@ import SwiftUI
     let project: CodeProject?
     var children: [FileNode]?
     var loading = false
+    var expanded: Bool
+    var projectIcon: NSImage?
+    var loadingIcon = false
     var watcher: DispatchSourceFileSystemObject?
 
     init(url: URL, isDirectory: Bool, project: CodeProject? = nil) {
@@ -20,6 +23,7 @@ import SwiftUI
         self.name = project?.name ?? url.lastPathComponent
         self.isDirectory = isDirectory
         self.project = project
+        self.expanded = project != nil
     }
 
     deinit { watcher?.cancel() }
@@ -42,14 +46,14 @@ struct FileTree: NSViewRepresentable {
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
         scroll.drawsBackground = false
-        let outline = NSOutlineView()
+        let outline = FileTreeOutlineView()
         let column = NSTableColumn(identifier: .init("files"))
         column.minWidth = 180
         outline.addTableColumn(column)
         outline.outlineTableColumn = column
         outline.headerView = nil
         outline.rowHeight = 29
-        outline.indentationPerLevel = 14
+        outline.indentationPerLevel = 18
         outline.intercellSpacing = NSSize(width: 0, height: 0)
         outline.style = .sourceList
         outline.backgroundColor = .clear
@@ -115,7 +119,7 @@ struct FileTree: NSViewRepresentable {
             outline?.reloadData()
             for root in roots {
                 if root.children == nil { load(root) }
-                else { outline?.expandItem(root) }
+                else { restoreExpansion(root) }
             }
         }
 
@@ -133,44 +137,75 @@ struct FileTree: NSViewRepresentable {
         }
 
         func outlineView(_ outlineView: NSOutlineView, shouldExpandItem item: Any) -> Bool {
-            if let node = item as? FileNode, node.children == nil { load(node) }
+            if let node = item as? FileNode {
+                node.expanded = true
+                if node.children == nil { load(node) }
+            }
             return true
         }
 
         func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
             guard let node = item as? FileNode else { return nil }
-            let cell = NSTableCellView()
-            let icon = NSImageView()
-            icon.image = NSImage(systemSymbolName: node.isDirectory ? "folder.fill" : fileSymbol(node.url), accessibilityDescription: nil)
-            icon.contentTintColor = node
-                .isDirectory ? NSColor(calibratedRed: 0.49, green: 0.68, blue: 0.87, alpha: 1) : .secondaryLabelColor
-            let label = NSTextField(labelWithString: node.name)
-            label.font = .systemFont(ofSize: 12, weight: node.project == nil ? .regular : .medium)
-            label.lineBreakMode = .byTruncatingMiddle
-            let detail = NSTextField(labelWithString: node.project?.kind.rawValue ?? "")
-            detail.font = .systemFont(ofSize: 10)
-            detail.textColor = .tertiaryLabelColor
-            detail.setContentCompressionResistancePriority(.required, for: .horizontal)
-            let stack = NSStackView(views: [icon, label, detail])
-            stack.orientation = .horizontal
-            stack.spacing = 7
-            stack.translatesAutoresizingMaskIntoConstraints = false
-            cell.addSubview(stack)
-            NSLayoutConstraint.activate([
-                stack.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2),
-                stack.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -10),
-                stack.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                icon.widthAnchor.constraint(equalToConstant: 15), icon.heightAnchor.constraint(equalToConstant: 15)
-            ])
-            cell.textField = label
-            cell.imageView = icon
-            cell.toolTip = node.url.path
-            return cell
+            return FileTreeCell(node: node, depth: outlineView.level(forItem: node), expanded: outlineView.isItemExpanded(node),
+                                monochrome: controller.workspace?.codeIconMonochrome == true) {
+                [weak self, weak node, weak outlineView] in
+                guard let self, let node, let outlineView else { return }
+                if outlineView.isItemExpanded(node) { outlineView.collapseItem(node) }
+                else { outlineView.expandItem(node) }
+                self.refreshDisclosure()
+            }
         }
 
-        private func fileSymbol(_ url: URL) -> String {
-            ["swift", "php", "ts", "js", "jsx", "tsx", "html", "css", "astro", "sql"]
-                .contains(url.pathExtension) ? "chevron.left.forwardslash.chevron.right" : "doc"
+        func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
+            let row = FileTreeRow()
+            row.outline = outlineView
+            row.node = item as? FileNode
+            return row
+        }
+
+        func outlineViewItemDidExpand(_ notification: Notification) { refreshDisclosure() }
+
+        func outlineViewItemDidCollapse(_ notification: Notification) {
+            if let node = notification.userInfo?["NSObject"] as? FileNode { node.expanded = false }
+            refreshDisclosure()
+        }
+
+        private func refreshDisclosure() {
+            guard let outline else { return }
+            let visible = outline.rows(in: outline.visibleRect)
+            guard visible.location != NSNotFound else { return }
+            for index in visible.location..<NSMaxRange(visible) {
+                if let cell = outline.view(atColumn: 0, row: index, makeIfNecessary: false) as? FileTreeCell,
+                   let node = outline.item(atRow: index) as? FileNode {
+                    cell.updateDisclosure(outline.isItemExpanded(node))
+                }
+                outline.rowView(atRow: index, makeIfNecessary: false)?.needsDisplay = true
+            }
+        }
+
+        private func restoreExpansion(_ node: FileNode) {
+            if node.expanded {
+                outline?.expandItem(node)
+                for child in node.children ?? [] where child.isDirectory { restoreExpansion(child) }
+            }
+        }
+
+        private func loadProjectIcon(_ node: FileNode) {
+            guard let project = node.project, !node.loadingIcon else { return }
+            node.loadingIcon = true
+            let token = generation
+            let directory = node.url
+            Task { [weak self, weak node] in
+                let files = await Task.detached(priority: .utility) {
+                    ProjectIconFiles.read(at: directory, kind: project.kind)
+                }.value
+                guard let self, let node else { return }
+                node.loadingIcon = false
+                guard self.generation == token else { return }
+                node.projectIcon = files.favicons.lazy.compactMap { FileIcons.favicon($0) }.first
+                    ?? files.technology.flatMap { FileIcons.asset($0) } ?? FileIcons.project(project)
+                self.outline?.reloadItem(node)
+            }
         }
 
         @objc func clicked() {
@@ -181,6 +216,7 @@ struct FileTree: NSViewRepresentable {
         private func load(_ node: FileNode) {
             guard !node.loading else { return }
             node.loading = true
+            loadProjectIcon(node)
             let token = generation
             let url = node.url
             queue.async { [weak self, weak node] in
@@ -206,7 +242,8 @@ struct FileTree: NSViewRepresentable {
                         let old = Dictionary(uniqueKeysWithValues: (node.children ?? []).map { ($0.url, $0) })
                         node.children = entries.map { old[$0.0] ?? FileNode(url: $0.0, isDirectory: $0.1) }
                         self.outline?.reloadItem(node, reloadChildren: true)
-                        if node.project != nil { self.outline?.expandItem(node) }
+                        self.restoreExpansion(node)
+                        self.refreshDisclosure()
                         self.watch(node)
                     case .failure(let error):
                         node.children = []

@@ -1,15 +1,23 @@
 {
+  "codeIconMonochrome" : false,
   "connections" : [
 
   ],
   "iconStyle" : {
     "glass" : true,
-    "hex" : "8863D7"
+    "hex" : "8863D7",
+    "letters" : ""
   },
   "name" : "Primer proyecto",
   "projects" : [
     {
       "command" : "php -S 127.0.0.1:18765",
+      "icon" : {
+        "asset" : "laravel",
+        "rendering" : "monochrome",
+        "source" : "automatic",
+        "tintHex" : "D662AD"
+      },
       "id" : "F3B7393B-E2E2-47BB-A218-2FB51A930001",
       "kind" : "PHP",
       "name" : "api",

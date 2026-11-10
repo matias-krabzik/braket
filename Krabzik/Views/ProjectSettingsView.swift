@@ -7,6 +7,7 @@ struct ProjectSettingsView: View {
     @State private var name: String
     @State private var icon: ProjectIconStyle
     @State private var editing: CodeProject?
+    @State private var codeIconMonochrome: Bool
     private let presets = ["687080", "4589E8", "8863D7", "D662AD", "DB8746", "4B9F83"]
 
     init(controller: WorkspaceController, workspace: Workspace, url: URL) {
@@ -14,9 +15,13 @@ struct ProjectSettingsView: View {
         self.url = url
         _name = State(initialValue: workspace.name)
         _icon = State(initialValue: workspace.iconStyle)
+        _codeIconMonochrome = State(initialValue: workspace.codeIconMonochrome)
     }
 
-    private var hasChanges: Bool { name != controller.workspace?.name || icon != controller.workspace?.iconStyle }
+    private var hasChanges: Bool {
+        name != controller.workspace?.name || icon != controller.workspace?.iconStyle
+            || codeIconMonochrome != controller.workspace?.codeIconMonochrome
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -49,7 +54,9 @@ struct ProjectSettingsView: View {
                                 supportsOpacity: false)
                     HStack {
                         Spacer()
-                        Button("Guardar cambios") { controller.saveProjectIdentity(name: name, icon: icon) }
+                        Button("Guardar cambios") {
+                            controller.saveProjectIdentity(name: name, icon: icon, codeIconMonochrome: codeIconMonochrome)
+                        }
                             .disabled(!hasChanges || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
@@ -62,6 +69,17 @@ struct ProjectSettingsView: View {
                     }
                     Text("Se mueve solo el archivo .krabzik. Las carpetas de código permanecen donde están.")
                         .font(.caption).foregroundStyle(.secondary)
+                }
+                Section("Iconos del explorador") {
+                    Picker("Apariencia", selection: $codeIconMonochrome) {
+                        Text("Color").tag(false)
+                        Text("Monocromático").tag(true)
+                    }.pickerStyle(.segmented)
+                    Text("Se aplica a archivos y subproyectos. Podés elegir otro estilo al editar cada subproyecto.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Aplicar apariencia") {
+                        controller.saveProjectIdentity(name: name, icon: icon, codeIconMonochrome: codeIconMonochrome)
+                    }.disabled(!hasChanges)
                 }
                 Section("Subproyectos") {
                     ForEach(controller.workspace?.projects ?? []) { project in
@@ -125,15 +143,18 @@ private struct SubprojectSettingsSheet: View {
                 }
                 TextField("Comando", text: $project.command)
             }
+            Divider()
+            SubprojectIconEditor(project: $project, workspaceURL: workspaceURL,
+                                 monochrome: controller.workspace?.codeIconMonochrome == true)
             HStack {
                 Spacer()
                 Button("Cancelar") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Guardar") {
                     Task { if await controller.saveSubproject(project) { dismiss() } }
-                }.keyboardShortcut(.defaultAction)
+                }.keyboardShortcut(.defaultAction).disabled(project.icon?.isValid == false)
             }
         }
-        .padding(24).frame(width: 480)
+        .padding(24).frame(width: 500)
         .disabled(controller.isSwitchingWorkspace)
     }
 }

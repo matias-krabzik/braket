@@ -11,8 +11,9 @@ struct WorkspaceView: View {
                     ProjectRail(controller: controller)
                     HSplitView {
                         if controller.sidebarVisible {
-                            sidebar(workspace, url: url)
-                                .frame(minWidth: 210, idealWidth: 260, maxWidth: 310)
+                            WorkspaceSidebar(controller: controller, workspace: workspace, url: url).id(url)
+                                .frame(minWidth: 270, idealWidth: 270, maxWidth: 360)
+                                .background(SidebarWidthPersistence())
                         }
                         VSplitView {
                             editor.frame(minWidth: 520, maxWidth: .infinity, minHeight: 240, maxHeight: .infinity)
@@ -120,41 +121,18 @@ struct WorkspaceView: View {
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
     }
 
-    private func sidebar(_ workspace: Workspace, url: URL) -> some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Código").font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
-                Spacer()
-                Button(action: controller.projects.addFolders) { Image(systemName: "plus").font(.system(size: 11)) }
-                    .buttonStyle(.plain).help("Agregar subproyecto")
-                    .accessibilityLabel("Agregar subproyecto")
-            }
-            .padding(.horizontal, 15).padding(.top, 15).padding(.bottom, 9)
-            if workspace.projects.isEmpty {
-                Button("Agregar carpeta…", action: controller.projects.addFolders)
-                    .buttonStyle(.plain).foregroundStyle(Theme.accent)
-                    .padding(.top, 16)
-                Spacer()
-            } else {
-                FileTree(workspace: workspace, workspaceURL: url, revision: controller.session.revision, controller: controller)
-            }
-            Rectangle().fill(Theme.border).frame(height: 1)
-            DatabaseSidebar(controller: controller)
-        }
-        .background(Theme.sidebar)
-    }
-
     private var editor: some View {
         VStack(spacing: 0) {
             if !controller.documents.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 0) {
+                    HStack(spacing: 4) {
                         ForEach(controller.documents) { document in
                             DocumentTab(document: document, selected: controller.selectedDocumentID == document.id,
                                         select: { controller.selectedDocumentID = document.id },
                                         close: { controller.closeDocument(document) })
                         }
                     }
+                    .padding(.horizontal, 9).padding(.vertical, 7)
                 }
                 .background(Theme.bar)
                 Rectangle().fill(Theme.border).frame(height: 1)
@@ -225,28 +203,53 @@ private struct DocumentTab: View {
     let selected: Bool
     let select: () -> Void
     let close: () -> Void
+    @State private var hovered = false
+    @State private var closeHovered = false
+    @FocusState private var closeFocused: Bool
+
+    private var showsDirtyIndicator: Bool { document.isDirty && !closeHovered && !closeFocused }
+    private var showsClose: Bool { selected || hovered || closeFocused || document.isDirty }
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 4) {
             Button(action: select) {
-                Text(document.url.lastPathComponent).font(.system(size: 12))
-                    .lineLimit(1).truncationMode(.middle)
-                    .foregroundStyle(selected ? .primary : .secondary)
-                    .frame(maxWidth: 210)
+                HStack(spacing: 7) {
+                    Image(nsImage: FileIcons.file(document.url))
+                        .resizable().scaledToFit().frame(width: 14, height: 14)
+                        .opacity(selected ? 1 : 0.75)
+                        .accessibilityHidden(true)
+                    Text(document.url.lastPathComponent)
+                        .font(.system(size: 12, weight: selected ? .medium : .regular))
+                        .lineLimit(1).truncationMode(.middle)
+                        .foregroundStyle(selected ? .primary : .secondary)
+                }
+                .padding(.leading, 10).padding(.trailing, 2)
+                .frame(maxWidth: 240).frame(height: 32)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityAddTraits(selected ? .isSelected : [])
             Button(action: close) {
-                Image(systemName: document.isDirty ? "circle.fill" : "xmark")
-                    .font(.system(size: document.isDirty ? 6 : 9))
-                    .frame(width: 14, height: 16)
+                Image(systemName: showsDirtyIndicator ? "circle.fill" : "xmark")
+                    .font(.system(size: showsDirtyIndicator ? 6 : 9, weight: .medium))
                     .foregroundStyle(.secondary)
+                    .opacity(showsClose ? 1 : 0)
+                    .frame(width: 24, height: 24)
+                    .background(Color.white.opacity(closeHovered ? 0.07 : 0), in: RoundedRectangle(cornerRadius: 4))
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain).help("Cerrar \(document.url.lastPathComponent)")
+            .buttonStyle(.plain)
+            .focused($closeFocused)
+            .onHover { closeHovered = $0 }
+            .accessibilityLabel("Cerrar \(document.url.lastPathComponent)")
+            .accessibilityValue(document.isDirty ? "Cambios sin guardar" : "")
+            .help("Cerrar \(document.url.lastPathComponent)" + (document.isDirty ? " · cambios sin guardar" : ""))
         }
-        .padding(.horizontal, 14).frame(height: 39)
-        .background(selected ? Theme.background : Theme.bar)
-        .overlay(alignment: .top) { if selected { Rectangle().fill(Theme.accent.opacity(0.8)).frame(height: 2) } }
-        .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 1) }
+        .padding(.trailing, 4).fixedSize(horizontal: true, vertical: false)
+        .background(Color.white.opacity(selected ? 0.09 : hovered ? 0.025 : 0), in: RoundedRectangle(cornerRadius: 7))
+        .overlay { RoundedRectangle(cornerRadius: 7).strokeBorder(Color.white.opacity(selected ? 0.045 : 0)) }
+        .shadow(color: .black.opacity(selected ? 0.14 : 0), radius: 1, y: 1)
+        .onHover { hovered = $0 }
         .help(document.url.path)
     }
 }

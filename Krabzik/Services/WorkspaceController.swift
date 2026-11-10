@@ -29,6 +29,7 @@ final class WorkspaceController {
     @ObservationIgnored var workspaceStates: [URL: SavedWorkspaceState] = [:]
     var selectedProjectID: UUID?
     var sidebarVisible = true
+    var sidebarTab: WorkspaceSidebarTab = .code
     var processesVisible = true
     var commandProject: CodeProject?
     var closingProjectURL: URL?
@@ -202,6 +203,7 @@ final class WorkspaceController {
         }
         let normalized = url.standardizedFileURL
         if !openWorkspaceURLs.contains(normalized) { openWorkspaceURLs.append(normalized) }
+        sidebarTab = workspaceStates[normalized]?.sidebarTab ?? .code
         docs.closeAll()
         session.open(project, at: url, trust: decided)
         openWorkspaceModels[normalized] = project

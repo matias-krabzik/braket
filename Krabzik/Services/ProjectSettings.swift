@@ -36,10 +36,11 @@ extension WorkspaceController {
     }
 
     @discardableResult
-    func saveProjectIdentity(name: String, icon: ProjectIconStyle) -> Bool {
+    func saveProjectIdentity(name: String, icon: ProjectIconStyle, codeIconMonochrome: Bool? = nil) -> Bool {
         guard !isReadOnly, !isSwitchingWorkspace, var updated = workspace, let url = workspaceURL else { return false }
         updated.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         updated.iconStyle = icon
+        if let codeIconMonochrome { updated.codeIconMonochrome = codeIconMonochrome }
         do {
             guard !updated.name.isEmpty else { throw WorkspaceError.invalidText("el nombre del proyecto") }
             try updated.checkFormat()
@@ -63,7 +64,9 @@ extension WorkspaceController {
             var directory: ObjCBool = false
             guard FileManager.default.fileExists(atPath: project.directory(relativeTo: url).path, isDirectory: &directory),
                   directory.boolValue else { throw WorkspaceError.missingFolder }
-            guard await prepareToLeave() else { return false }
+            let previous = workspace?.projects[index]
+            let affectsExecution = previous?.path != project.path || previous?.kind != project.kind || previous?.command != project.command
+            if affectsExecution { guard await prepareToLeave() else { return false } }
             try session.save(updated)
             trust.approve(command: project.command, project: project.id, workspaceURL: url)
             openWorkspaceModels[url] = updated

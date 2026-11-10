@@ -59,6 +59,9 @@ def render():
     app_icon = 'Krabzik/AppIcon.icon'
     obj(app_icon, f'isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = {q(app_icon)}; sourceTree = SOURCE_ROOT;')
     obj('build:' + app_icon, f'isa = PBXBuildFile; fileRef = {uid(app_icon)};')
+    developer_icons = 'Krabzik/Resources/DeveloperIcons'
+    obj(developer_icons, f'isa = PBXFileReference; lastKnownFileType = folder; path = {q(developer_icons)}; sourceTree = SOURCE_ROOT;')
+    obj('build:' + developer_icons, f'isa = PBXBuildFile; fileRef = {uid(developer_icons)};')
     for path in app_sources + test_sources:
         rel = path.relative_to(root).as_posix()
         obj(rel, f'isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = {q(rel)}; sourceTree = SOURCE_ROOT;')
@@ -73,7 +76,7 @@ def render():
         obj(name + '-sources', f'isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ({", ".join(uid("build:" + p.relative_to(root).as_posix()) for p in files)},); runOnlyForDeploymentPostprocessing = 0;')
         framework = uid('mysql-build') + ',' if name == 'app' else ''
         obj(name + '-frameworks', f'isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = ({framework}); runOnlyForDeploymentPostprocessing = 0;')
-        resources = ', '.join(uid('build:' + resource) for resource in [notices, app_icon]) + ',' if name == 'app' else ''
+        resources = ', '.join(uid('build:' + resource) for resource in [notices, app_icon, developer_icons]) + ',' if name == 'app' else ''
         obj(name + '-resources', f'isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ({resources}); runOnlyForDeploymentPostprocessing = 0;')
     obj('test-proxy', f'isa = PBXContainerItemProxy; containerPortal = {uid("project")}; proxyType = 1; remoteGlobalIDString = {uid("app-target")}; remoteInfo = Krabzik;')
     obj('test-dependency', f'isa = PBXTargetDependency; target = {uid("app-target")}; targetProxy = {uid("test-proxy")};')

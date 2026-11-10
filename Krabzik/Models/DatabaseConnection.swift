@@ -14,6 +14,8 @@ struct DatabaseConnection: Identifiable, Codable, Equatable, Sendable {
     var username = "root"
     var database = ""
     var tls: TLSMode = .verified
+    var tintHex: String?
+    var tintStrength: Double?
 
     /// Cómo se cifra la conexión. `disabled` solo se acepta contra un extremo de
     /// loopback, y eso se comprueba sobre la dirección resuelta, no sobre el nombre
@@ -59,6 +61,10 @@ struct DatabaseConnection: Identifiable, Codable, Equatable, Sendable {
         }
         guard ![value.host, value.username, value.database].contains(where: { $0.contains("\0") || $0.contains("\n") }) else {
             throw DatabaseFailure("La conexión contiene caracteres no válidos.")
+        }
+        guard tintHex.map({ ProjectIconStyle(hex: $0).isValid }) ?? true,
+              (tintStrength ?? 0.12).isFinite, (0.04...0.20).contains(tintStrength ?? 0.12) else {
+            throw DatabaseFailure("El tinte de la conexión no es válido.")
         }
         if level == .strict, value.tls == .disabled, !value.isLoopbackHost {
             throw DatabaseFailure("Sin TLS solo se permite para conexiones locales (127.0.0.1, ::1 o localhost).")

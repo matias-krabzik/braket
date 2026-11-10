@@ -169,6 +169,37 @@ final class FileTreeTests: XCTestCase {
                           "cambiar de proyecto descarta las cargas del anterior")
     }
 
+    func testPlusMinusTogglesFolderAndReloadKeepsItCollapsed() async throws {
+        let (directory, defaults) = try environment()
+        let (coordinator, root) = try await loadedCoordinator(directory, defaults)
+        let outline = FileTreeOutlineView()
+        let column = NSTableColumn(identifier: .init("files"))
+        outline.addTableColumn(column)
+        outline.outlineTableColumn = column
+        outline.dataSource = coordinator
+        outline.delegate = coordinator
+        coordinator.outline = outline
+        outline.reloadData()
+        outline.expandItem(root)
+        let expandedFrame = try XCTUnwrap(outline.groupFrame(for: root))
+        let child = try XCTUnwrap(root.children?.first)
+        XCTAssertEqual(outline.groupFrame(for: child), expandedFrame)
+        XCTAssertGreaterThan(expandedFrame.height, outline.rect(ofRow: 0).height)
+        let cell = try XCTUnwrap(coordinator.outlineView(outline, viewFor: column, item: root) as? FileTreeCell)
+        let button = try XCTUnwrap(cell.subviews.compactMap { $0 as? NSButton }.first)
+        button.performClick(nil)
+        XCTAssertFalse(outline.isItemExpanded(root))
+        XCTAssertFalse(root.expanded)
+        let collapsedFrame = try XCTUnwrap(outline.groupFrame(for: root))
+        XCTAssertEqual(collapsedFrame.height, outline.rect(ofRow: 0).height - 4, accuracy: 0.01)
+        coordinator.update(try XCTUnwrap(coordinator.controller.workspace),
+                           at: try XCTUnwrap(coordinator.controller.workspaceURL), revision: 2)
+        XCTAssertFalse(outline.isItemExpanded(root))
+        button.performClick(nil)
+        XCTAssertTrue(outline.isItemExpanded(root))
+        XCTAssertTrue(root.expanded)
+    }
+
     /// Cada carpeta cargada queda observada; de eso depende que el árbol se actualice
     /// solo. **La llegada del evento no se puede comprobar desde XCTest acá**: con el
     /// observador instalado y un archivo nuevo en la carpeta, el handler no corre ni
