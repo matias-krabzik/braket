@@ -60,7 +60,7 @@ Dos hallazgos de la auditoría se resolvieron durante esa ventana y los specs ya
 | [C8](C8-pbxproj-sincronizado.md) | Garantizar que el `.pbxproj` generado esté al día | Media | **resuelto** |
 | [C9](C9-cobertura-pruebas.md) | Cerrar los huecos de cobertura que quedan | Media | pendiente |
 | [C10](C10-version-unica.md) | Una sola fuente de verdad para la versión | Baja | **resuelto** |
-| [C11](C11-rendimiento-editor.md) | Rendimiento del editor y arquitecturas del Release | Baja | pendiente |
+| [C11](C11-rendimiento-editor.md) | Rendimiento del editor y arquitecturas del Release | Baja | **resuelto** |
 
 ## Orden de ejecución propuesto
 
@@ -113,6 +113,10 @@ manual —el criterio 5, `log show` sobre la app instalada— para cuando se ins
 **S7 resuelto** el 2026-11-10 (commit `f7e5594`): el vendoring es upstream 1.9.1 más cinco parches con su
 motivo, y `scripts/check_vendor.sh` lo comprueba. Con esto `verify.sh` ya no omite ningún paso: los ocho
 bloqueantes corren.
+
+**C11 resuelto** el 2026-11-10 (commit `101c1ce`): la pulsación sobre un archivo de 5 MB pasó de 8,39 a
+0,83 ms. El diagnóstico del spec estaba equivocado —el costo no era copiar el texto, era reconstruir el
+índice de líneas— y el spec lo deja escrito con los números medidos.
 
 Al cerrar un spec, marcarlo en la tabla de este índice y dejar en el propio spec una sección `## Resuelto`
 con la fecha, los commits y los criterios verificados.
