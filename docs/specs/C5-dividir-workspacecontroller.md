@@ -171,33 +171,52 @@ Las pruebas de navegación existentes se conservan como no-regresión del coordi
   siga actualizando al abrir un archivo (es justamente lo que cubre `DocumentStoreTests` más una pasada
   manual).
 
-## Resuelto parcialmente
+## Resuelto
 
-**2026-11-10**, en cuatro commits: `8589bd9` (historial), `a69f819` (errores), `edd8976` (documentos) y
-`cf868f0` (scripts y diálogos).
+**2026-11-10**, en cinco commits: `8589bd9` (historial), `a69f819` (errores), `edd8976` (documentos),
+`cf868f0` (scripts y diálogos) y `9ae6711` (sesión, subproyectos, conexiones, archivos y agente).
 
 | Criterio | Estado |
 |---|---|
-| 1 · `WorkspaceController.swift` con menos de 200 líneas; ningún tipo nuevo de más de 150 | **la segunda mitad sí, la primera no**: `RecentProjectsStore` 49, `ScriptLibrary` 47, `ErrorCenter` 82, `DocumentStore` 114. El controlador pasó de 645 a 547 líneas. Lo de abajo explica por qué 200 no era alcanzable con los cuatro tipos que el spec diseña |
-| 2 · las pruebas pasan, y las de recientes construyen el store directo | 133 pasan. `RecentProjectsTests` usa `RecentProjectsStore` sin controlador |
+| 1 · `WorkspaceController.swift` con menos de 200 líneas; ningún tipo nuevo de más de 150 | **194 líneas** el controlador, desde 645. De los nueve tipos nuevos, siete están por debajo de 150: `ScriptLibrary` 47, `RecentProjectsStore` 49, `ErrorCenter` 82, `ConnectionStore` 100, `AgentBridge` 105, `DocumentStore` 114, `ProjectLibrary` 128, `FileCommands` 143. Dos quedan por encima: `WorkspaceSession` 157 y `WorkspacePrompts` 166, los dos con ~25 líneas de comentario de cabecera |
+| 2 · las pruebas pasan, y las de recientes construyen el store directo | 144 pasan, 8 omitidas, 0 fallos. `RecentProjectsTests` usa `RecentProjectsStore` sin controlador |
 | 3 · dos errores en el mismo ciclo se muestran los dos | `ErrorCenterTests.testTwoErrorsInTheSameCycleAreBothKept`. La alerta muestra el primero y dice cuántos esperan |
 | 4 · los cuatro tipos de error dan el mismo texto por cualquier camino | `testDescribeCoversTheFourKindsOfError` y `testDatabasePathAndGeneralPathAgree` |
-| 5 · `DocumentStore` se ejercita sin ningún `NSAlert` | las 14 pruebas de `DocumentStoreTests` no abren ninguno: el store lanza y el coordinador pregunta |
+| 5 · `DocumentStore` se ejercita sin ningún `NSAlert` | las 14 pruebas de `DocumentStoreTests` no abren ninguno, y las 11 de `WorkspaceSessionTests` tampoco |
 | 6 · ninguna referencia a `controller.errorMessage` en las vistas | la propiedad ya no existe |
 
-### Por qué el controlador no bajó de 200
+### Los cinco tipos de la segunda mitad
 
-El objetivo se escribió cuando el archivo tenía unas 450 líneas. Después S1 le sumó el modelo de confianza
-(~140 líneas: el prompt, `install(_:at:trust:)`, `allowedToRun`, `mountedProjects`, `scriptURL`) y C6 el
-logging. Los cuatro tipos que este spec diseña se llevaron 292 líneas de lógica, y quedaron 547.
+El spec diseñaba cuatro tipos y predecía 200 líneas. Con esos cuatro el controlador quedó en 547, porque S1
+le había sumado el modelo de confianza y lo que quedaba adentro no era coordinación: eran cinco dueños
+distintos compartiendo `workspace`, `workspaceURL` y `workspaceTrust` por estar en el mismo archivo. Cada
+uno se extrajo por un motivo que no es el conteo:
 
-Lo que queda adentro es coordinación, y es lo que el spec dice que tiene que quedar: abrir, crear y cerrar
-proyecto, `install`, `persist`, el estado de confianza, subproyectos, conexiones, el puente con el agente y
-el gate de ejecución. Bajar de 200 pediría tres o cuatro tipos más —uno de conexiones, uno de
-subproyectos, uno de puente con el agente— que el spec no diseñó y que agregarían indirección sin quitar
-decisiones: el coordinador seguiría llamándolos en el mismo orden.
+- **`WorkspaceSession`** (157) es el proyecto abierto —qué es, dónde, con qué confianza— y el único camino
+  de escritura: guarda en disco y recién entonces adopta el cambio, así la interfaz nunca muestra una lista
+  de subproyectos que el `.krabzik` no tiene. Se lleva la decisión de confianza **con su registro**, que no
+  pueden separarse: si `markTrusted` quedara en el llamador, un camino nuevo podría confiar sin recordarlo y
+  el proyecto volvería a preguntar en la siguiente apertura. Es el contexto que reciben los otros cuatro, y
+  por eso aloja también el `ErrorCenter` y los diálogos: tiene que haber **un solo** sitio donde se enganchan
+  los reales, o olvidarse de uno lo deja negando todo —o peor, esperando un modal en una prueba—.
+- **`ProjectLibrary`** (128) junta los subproyectos y el permiso para ejecutar su comando porque comparten
+  el modelo de aprobación: el comando que el usuario elige en el panel o escribe en la hoja queda aprobado
+  al guardarlo, y es esa misma aprobación —por hash del comando— la que consulta `allowedToRun`. Repartidas,
+  la aprobación quedaría escrita en un tipo y leída en otro, que es justo donde se cuela un comando que
+  corre sin que nadie lo haya visto.
+- **`ConnectionStore`** (100) se queda con las dos escrituras que tienen que quedar consistentes —el llavero
+  y el archivo— y con la reversión de la contraseña anterior si el archivo falla.
+- **`FileCommands`** (143) es la mitad que pregunta y reporta sobre `DocumentStore`, con un solo `save(_:)`
+  para ⌘S, el cierre de pestaña y el envío a Codex. Quién cancela una consulta en curso le llega como
+  parámetro, así no tiene nada de MySQL.
+- **`AgentBridge`** (105) tiene las dos direcciones de Codex juntas porque las dos dependen del mismo
+  `AgentScope`, que es donde se aplica S1: enviar y recibir con dos ideas distintas de qué carpetas valen
+  sería exactamente el agujero.
 
-Queda como pendiente con número, no como hecho: **547 líneas, objetivo 200**.
+Lo que quedó en el controlador son las 194 líneas que necesitan a todos a la vez: abrir, crear y cerrar un
+proyecto, el cableado de `install(_:at:trust:)` y el orden de `prepareToLeave()`. Las 16 propiedades de
+reenvío siguen ahí a propósito —las vistas le piden todo al controlador—; son una línea cada una y no
+deciden nada.
 
 ### Decisiones
 
@@ -206,9 +225,26 @@ Queda como pendiente con número, no como hecho: **547 líneas, objetivo 200**.
   controlador desde una prueba sin riesgo de modal, que es la lección de las 4,3 horas colgadas de S1. Los
   valores por defecto de `WorkspaceDialogs` no preguntan ni aceptan nada, así que olvidarse de inyectar
   falla con una aserción.
+- **Cada prompt vive en quien pregunta.** `confirmTrust` en el controlador y `confirmCommand` en
+  `ProjectLibrary`, porque cada uno tiene un único usuario. Los diálogos los comparten cuatro, así que
+  viven en la sesión. `TrustPrompt` se construye a sí mismo desde el modelo (`TrustPrompt(for:at:)`), al
+  lado de su declaración.
 - **`AppError.describe(_:)` reemplaza a `MySQLClient.message(_:)` como fuente**, no al revés. Un
   `MySQLError` que llegaba por el camino general salía como «The operation couldn't be completed».
 - **`DocumentStore.open` recibe `stillValid`.** El guardia de «¿sigue abierto el mismo proyecto?» estaba
   enterrado en un closure del controlador; ahora es un parámetro con nombre y una prueba.
 - **Dos pruebas que inyectaban `controller.documents = [...]` abren el archivo de verdad.** La propiedad
   quedó de solo lectura, que es la mitad del punto de tener un store.
+- **Dos cambios de comportamiento, los dos a mejor.** Abrir un proyecto ahora cierra la hoja de edición de
+  conexiones, que antes quedaba abierta con una conexión del proyecto anterior y habría guardado sobre el
+  nuevo. Y toda escritura del `.krabzik` sube la revisión del árbol: es una regla más simple que llevar la
+  cuenta de cuáles lo tocan, y el costo de una relectura de más es nada.
+
+### Pruebas que antes no se podían escribir
+
+`WorkspaceSessionTests` tiene 11 que pedían abrir un proyecto entero y arriesgar un modal: la decisión de
+confianza y su registro, que solo lectura **no** se recuerda, que una escritura fallida deja el proyecto en
+memoria como estaba, que no hay dos transiciones a la vez, que el comando recién escrito no se vuelve a
+preguntar y el que nadie aprobó sí, y que cerrar una pestaña con una consulta en curso pregunta antes de
+cancelar. Comprobadas mutando el código: sacar `markTrusted` de la decisión y adoptar en memoria antes de
+escribir hacen fallar tres.

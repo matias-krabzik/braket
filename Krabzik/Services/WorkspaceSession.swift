@@ -82,7 +82,7 @@ final class WorkspaceSession {
                      ask: @MainActor (TrustPrompt) -> TrustDecision) -> TrustStore.Trust? {
         let known = trustStore.trust(for: url)
         guard known == .untrusted else { return known }
-        switch ask(Self.prompt(for: project, at: url)) {
+        switch ask(TrustPrompt(for: project, at: url)) {
         case .cancel: return nil
         case .readOnly: return .untrusted
         case .trust:
@@ -154,17 +154,4 @@ final class WorkspaceSession {
     /// El disco cambió sin que cambiara el `.krabzik`: un archivo nuevo, una carpeta que
     /// el agente tocó.
     func touch() { revision += 1 }
-
-    /// Qué se le muestra al usuario antes de confiar: carpetas externas y comandos, que es
-    /// exactamente lo que puede hacer daño.
-    private static func prompt(for project: Workspace, at url: URL) -> TrustPrompt {
-        let external = project.projects
-            .filter { $0.scope(relativeTo: url) == .external }
-            .map { $0.directory(relativeTo: url).path }
-        let commands = project.projects
-            .filter { !$0.command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .map { "\($0.name): \($0.command)" }
-        return TrustPrompt(name: project.name, path: url.path, externalFolders: external,
-                           commands: commands, connectionCount: project.connections.count)
-    }
 }

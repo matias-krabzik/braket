@@ -54,7 +54,7 @@ Dos hallazgos de la auditoría se resolvieron durante esa ventana y los specs ya
 | [C2](C2-swift-6-mode.md) | Migrar a Swift 6 language mode | Alta | **resuelto** |
 | [C3](C3-ci-lint-warnings.md) | CI, linter y warnings como errores | Alta | **implementado** · falta un remoto |
 | [C4](C4-legibilidad.md) | Legibilidad: estilo, nombres y constantes con nombre | Media | **resuelto** |
-| [C5](C5-dividir-workspacecontroller.md) | Dividir `WorkspaceController` | Media | **parcial** · 547 líneas, objetivo 200 |
+| [C5](C5-dividir-workspacecontroller.md) | Dividir `WorkspaceController` | Media | **resuelto** · 194 líneas |
 | [C6](C6-logging-y-errores.md) | Logging real y errores no silenciados | Media | **resuelto** |
 | [C7](C7-validacion-formato-krabzik.md) | Validar y acotar el formato `.krabzik` | Media | **resuelto** |
 | [C8](C8-pbxproj-sincronizado.md) | Garantizar que el `.pbxproj` generado esté al día | Media | **resuelto** |
@@ -128,10 +128,12 @@ cero avisos de SwiftLint con `--strict`, los 65 tipos de `Models/` y `Services/`
 escritas en `docs/style.md`. Los trinquetes de `verify.sh` quedaron en 0, así que dejaron de ser topes con
 margen y pasaron a ser reglas.
 
-**C5 parcial** el 2026-11-10: los cuatro tipos que el spec diseña existen y están probados
-—`RecentProjectsStore`, `ErrorCenter`, `DocumentStore`, `ScriptLibrary`—, más `WorkspacePrompts` para los
-diálogos. Cinco de los seis criterios cumplidos. El controlador bajó de 645 a 547 líneas y el objetivo era
-200: el spec explica por qué no era alcanzable con esos cuatro tipos y qué pediría llegar.
+**C5 resuelto** el 2026-11-10: el controlador bajó de 645 a **194 líneas** en nueve tipos nuevos. Los cuatro
+que el spec diseña —`RecentProjectsStore`, `ErrorCenter`, `DocumentStore`, `ScriptLibrary`— más
+`WorkspacePrompts` para los diálogos, y después `WorkspaceSession`, `ProjectLibrary`, `ConnectionStore`,
+`FileCommands` y `AgentBridge`. Los seis criterios cumplidos. Lo que quedó en el controlador es lo que
+necesita a todos a la vez: abrir, crear y cerrar un proyecto, el cableado de `install` y el orden de
+`prepareToLeave`.
 
 Al cerrar un spec, marcarlo en la tabla de este índice y dejar en el propio spec una sección `## Resuelto`
 con la fecha, los commits y los criterios verificados.

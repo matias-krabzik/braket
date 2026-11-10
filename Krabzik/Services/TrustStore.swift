@@ -97,6 +97,22 @@ struct TrustPrompt: Sendable {
     let connectionCount: Int
 }
 
+extension TrustPrompt {
+    /// Lo que de un proyecto puede hacer daño: las carpetas que están fuera de su propia
+    /// carpeta y los comandos que podría ejecutar. El resto no se muestra porque no ayuda
+    /// a decidir.
+    init(for project: Workspace, at url: URL) {
+        let external = project.projects
+            .filter { $0.scope(relativeTo: url) == .external }
+            .map { $0.directory(relativeTo: url).path }
+        let commands = project.projects
+            .filter { !$0.command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .map { "\($0.name): \($0.command)" }
+        self.init(name: project.name, path: url.path, externalFolders: external,
+                  commands: commands, connectionCount: project.connections.count)
+    }
+}
+
 /// Lo que el usuario decidió sobre un proyecto que no había abierto antes.
 enum TrustDecision: Sendable {
     case cancel
