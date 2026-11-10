@@ -53,7 +53,7 @@ Dos hallazgos de la auditoría se resolvieron durante esa ventana y los specs ya
 | [C1](C1-repositorio-git.md) | Inicializar el control de versiones | Crítica | **resuelto** |
 | [C2](C2-swift-6-mode.md) | Migrar a Swift 6 language mode | Alta | **resuelto** |
 | [C3](C3-ci-lint-warnings.md) | CI, linter y warnings como errores | Alta | **implementado** · falta C4 y un remoto |
-| [C4](C4-legibilidad.md) | Legibilidad: estilo, nombres y constantes con nombre | Media | pendiente |
+| [C4](C4-legibilidad.md) | Legibilidad: estilo, nombres y constantes con nombre | Media | **parcial** |
 | [C5](C5-dividir-workspacecontroller.md) | Dividir `WorkspaceController` | Media | pendiente |
 | [C6](C6-logging-y-errores.md) | Logging real y errores no silenciados | Media | **resuelto** |
 | [C7](C7-validacion-formato-krabzik.md) | Validar y acotar el formato `.krabzik` | Media | **resuelto** |

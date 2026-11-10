@@ -165,3 +165,32 @@ Nunca mezclar formato con extracción en el mismo commit.
   archivo, revisar el diff, y solo entonces sobre el resto.
 - Agregar doc comments sin entender el invariante es peor que no agregarlos: si algo no se entiende, el
   comentario correcto es una pregunta anotada en el spec, no una descripción inventada.
+
+
+## Estado: parcial
+
+**2026-11-10**, commits `3910c44` (pasada mecánica) y `2f4439a` (constantes con nombre).
+
+Hecho y verificado:
+
+| Criterio | Estado |
+|---|---|
+| 1 · ninguna línea con más de una sentencia | hecho. El chequeo pasó a `scripts/check_style.py`, que salta cadenas y comentarios: el `grep '; '` anterior marcaba media docena de pruebas con SQL o Python dentro de un literal, y SQL sin punto y coma no es SQL |
+| 2 · ninguna línea de más de 140 columnas | hecho: de 57 a 0 |
+| 3 · sin literales de bytes sin nombre en `SQLScript` y `MySQLTextCommand` | hecho: enums `Byte`, `Wire` y `Retained` |
+| 5 · las pruebas pasan sin cambiarles el cuerpo | las 97 pasan. Se tocaron tres líneas de pruebas, las de los force unwrap que pide el punto 5 del diseño |
+| 6 · `swiftformat --lint` y `swiftlint --strict` | los dos pasan, con cero avisos |
+| 7 · ningún force unwrap ni `try!` sin justificación | hecho. `MySQLClient.eventLoop()` ya no fuerza; las pruebas usan `XCTUnwrap`; las expresiones del resaltado se unificaron en `try!` con el comentario y el `swiftlint:disable` que dice qué prueba las cubre |
+
+**Falta**, y queda para una próxima vuelta:
+
+- **Criterio 4**: los `///` en los tipos de `Models/` y `Services/` que todavía no los tienen. Se agregaron
+  los de `JSONValue`, `SQLStatement`, `SQLScript`, `Byte`, `Wire`, `Retained` y `MySQLClient.eventLoop`,
+  además de los que C6, C7, S1 y S2 fueron dejando. Faltan los del resto.
+- **Punto 4 del diseño**: desarmar `AgentController.receive(_:)` en `finishTurn(from:)` y
+  `handleItem(_:completed:)`, el `canExecute` de `DatabaseViews` y el `endpointChanged(from:to:)` de
+  `WorkspaceController` con su prueba.
+- **`docs/style.md`** con las reglas escritas.
+- **Bajar los topes de `scripts/verify.sh`** a 0 y cambiar el trinquete de `;` por `check_style.py`. Los
+  valores actuales (57, 159, 60) ya están muy por encima de la realidad (0, 0, 0), así que hoy no frenan
+  nada: el paso sigue siendo bloqueante pero con margen de sobra.
