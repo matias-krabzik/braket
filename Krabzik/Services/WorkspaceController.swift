@@ -24,7 +24,6 @@ final class WorkspaceController {
     var documents: [EditorDocument] = []
     var selectedDocumentID: URL?
     var selectedProjectID: UUID?
-    var recentProjects: [URL] = []
     private(set) var isSwitchingWorkspace = false
     var sidebarVisible = true
     var processesVisible = true
@@ -36,6 +35,7 @@ final class WorkspaceController {
     let database = DatabaseController()
     let agent: AgentController
     @ObservationIgnored let trust: TrustStore
+    @ObservationIgnored let recents: RecentProjectsStore
     /// Confianza del proyecto abierto. En `.untrusted` el proyecto es solo lectura:
     /// no se ejecuta nada ni se habilita el agente. Ver docs/specs/S1-proyecto-no-confiable.md.
     private(set) var workspaceTrust: TrustStore.Trust = .trusted
@@ -50,6 +50,8 @@ final class WorkspaceController {
     @ObservationIgnored private let defaults: UserDefaults
 
     var selectedDocument: EditorDocument? { documents.first { $0.id == selectedDocumentID } }
+    /// Reenvío para las vistas, que piden el historial al controlador.
+    var recentProjects: [URL] { recents.urls }
     /// Vacío en solo lectura: así los botones ▶ y el menú Proyecto quedan deshabilitados
     /// sin tener que repetir la condición en cada vista.
     var runnableProjects: [CodeProject] {
@@ -73,13 +75,10 @@ final class WorkspaceController {
         self.defaults = defaults
         self.trust = TrustStore(defaults: defaults)
         self.agent = AgentController(defaults: defaults)
-        var seen: Set<URL> = []
-        recentProjects = Array((defaults.stringArray(forKey: "recentProjects") ?? [])
-            .map { URL(fileURLWithPath: $0).standardizedFileURL }
-            .filter { seen.insert($0).inserted }.prefix(10))
+        self.recents = RecentProjectsStore(defaults: defaults)
         agent.onFilesChanged = { [weak self] scope in self?.refreshAgentFiles(scope) }
         // Lo que el usuario ya venía usando se considera confiable, una sola vez.
-        trust.migrateIfNeeded(recentProjects: recentProjects)
+        trust.migrateIfNeeded(recentProjects: recents.urls)
     }
 
     func start(arguments: [String] = ProcessInfo.processInfo.arguments) async {
@@ -162,10 +161,7 @@ final class WorkspaceController {
         treeRevision += 1
     }
 
-    func removeRecentProject(_ url: URL) {
-        recentProjects.removeAll { $0 == url.standardizedFileURL }
-        defaults.set(recentProjects.map(\.path), forKey: "recentProjects")
-    }
+    func removeRecentProject(_ url: URL) { recents.forget(url) }
 
     /// Qué se le muestra al usuario antes de confiar: carpetas externas y comandos,
     /// que es exactamente lo que puede hacer daño.
@@ -202,10 +198,7 @@ final class WorkspaceController {
         for item in project.projects { _ = runner.state(for: item.id) }
         selectedProjectID = runnableProjects.first?.id
         treeRevision += 1
-        recentProjects.removeAll { $0 == url.standardizedFileURL }
-        recentProjects.insert(url.standardizedFileURL, at: 0)
-        recentProjects = Array(recentProjects.prefix(10))
-        defaults.set(recentProjects.map(\.path), forKey: "recentProjects")
+        recents.remember(url)
     }
 
     func addFolders() {
