@@ -170,3 +170,45 @@ Las pruebas de navegación existentes se conservan como no-regresión del coordi
   propiedad a través del controlador para que el seguimiento funcione; verificar que la lista de pestañas se
   siga actualizando al abrir un archivo (es justamente lo que cubre `DocumentStoreTests` más una pasada
   manual).
+
+## Resuelto parcialmente
+
+**2026-11-10**, en cuatro commits: `8589bd9` (historial), `a69f819` (errores), `edd8976` (documentos) y
+`cf868f0` (scripts y diálogos).
+
+| Criterio | Estado |
+|---|---|
+| 1 · `WorkspaceController.swift` con menos de 200 líneas; ningún tipo nuevo de más de 150 | **la segunda mitad sí, la primera no**: `RecentProjectsStore` 49, `ScriptLibrary` 47, `ErrorCenter` 82, `DocumentStore` 114. El controlador pasó de 645 a 547 líneas. Lo de abajo explica por qué 200 no era alcanzable con los cuatro tipos que el spec diseña |
+| 2 · las pruebas pasan, y las de recientes construyen el store directo | 133 pasan. `RecentProjectsTests` usa `RecentProjectsStore` sin controlador |
+| 3 · dos errores en el mismo ciclo se muestran los dos | `ErrorCenterTests.testTwoErrorsInTheSameCycleAreBothKept`. La alerta muestra el primero y dice cuántos esperan |
+| 4 · los cuatro tipos de error dan el mismo texto por cualquier camino | `testDescribeCoversTheFourKindsOfError` y `testDatabasePathAndGeneralPathAgree` |
+| 5 · `DocumentStore` se ejercita sin ningún `NSAlert` | las 14 pruebas de `DocumentStoreTests` no abren ninguno: el store lanza y el coordinador pregunta |
+| 6 · ninguna referencia a `controller.errorMessage` en las vistas | la propiedad ya no existe |
+
+### Por qué el controlador no bajó de 200
+
+El objetivo se escribió cuando el archivo tenía unas 450 líneas. Después S1 le sumó el modelo de confianza
+(~140 líneas: el prompt, `install(_:at:trust:)`, `allowedToRun`, `mountedProjects`, `scriptURL`) y C6 el
+logging. Los cuatro tipos que este spec diseña se llevaron 292 líneas de lógica, y quedaron 547.
+
+Lo que queda adentro es coordinación, y es lo que el spec dice que tiene que quedar: abrir, crear y cerrar
+proyecto, `install`, `persist`, el estado de confianza, subproyectos, conexiones, el puente con el agente y
+el gate de ejecución. Bajar de 200 pediría tres o cuatro tipos más —uno de conexiones, uno de
+subproyectos, uno de puente con el agente— que el spec no diseñó y que agregarían indirección sin quitar
+decisiones: el coordinador seguiría llamándolos en el mismo orden.
+
+Queda como pendiente con número, no como hecho: **547 líneas, objetivo 200**.
+
+### Decisiones
+
+- **Un quinto tipo que el spec no pedía: `WorkspacePrompts`.** Los once diálogos y paneles se fueron a la
+  capa de vistas, al lado de `TrustPrompts`. No era para bajar el conteo: es lo que permite manejar el
+  controlador desde una prueba sin riesgo de modal, que es la lección de las 4,3 horas colgadas de S1. Los
+  valores por defecto de `WorkspaceDialogs` no preguntan ni aceptan nada, así que olvidarse de inyectar
+  falla con una aserción.
+- **`AppError.describe(_:)` reemplaza a `MySQLClient.message(_:)` como fuente**, no al revés. Un
+  `MySQLError` que llegaba por el camino general salía como «The operation couldn't be completed».
+- **`DocumentStore.open` recibe `stillValid`.** El guardia de «¿sigue abierto el mismo proyecto?» estaba
+  enterrado en un closure del controlador; ahora es un parámetro con nombre y una prueba.
+- **Dos pruebas que inyectaban `controller.documents = [...]` abren el archivo de verdad.** La propiedad
+  quedó de solo lectura, que es la mitad del punto de tener un store.
