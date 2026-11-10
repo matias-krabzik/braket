@@ -255,6 +255,8 @@ final class DatabaseTests: XCTestCase {
         } catch { await client.shutdown(); await observer.shutdown(); throw error }
     }
 
+    /// Cubre el parche 0001 del vendoring (rechazar TLS que el servidor no anuncia).
+    /// Ver Vendor/MySQLNIO/patches/0001-reject-tls-when-server-does-not-advertise.patch
     func testMySQLRejectsBadCredentialsAndUntrustedTLS() async throws {
         var config = try configuration()
         let client = MySQLClient()
@@ -265,6 +267,10 @@ final class DatabaseTests: XCTestCase {
         await client.shutdown()
     }
 
+    /// Cubre dos parches del vendoring: el nonce de 20 bytes de `caching_sha2_password`
+    /// —con una contraseña más larga que el nonce, y la autenticación en caché de la
+    /// segunda conexión— y `CLIENT_MULTI_RESULTS`, que es lo que permite el `CALL`.
+    /// Ver patches/0002-caching-sha2-nonce-20-bytes.patch y 0004-negotiate-client-multi-results.patch
     func testMySQLPasswordAuthenticationAndStoredProcedure() async throws {
         let adminConfig = try configuration(), admin = MySQLClient(), client = MySQLClient()
         let suffix = UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)
@@ -316,6 +322,9 @@ final class DatabaseTests: XCTestCase {
         XCTAssertEqual(try CredentialStore.read(for: config), "")
     }
 
+    /// Cubre el parche 0003 del vendoring: plazos de conexión y autenticación, y cierre
+    /// del canal cuando el servidor corta antes de terminar.
+    /// Ver patches/0003-connection-deadlines-and-channel-cleanup.patch
     func testHandshakeTimeoutAndEarlyServerDisconnect() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         do {

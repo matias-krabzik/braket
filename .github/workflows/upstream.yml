@@ -1,0 +1,34 @@
+# Krabzik IDE · seguimiento de upstream
+#
+# El fork local de MySQLNIO está fijado a un tag (Vendor/MySQLNIO/UPSTREAM.md) y se
+# mantiene como upstream + patches/. Una release nueva de mysql-nio puede traer las
+# correcciones que acá están parcheadas, y entonces el parche se retira. Sin un aviso
+# eso no se descubre nunca: este job falla una vez al mes si hay una versión más nueva.
+#
+# No publica nada ni toca el repositorio: consulta la API pública de releases.
+
+name: Upstream
+on:
+  schedule:
+    - cron: '0 9 1 * *'   # el día 1 de cada mes, 09:00 UTC
+  workflow_dispatch:
+
+jobs:
+  mysql-nio:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Comparar la versión fijada con la última release
+        run: |
+          set -euo pipefail
+          line=$(grep -m1 '^Source:' Vendor/MySQLNIO/UPSTREAM.md)
+          pinned=$(printf '%s' "$line" | sed -n 's|.*/releases/tag/\([^)]*\)).*|\1|p')
+          latest=$(curl -fsSL https://api.github.com/repos/vapor/mysql-nio/releases/latest | jq -r .tag_name)
+          echo "fijada: $pinned · última: $latest"
+          if [ "$pinned" != "$latest" ]; then
+            echo "::error::mysql-nio publicó $latest y el vendoring sigue en $pinned."
+            echo "Revisar si algún parche de Vendor/MySQLNIO/patches/ ya está integrado aguas arriba."
+            exit 1
+          fi

@@ -1,0 +1,24 @@
+Krabzik: negociar CLIENT_MULTI_RESULTS.
+
+Por qué: un CALL a un procedimiento almacenado devuelve varios conjuntos de
+resultados, y sin esta capacidad el servidor corta la respuesta. CLIENT_MULTI_STATEMENTS
+queda deshabilitado a propósito: Krabzik parsea el script y manda las sentencias de
+una en una, así que permitir varias por paquete solo agregaría superficie.
+
+Dónde: MySQLProtocol.CapabilityFlags.clientDefault.
+Prueba que lo cubre: DatabaseTests.testMySQLPasswordAuthenticationAndStoredProcedure,
+que llama a un procedimiento almacenado.
+
+diff --git a/Sources/MySQLNIO/Protocol/MySQLProtocol+CapabilityFlags.swift b/Sources/MySQLNIO/Protocol/MySQLProtocol+CapabilityFlags.swift
+index fe005eb..fbdf5a1 100644
+--- a/Sources/MySQLNIO/Protocol/MySQLProtocol+CapabilityFlags.swift
++++ b/Sources/MySQLNIO/Protocol/MySQLProtocol+CapabilityFlags.swift
+@@ -130,6 +130,7 @@ extension MySQLProtocol {
+         
+         /// Default capabilities.
+         public static var clientDefault: Self { [
++            .CLIENT_MULTI_RESULTS,
+             .CLIENT_PROTOCOL_41,
+             .CLIENT_PLUGIN_AUTH,
+             .CLIENT_SECURE_CONNECTION,
+

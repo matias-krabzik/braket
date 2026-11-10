@@ -1,0 +1,27 @@
+Krabzik: rechazar TLS cuando el servidor no lo anuncia.
+
+Por qué: upstream, si se pide TLS y el servidor no anuncia CLIENT_SSL, la conexión
+sigue en texto plano y las credenciales se envían igual. Un downgrade silencioso
+es justo lo que no puede pasar: S3 limita «sin TLS» a loopback, y esta rama es la
+que decide si el TLS pedido se cumple.
+
+Dónde: MySQLConnectionHandler.handshake(), antes de enviar credenciales.
+Prueba que lo cubre: DatabaseTests.testMySQLRejectsBadCredentialsAndUntrustedTLS
+(contra un servidor real).
+Referencia: https://dev.mysql.com/doc/dev/mysql-server/8.0.46/page_protocol_connection_phase.html
+
+diff --git a/Sources/MySQLNIO/MySQLConnectionHandler.swift b/Sources/MySQLNIO/MySQLConnectionHandler.swift
+index 45a3ba9..47e6dc4 100644
+--- a/Sources/MySQLNIO/MySQLConnectionHandler.swift
++++ b/Sources/MySQLNIO/MySQLConnectionHandler.swift
+@@ -114,6 +114,10 @@ final class MySQLConnectionHandler: ChannelDuplexHandler {
+             throw MySQLError.unsupportedServer(message: "Client protocol 4.1 required")
+         }
+         self.serverCapabilities = handshakeRequest.capabilities
++        // Krabzik: a requested TLS connection must never silently downgrade.
++        if state.tlsConfiguration != nil && !handshakeRequest.capabilities.contains(.CLIENT_SSL) {
++            throw MySQLError.unsupportedServer(message: "El servidor no ofrece TLS.")
++        }
+         if let tlsConfiguration = state.tlsConfiguration, handshakeRequest.capabilities.contains(.CLIENT_SSL) {
+             var capabilities = MySQLProtocol.CapabilityFlags.clientDefault
+             capabilities.insert(.CLIENT_SSL)

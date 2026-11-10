@@ -1,0 +1,26 @@
+Krabzik: omitir el target de pruebas de upstream.
+
+Por qué: las fuentes de Tests/ no se versionan en este vendoring, así que el target
+no resuelve y el paquete no carga. La integración se prueba desde
+KrabzikTests/DatabaseTests.swift, contra un servidor real.
+
+Dónde: Package.swift.
+
+diff --git a/Package.swift b/Package.swift
+index 6d1262a..39888c4 100644
+--- a/Package.swift
++++ b/Package.swift
+@@ -32,13 +32,6 @@ let package = Package(
+             ],
+             swiftSettings: swiftSettings
+         ),
+-        .testTarget(
+-            name: "MySQLNIOTests",
+-            dependencies: [
+-                .target(name: "MySQLNIO"),
+-            ],
+-            swiftSettings: swiftSettings
+-        ),
+     ]
+ )
+ 

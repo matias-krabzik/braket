@@ -1,0 +1,58 @@
+Krabzik: plazos de 10 s para conexión y autenticación, y cerrar el canal fallido.
+
+Por qué: upstream acota el connect de TCP pero no la autenticación. Un servidor que
+acepta el socket y no contesta deja la promesa colgada para siempre, y la interfaz
+se queda esperando sin nada que mostrar. También: si el socket se cierra antes de
+terminar la autenticación, la promesa nunca se completa; y si agregar los handlers
+falla, el canal queda abierto.
+
+Dónde: MySQLConnection.connect().
+Prueba que lo cubre: DatabaseTests.testHandshakeTimeoutAndEarlyServerDisconnect, con
+un servidor TCP local que acepta y no responde.
+
+diff --git a/Sources/MySQLNIO/MySQLConnection.swift b/Sources/MySQLNIO/MySQLConnection.swift
+index 957e167..9d94e49 100644
+--- a/Sources/MySQLNIO/MySQLConnection.swift
++++ b/Sources/MySQLNIO/MySQLConnection.swift
+@@ -12,9 +12,11 @@ public final class MySQLConnection: MySQLDatabase, Sendable {
+         tlsConfiguration: TLSConfiguration? = .makeClientConfiguration(),
+         serverHostname: String? = nil,
+         logger: Logger = .init(label: "codes.vapor.mysql"),
++        connectTimeout: TimeAmount = .seconds(10),
+         on eventLoop: any EventLoop
+     ) -> EventLoopFuture<MySQLConnection> {
+         let bootstrap = ClientBootstrap(group: eventLoop)
++            .connectTimeout(connectTimeout)
+             .channelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
+         
+         logger.debug("Opening new connection to \(socketAddress)")
+@@ -22,8 +24,18 @@ public final class MySQLConnection: MySQLDatabase, Sendable {
+         return bootstrap.connect(to: socketAddress).flatMap { channel in
+             let sequence = MySQLPacketSequence()
+             let done = channel.eventLoop.makePromise(of: Void.self)
+-            done.futureResult.whenFailure { _ in
+-                channel.close(mode: .all, promise: nil)
++            // Krabzik: bound authentication as well as TCP connection setup.
++            let completed = NIOLoopBoundBox(false, eventLoop: channel.eventLoop)
++            let deadline = channel.eventLoop.scheduleTask(in: connectTimeout) {
++                if !completed.value { done.fail(ChannelError.connectTimeout(connectTimeout)) }
++            }
++            done.futureResult.whenComplete { _ in
++                completed.value = true
++                deadline.cancel()
++            }
++            done.futureResult.whenFailure { _ in channel.close(mode: .all, promise: nil) }
++            channel.closeFuture.whenComplete { _ in
++                if !completed.value { done.fail(MySQLError.closed) }
+             }
+             do {
+                 try channel.pipeline.syncOperations.addHandlers([
+@@ -46,7 +58,7 @@ public final class MySQLConnection: MySQLDatabase, Sendable {
+                     ErrorHandler()
+                 ], position: .last)
+             } catch {
+-                return channel.eventLoop.makeFailedFuture(error)
++                done.fail(error)
+             }
+ 
+             return done.futureResult.map { MySQLConnection(channel: channel, logger: logger) }

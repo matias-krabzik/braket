@@ -126,7 +126,7 @@ else
 fi
 
 # ----------------------------------------------------------------------- vendor
-step "Integridad del vendoring (BLOQUEANTE cuando S7 esté hecho)"
+step "Integridad del vendoring (BLOQUEANTE · necesita red)"
 if [[ -x scripts/check_vendor.sh ]]; then
   if scripts/check_vendor.sh; then ok "Vendor/MySQLNIO coincide con upstream + parches"; else fail "el vendoring no coincide"; fi
 else

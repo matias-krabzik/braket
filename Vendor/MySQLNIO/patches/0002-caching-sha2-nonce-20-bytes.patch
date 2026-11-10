@@ -1,0 +1,30 @@
+Krabzik: usar exactamente 20 bytes de nonce en caching_sha2_password.
+
+Por qué: upstream usa todo authPluginData como semilla, incluido el NUL terminador
+del handshake. Con eso el scramble sale mal y el servidor rechaza la autenticación
+cuando la contraseña es más larga que el nonce. Además, con contraseña vacía hay
+que enviar una respuesta vacía, no un hash.
+
+Dónde: MySQLConnectionHandler, armado del hash de autenticación.
+Prueba que lo cubre: DatabaseTests.testMySQLPasswordAuthenticationAndStoredProcedure,
+con una contraseña más larga que el nonce, contra un servidor real.
+Referencia: https://dev.mysql.com/doc/dev/mysql-server/8.0.46/page_caching_sha2_authentication_exchanges.html
+
+diff --git a/Sources/MySQLNIO/MySQLConnectionHandler.swift b/Sources/MySQLNIO/MySQLConnectionHandler.swift
+index 45a3ba9..47e6dc4 100644
+--- a/Sources/MySQLNIO/MySQLConnectionHandler.swift
++++ b/Sources/MySQLNIO/MySQLConnectionHandler.swift
+@@ -158,8 +162,11 @@ final class MySQLConnectionHandler: ChannelDuplexHandler {
+         let hash: ByteBuffer
+         switch authPluginName {
+         case "caching_sha2_password":
+-            let seed = authPluginData
+-            hash = xor(sha256(password), sha256(sha256(sha256(password)), seed))
++            // The handshake's trailing NUL is not part of the 20-byte nonce.
++            guard let seed = authPluginData.getSlice(at: authPluginData.readerIndex, length: 20) else {
++                throw MySQLError.authPluginDataError(name: authPluginName)
++            }
++            hash = password.readableBytes == 0 ? .init() : xor(sha256(password), sha256(sha256(sha256(password)), seed))
+             saveSeed = seed.getBytes(at: 0, length: seed.readableBytes) ?? []
+             self.logger.trace("Generated scrambled hash for caching_sha2_password")
+         case "mysql_native_password":
