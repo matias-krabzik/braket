@@ -21,6 +21,93 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(project.directory(relativeTo: url), directory.appendingPathComponent("api"))
     }
 
+    // MARK: - Rendimiento del editor (C11)
+
+    /// Un archivo cerca del límite de 5 MB, hecho de líneas de código repetidas.
+    private func largeSource() -> String {
+        let line = "    let value = compute(index: 42, label: \"etiqueta\")  // comentario\n"
+        let limit = 5 * 1024 * 1024
+        var text = ""
+        text.reserveCapacity(limit)
+        while text.utf8.count + line.utf8.count <= limit { text += line }
+        return text
+    }
+
+    /// La latencia de tecla no puede depender del tamaño del archivo.
+    ///
+    /// Medido sobre 5 MB y 76.000 líneas, insertando al principio, en esta misma
+    /// configuración de pruebas:
+    ///
+    /// | | ms/tecla |
+    /// |---|---|
+    /// | antes de C11 | 8,39 |
+    /// | `LineIndex.replace`, sola, antes | 7,25 |
+    /// | leer `textView.string`, lo que señalaba el spec | 0,27 |
+    /// | `NSTextView` sin delegado: el piso de TextKit | 0,06 |
+    /// | después de C11 | **0,83** |
+    @MainActor func testEditorKeystrokeLatencyOnLargeDocument() throws {
+        let directory = try temporaryDirectory()
+        let url = directory.appendingPathComponent("grande.swift")
+        let data = Data(largeSource().utf8)
+        try data.write(to: url)
+        let document = try EditorDocument(url: url, data: data)
+        let surface = EditorSurface(document: document)
+        document.editorStorage = surface
+        defer { document.releaseEditor() }
+        XCTAssertGreaterThan(surface.lines.count, 50_000, "el archivo tiene que ser grande de verdad")
+
+        // Insertar al principio es el peor caso: desplaza todas las líneas siguientes.
+        let keystrokes = 200
+        let start = DispatchTime.now()
+        for _ in 0 ..< keystrokes {
+            surface.textView.insertText("x", replacementRange: NSRange(location: 0, length: 0))
+        }
+        let elapsed = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
+        let perKeystroke = elapsed / Double(keystrokes)
+        // Un frame a 120 Hz. Si CI resulta demasiado variable, el umbral se sube acá y se
+        // anota por qué; lo que no se puede volver es a reconstruir el índice por tecla.
+        XCTAssertLessThan(perKeystroke, 8,
+                          "\(String(format: "%.2f", perKeystroke)) ms por pulsación sobre \(data.count / 1024) KiB")
+        // Y el índice sigue siendo exacto después de 200 ediciones.
+        XCTAssertEqual(surface.lines.starts, LineIndex(surface.textView.string).starts)
+    }
+
+    /// Criterio 2 de C11: el texto que ve el resto de la app es exactamente el del editor,
+    /// aunque no se haya leído en cada tecla.
+    @MainActor func testDocumentTextReflectsEditorAfterEditing() throws {
+        let directory = try temporaryDirectory()
+        let url = directory.appendingPathComponent("edit.swift")
+        let data = Data("let a = 1\n".utf8)
+        try data.write(to: url)
+        let document = try EditorDocument(url: url, data: data)
+        let surface = EditorSurface(document: document)
+        document.editorStorage = surface
+        defer { document.releaseEditor() }
+
+        surface.textView.insertText("// hola\n", replacementRange: NSRange(location: 0, length: 0))
+        XCTAssertEqual(document.text, "// hola\nlet a = 1\n")
+        XCTAssertEqual(document.text, surface.textView.string)
+        XCTAssertTrue(document.isDirty)
+
+        // Soltar la vista no pierde lo escrito.
+        document.releaseEditor()
+        XCTAssertEqual(document.text, "// hola\nlet a = 1\n")
+    }
+
+    /// Un documento abierto y nunca mostrado no tiene surface de donde releer: devuelve el
+    /// contenido con el que se abrió.
+    @MainActor func testDocumentTextWithoutSurfaceReturnsInitialContent() throws {
+        let directory = try temporaryDirectory()
+        let url = directory.appendingPathComponent("sin-vista.sql")
+        let data = Data("SELECT 1;\n".utf8)
+        try data.write(to: url)
+        let document = try EditorDocument(url: url, data: data)
+        XCTAssertNil(document.editorStorage)
+        XCTAssertEqual(document.text, "SELECT 1;\n")
+        document.markTextStale()
+        XCTAssertEqual(document.text, "SELECT 1;\n", "sin vista, la caché es exacta")
+    }
+
     // MARK: - Contrato del formato (C7)
 
     /// Escribe el `.krabzik` tal cual, sin pasar por `Workspace.write`: estas pruebas

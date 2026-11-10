@@ -90,7 +90,11 @@ def render():
         for config in ['Debug', 'Release']:
             settings = {
                 'MACOSX_DEPLOYMENT_TARGET': '14.0', 'SWIFT_VERSION': '6.0',
-                'CLANG_ENABLE_MODULES': 'YES', 'SDKROOT': 'macosx', 'ONLY_ACTIVE_ARCH': 'YES',
+                'CLANG_ENABLE_MODULES': 'YES', 'SDKROOT': 'macosx',
+                # Debug compila solo para esta máquina; Release es universal, porque
+                # ese binario es el que se instala en /Applications (ver AGENTS.md).
+                'ONLY_ACTIVE_ARCH': 'YES' if config == 'Debug' else 'NO',
+                'ARCHS': '$(ARCHS_STANDARD)',
                 'CODE_SIGN_IDENTITY': '-', 'CODE_SIGN_STYLE': 'Manual',
                 # Un aviso del compilador rompe el build. La válvula de escape es la
                 # invocación (xcodebuild SWIFT_TREAT_WARNINGS_AS_ERRORS=NO), nunca editar esto.

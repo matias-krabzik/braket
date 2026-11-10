@@ -10,7 +10,28 @@ final class EditorDocument: Identifiable {
     var hasExternalChange = false
     var line = 1
     var column = 1
-    @ObservationIgnored var text: String
+    /// El texto del documento. **No se mantiene actualizado en cada tecla**: leer
+    /// `NSTextView.string` materializa un `String` nuevo del `NSTextStorage`, así que
+    /// hacerlo por pulsación cuesta O(n) sobre un archivo que puede tener 5 MB. El editor
+    /// solo marca la caché como vieja, y acá se relee cuando alguien pide el texto:
+    /// guardar, ejecutar SQL, guardar una copia o recargar desde disco. Todos son eventos
+    /// puntuales del usuario. Ver docs/specs/C11-rendimiento-editor.md.
+    var text: String {
+        get {
+            if textIsStale, let surface = editorStorage as? EditorSurface {
+                cachedText = surface.textView.string
+                textIsStale = false
+            }
+            return cachedText
+        }
+        set {
+            cachedText = newValue
+            textIsStale = false
+        }
+    }
+
+    @ObservationIgnored private var cachedText: String
+    @ObservationIgnored private var textIsStale = false
     @ObservationIgnored var originalData: Data
     @ObservationIgnored var editorStorage: AnyObject?
     @ObservationIgnored var selectedRange = NSRange(location: 0, length: 0)
@@ -42,12 +63,17 @@ final class EditorDocument: Identifiable {
         guard data.count <= 5 * 1024 * 1024 else { throw WorkspaceError.largeFile }
         guard !data.contains(0), let text = String(data: data, encoding: .utf8) else { throw WorkspaceError.binaryFile }
         self.id = url.standardizedFileURL
-        self.text = text
+        self.cachedText = text
         self.originalData = data
     }
 
+    /// La llama el editor en cada cambio: O(1). El texto se relee cuando alguien lo pida.
+    func markTextStale() { textIsStale = true }
+
     /// Suelta la vista nativa del documento. Se llama al cerrar el documento o el proyecto.
+    /// Lee el texto antes de soltarla: después ya no hay de dónde releerlo.
     func releaseEditor() {
+        _ = text
         (editorStorage as? EditorSurface)?.teardown()
         editorStorage = nil
     }

@@ -187,7 +187,7 @@ private final class ObserverToken: @unchecked Sendable {
 
     func textDidChange(_ notification: Notification) {
         editRevision += 1
-        document?.text = textView.string
+        document?.markTextStale()
         if document?.isDirty == false { document?.isDirty = true }
         textView.typingAttributes = baseAttributes
         gutter.needsDisplay = true
@@ -202,7 +202,7 @@ private final class ObserverToken: @unchecked Sendable {
         let position = textView.selectedRange().location
         let line = lines.line(at: position)
         document?.line = line + 1
-        document?.column = position - lines.starts[line] + 1
+        document?.column = position - lines.start(of: line) + 1
     }
 
     private func scheduleHighlight() {
