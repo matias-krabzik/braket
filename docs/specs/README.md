@@ -44,7 +44,7 @@ Dos hallazgos de la auditoría se resolvieron durante esa ventana y los specs ya
 | [S4](S4-no-retener-password.md) | No retener la contraseña en memoria durante la sesión | Media-baja | **resuelto** |
 | [S5](S5-contenido-del-modelo.md) | Marcar y sanear el contenido que viene del modelo | Baja | **resuelto** |
 | [S6](S6-sandbox-y-firma.md) | Decidir y documentar sandbox, firma y distribución | Estructural | **resuelto** |
-| [S7](S7-gobernanza-fork-mysqlnio.md) | Gobernanza del fork local de MySQLNIO | Proceso | pendiente |
+| [S7](S7-gobernanza-fork-mysqlnio.md) | Gobernanza del fork local de MySQLNIO | Proceso | **resuelto** |
 
 ## Calidad y prácticas
 
@@ -52,7 +52,7 @@ Dos hallazgos de la auditoría se resolvieron durante esa ventana y los specs ya
 |---|---|---|---|
 | [C1](C1-repositorio-git.md) | Inicializar el control de versiones | Crítica | **resuelto** |
 | [C2](C2-swift-6-mode.md) | Migrar a Swift 6 language mode | Alta | **resuelto** |
-| [C3](C3-ci-lint-warnings.md) | CI, linter y warnings como errores | Alta | **implementado** · falta C8, C4, S7 y un remoto |
+| [C3](C3-ci-lint-warnings.md) | CI, linter y warnings como errores | Alta | **implementado** · falta C4 y un remoto |
 | [C4](C4-legibilidad.md) | Legibilidad: estilo, nombres y constantes con nombre | Media | pendiente |
 | [C5](C5-dividir-workspacecontroller.md) | Dividir `WorkspaceController` | Media | pendiente |
 | [C6](C6-logging-y-errores.md) | Logging real y errores no silenciados | Media | **resuelto** |
@@ -109,6 +109,10 @@ mostrar con honestidad y rutas relativas que salen de la carpeta, y normaliza la
 **C6 resuelto** el 2026-11-10 (commit `b252444`): existe `Log.swift` con su regla de privacidad, ningún
 error se descarta en silencio y el nivel del logger de MySQL se sube sin recompilar. Queda una verificación
 manual —el criterio 5, `log show` sobre la app instalada— para cuando se instale la Release.
+
+**S7 resuelto** el 2026-11-10 (commit `f7e5594`): el vendoring es upstream 1.9.1 más cinco parches con su
+motivo, y `scripts/check_vendor.sh` lo comprueba. Con esto `verify.sh` ya no omite ningún paso: los ocho
+bloqueantes corren.
 
 Al cerrar un spec, marcarlo en la tabla de este índice y dejar en el propio spec una sección `## Resuelto`
 con la fecha, los commits y los criterios verificados.

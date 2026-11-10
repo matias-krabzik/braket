@@ -134,3 +134,32 @@ mencionar `caching_sha2` en el nombre o en un comentario con el número de parch
   arregló. Ese es el resultado buscado: se borra el parche y se anota en `UPSTREAM.md`.
 - Hacer obligatorias las pruebas de MySQL en CI alarga la corrida (arranque del contenedor, ~30 s). Vale la
   pena: son las únicas que cubren el código de autenticación parcheado.
+
+## Resuelto
+
+**2026-11-10**, commit `f7e5594`.
+
+| Criterio | Cómo se verificó |
+|---|---|
+| 1 · `check_vendor.sh` pasa sobre el repositorio | sí: clona 1.9.1, aplica los cinco parches y el árbol coincide exactamente con `Sources/` y `Package.swift` |
+| 2 · editar sin parche hace fallar el script, nombrando el archivo | comprobado agregando una línea a `MySQLRow.swift`: `✗ Sources/MySQLNIO/MySQLRow.swift no coincide con upstream + parches`, exit 1. Restaurado, vuelve a pasar |
+| 3 · cada parche aplica limpio sobre el tag declarado | es lo que hace el paso 1 del script, en orden |
+| 4 · en CI las 6 pruebas de MySQL se ejecutan | el workflow instala `mysql@8.4` por Homebrew, espera el `ping` y crea `.build/mysql-test-port` antes de `verify.sh`. **La redacción del criterio no se puede cumplir tal cual**: la salida no va a decir «0 tests skipped», porque las dos pruebas de Codex en vivo se siguen salteando sin un `codex` instalado y una sesión. Lo que vale es que las 6 de MySQL dejan de saltarse |
+| 5 · `UPSTREAM.md` dice qué prueba cubre cada parche | tabla «Qué prueba cubre cada parche». Además cada parche lo repite en su cabecera y las tres pruebas lo dicen en un comentario con el número |
+
+### Decisiones
+
+- **Los parches van numerados por posición en el archivo, no por el orden del spec.** El spec proponía
+  `0001` para el nonce y `0002` para el rechazo de TLS; los dos tocan `MySQLConnectionHandler.swift` y el de
+  TLS está antes en el archivo. Numerarlos al revés los hace aplicar en secuencia sin depender de que
+  `git apply` acomode los desplazamientos.
+- **El script compara en los dos sentidos**: archivos del vendoring que no coinciden, y archivos de upstream
+  que faltan. Lo segundo no estaba en el spec y es la mitad del problema: borrar un archivo también es
+  editar el fork.
+- **No hay prueba en `scripts/tests/` para este chequeo.** Las demás pruebas de scripts corren en cada
+  `verify.sh` y esta necesitaría clonar upstream dos veces más. La verificación del criterio 2 se hizo una
+  vez, a mano, y queda escrita arriba.
+- **El aviso mensual es un workflow aparte** (`Upstream`), no un paso de CI: no tiene que ver con un cambio
+  del repositorio y no debe fallar un push.
+- **Las pruebas no se renombraron.** El spec lo sugería como alternativa a un comentario; el comentario con
+  el número de parche dice más —qué parche y por qué— y no toca nombres que ya están citados en otros specs.
