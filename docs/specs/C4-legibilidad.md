@@ -167,30 +167,39 @@ Nunca mezclar formato con extracción en el mismo commit.
   comentario correcto es una pregunta anotada en el spec, no una descripción inventada.
 
 
-## Estado: parcial
+## Resuelto
 
-**2026-11-10**, commits `3910c44` (pasada mecánica) y `2f4439a` (constantes con nombre).
-
-Hecho y verificado:
+**2026-11-10**, en cuatro commits: `3910c44` (pasada mecánica), `2f4439a` (constantes con nombre),
+`d7e2158` (doc comments y `docs/style.md`) y `50f19ee` (extracciones).
 
 | Criterio | Estado |
 |---|---|
 | 1 · ninguna línea con más de una sentencia | hecho. El chequeo pasó a `scripts/check_style.py`, que salta cadenas y comentarios: el `grep '; '` anterior marcaba media docena de pruebas con SQL o Python dentro de un literal, y SQL sin punto y coma no es SQL |
 | 2 · ninguna línea de más de 140 columnas | hecho: de 57 a 0 |
 | 3 · sin literales de bytes sin nombre en `SQLScript` y `MySQLTextCommand` | hecho: enums `Byte`, `Wire` y `Retained` |
-| 5 · las pruebas pasan sin cambiarles el cuerpo | las 97 pasan. Se tocaron tres líneas de pruebas, las de los force unwrap que pide el punto 5 del diseño |
+| 4 · todos los tipos de `Models/` y `Services/` con `///` | los 65, con responsabilidad, dueño e invariante de aislamiento. 41 se agregaron en esta vuelta |
+| 5 · las pruebas pasan sin cambiarles el cuerpo | las 98 pasan. Se tocaron tres líneas de pruebas, las de los force unwrap que pide el punto 5 del diseño |
 | 6 · `swiftformat --lint` y `swiftlint --strict` | los dos pasan, con cero avisos |
 | 7 · ningún force unwrap ni `try!` sin justificación | hecho. `MySQLClient.eventLoop()` ya no fuerza; las pruebas usan `XCTUnwrap`; las expresiones del resaltado se unificaron en `try!` con el comentario y el `swiftlint:disable` que dice qué prueba las cubre |
 
-**Falta**, y queda para una próxima vuelta:
+### Decisiones
 
-- **Criterio 4**: los `///` en los tipos de `Models/` y `Services/` que todavía no los tienen. Se agregaron
-  los de `JSONValue`, `SQLStatement`, `SQLScript`, `Byte`, `Wire`, `Retained` y `MySQLClient.eventLoop`,
-  además de los que C6, C7, S1 y S2 fueron dejando. Faltan los del resto.
-- **Punto 4 del diseño**: desarmar `AgentController.receive(_:)` en `finishTurn(from:)` y
-  `handleItem(_:completed:)`, el `canExecute` de `DatabaseViews` y el `endpointChanged(from:to:)` de
-  `WorkspaceController` con su prueba.
-- **`docs/style.md`** con las reglas escritas.
-- **Bajar los topes de `scripts/verify.sh`** a 0 y cambiar el trinquete de `;` por `check_style.py`. Los
-  valores actuales (57, 159, 60) ya están muy por encima de la realidad (0, 0, 0), así que hoy no frenan
-  nada: el paso sigue siendo bloqueante pero con margen de sobra.
+- **El trinquete de `;` se reemplazó por `scripts/check_style.py`** en vez de ajustarlo. El `grep '; '`
+  marcaba media docena de pruebas con SQL o Python dentro de un literal, y SQL sin punto y coma no es SQL:
+  el criterio 1 solo se podía cumplir mutilando esas cadenas o midiendo lo que el criterio dice medir.
+- **`swiftformat` no incluye `wrapIfStatementBodies` ni `wrapLoopBodies`.** Expandirían los 274 bloques de
+  una sola sentencia que el proyecto quiere compactos (`guard let x else { return }`). Lo que sí se expandió
+  fue todo bloque con dos sentencias, que es lo que la regla pedía.
+- **`try!` unificado en `SyntaxStyler`** con `swiftlint:disable` y la justificación. Antes `try?` +
+  `compactMap` hacía desaparecer en silencio un patrón roto: el editor coloreaba de menos y nada lo decía.
+- **Los topes quedaron en 0 y el paso de SwiftLint pasó a `--strict`.** Dejar 57/159/60 cuando la realidad
+  es 0/0/0 no frena nada; con 0 cualquier aparición falla.
+
+### Errores cometidos
+
+- Al quitar los `;`, swiftformat deja el `}` colgando en la línea siguiente. Rearmé 43 bloques con un
+  script, pero el detector no vio los que abren con `} catch {` —la línea tiene una `{` y una `}`, así que
+  el balance de llaves no cambia— y quedaron nueve mal formateados hasta la pasada siguiente.
+- Insertando doc comments con un script, una de las sustituciones reemplazó la declaración de
+  `DatabaseConnection.TLSMode` en vez de insertar antes. Lo agarré comparando el diff, que no tenía que
+  tener ninguna línea borrada; después de eso el script solo inserta.

@@ -52,8 +52,8 @@ Dos hallazgos de la auditoría se resolvieron durante esa ventana y los specs ya
 |---|---|---|---|
 | [C1](C1-repositorio-git.md) | Inicializar el control de versiones | Crítica | **resuelto** |
 | [C2](C2-swift-6-mode.md) | Migrar a Swift 6 language mode | Alta | **resuelto** |
-| [C3](C3-ci-lint-warnings.md) | CI, linter y warnings como errores | Alta | **implementado** · falta C4 y un remoto |
-| [C4](C4-legibilidad.md) | Legibilidad: estilo, nombres y constantes con nombre | Media | **parcial** |
+| [C3](C3-ci-lint-warnings.md) | CI, linter y warnings como errores | Alta | **implementado** · falta un remoto |
+| [C4](C4-legibilidad.md) | Legibilidad: estilo, nombres y constantes con nombre | Media | **resuelto** |
 | [C5](C5-dividir-workspacecontroller.md) | Dividir `WorkspaceController` | Media | pendiente |
 | [C6](C6-logging-y-errores.md) | Logging real y errores no silenciados | Media | **resuelto** |
 | [C7](C7-validacion-formato-krabzik.md) | Validar y acotar el formato `.krabzik` | Media | **resuelto** |
@@ -122,6 +122,11 @@ bloqueantes corren.
 sin servidor. `MySQLTextCommand`, `FileTree.Coordinator` y `SyntaxStyler` pasaron de cero pruebas a 31 entre
 los tres, y las dos cosas que encontraron —el color de las palabras clave en mayúsculas y el evento del
 observador que no llega en el host de pruebas— quedaron escritas en el spec.
+
+**C4 resuelto** el 2026-11-10: cero líneas de más de 140 columnas, cero líneas con más de una sentencia,
+cero avisos de SwiftLint con `--strict`, los 65 tipos de `Models/` y `Services/` documentados, y las reglas
+escritas en `docs/style.md`. Los trinquetes de `verify.sh` quedaron en 0, así que dejaron de ser topes con
+margen y pasaron a ser reglas.
 
 Al cerrar un spec, marcarlo en la tabla de este índice y dejar en el propio spec una sección `## Resuelto`
 con la fecha, los commits y los criterios verificados.
