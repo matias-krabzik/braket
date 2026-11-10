@@ -56,7 +56,7 @@ Dos hallazgos de la auditoría se resolvieron durante esa ventana y los specs ya
 | [C4](C4-legibilidad.md) | Legibilidad: estilo, nombres y constantes con nombre | Media | pendiente |
 | [C5](C5-dividir-workspacecontroller.md) | Dividir `WorkspaceController` | Media | pendiente |
 | [C6](C6-logging-y-errores.md) | Logging real y errores no silenciados | Media | pendiente |
-| [C7](C7-validacion-formato-krabzik.md) | Validar y acotar el formato `.krabzik` | Media | pendiente |
+| [C7](C7-validacion-formato-krabzik.md) | Validar y acotar el formato `.krabzik` | Media | **resuelto** |
 | [C8](C8-pbxproj-sincronizado.md) | Garantizar que el `.pbxproj` generado esté al día | Media | **resuelto** |
 | [C9](C9-cobertura-pruebas.md) | Cerrar los huecos de cobertura que quedan | Media | pendiente |
 | [C10](C10-version-unica.md) | Una sola fuente de verdad para la versión | Baja | **resuelto** |
@@ -102,6 +102,9 @@ pasó a tener ocho pasos bloqueantes y corre también `scripts/tests/*.sh`.
 **S2 corregido** el 2026-11-10 (commit `4d86a40`): la identidad del ejecutable de Codex pasó a ser el
 SHA-256 de su contenido. La versión anterior —tamaño, `mtime` e inode— podía heredar la aprobación a un
 binario reemplazado en el lugar.
+
+**C7 resuelto** el 2026-11-10 (commit `ca5b283`): el formato tiene topes, rechaza texto que no se puede
+mostrar con honestidad y rutas relativas que salen de la carpeta, y normaliza las de los scripts.
 
 Al cerrar un spec, marcarlo en la tabla de este índice y dejar en el propio spec una sección `## Resuelto`
 con la fecha, los commits y los criterios verificados.

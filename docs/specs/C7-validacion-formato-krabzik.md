@@ -149,3 +149,39 @@ Fixtures: construirlos en código, no como archivos, salvo uno malformado a mano
 - Rechazar un archivo entero por un carácter inválido en un campo puede ser frustrante. El mensaje tiene que
   decir **qué campo** y **de qué subproyecto**, para que se pueda corregir a mano: el formato es JSON
   legible, y eso es una ventaja que conviene aprovechar.
+
+## Resuelto
+
+**2026-11-10**, commit `ca5b283`.
+
+| Criterio | Cómo se verificó |
+|---|---|
+| 1 · demasiadas entradas se rechazan | `testWorkspaceRejectsOversizedCollections`, con 1.000 scripts y con 70 subproyectos. Comprueba el mensaje exacto, que incluye el tope y lo que trae el archivo |
+| 2 · `"path": "../../etc"` se rechaza | `testWorkspaceRejectsEscapingRelativePaths`, que además comprueba que una ruta absoluta **sí** se admite |
+| 3 · `U+202E` en un nombre se rechaza | `testWorkspaceRejectsControlAndBidiText`, con el override bidi en el nombre del proyecto y un `NUL` en la ruta de un subproyecto |
+| 4 · comando de 10.000 se rechaza, uno multilínea de 3.000 se acepta | `testWorkspaceBoundsCommandLengthButAllowsNewlines` |
+| 5 · `"sql/a.sql"` y `"./sql/a.sql"` colapsan | `testWorkspaceNormalizesAndDeduplicatesScripts`, que incluye también `sql/sub/../b.sql` |
+| 6 · el ejemplo y el round-trip siguen funcionando | `testWorkspaceRoundTripAndRelativePaths` ampliada con scripts y una conexión. El `.krabzik` del ejemplo no tiene nada que supere los topes |
+| 7 · la barra lateral con 512 scripts se desplaza con fluidez | la lista pasó a `ScrollView` + `LazyVStack` con alto máximo, así que construye solo las filas visibles. No se midió con 512 entradas reales: queda como verificación manual pendiente |
+
+### Decisiones
+
+- **`WorkspaceLimits` en el nivel del archivo**, no anidado en `Workspace` como proponía el spec. Lo usan
+  el modelo, las vistas y el README, y `Workspace.Limits` no agregaba nada.
+- **Un cuarto error, `textTooLong`.** El spec listaba tres casos nuevos y ninguno decía «es demasiado
+  largo»: meter las longitudes en `tooManyEntries` daba mensajes raros («demasiados caracteres en…»).
+- **Normalización sin tocar el disco.** `standardizedFileURL` necesita una base y resuelve contra el
+  sistema de archivos; para decidir si `"sql/a.sql"` y `"./sql/a.sql"` son la misma entrada basta con
+  resolver los componentes `.` y `..` léxicamente, que es lo que hace `Workspace.normalized(_:)` y se puede
+  probar sin crear archivos.
+- **El fixture hostil se lee con `#filePath`**, no como recurso del bundle: así no hay que registrarlo en
+  el proyecto Xcode ni copiarlo al bundle de pruebas, y vive en `KrabzikTests/Fixtures/` como pide C9.
+- **Las pruebas escriben el JSON crudo**, sin pasar por `Workspace.write`. Es lo fiel al caso real —un
+  archivo ajeno— y además `write` ahora tiene un `assertionFailure` en Debug que una prueba hostil
+  dispararía.
+
+### Errores cometidos
+
+- Las dos primeras pasadas de este spec rompieron el trinquete de líneas largas y el de `;` con código
+  propio. En los dos casos se arregló el código, que es para lo que están los trinquetes, en vez de subir
+  el tope.
