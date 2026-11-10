@@ -4,7 +4,7 @@ IDE nativo para macOS 14 o posterior, escrito en Swift con SwiftUI, AppKit y Tex
 
 ## Abrir y compilar
 
-Abrí `Krabzik.xcodeproj`, seleccioná **Krabzik** y ejecutá con ⌘R. Xcode resuelve las dependencias Swift Package Manager en la primera compilación; requiere acceso a Internet. Compilación local con firma ad hoc, sin cuenta de desarrollador.
+Abrí `Krabzik.xcodeproj`, seleccioná **Krabzik** y ejecutá con ⌘R. Xcode resuelve las dependencias Swift Package Manager en la primera compilación; requiere acceso a Internet. Compilación local con firma ad hoc, sin cuenta de desarrollador: la app **no está preparada para distribuirse a terceros** y Gatekeeper la bloquea en otra máquina. La postura completa —modelo de amenaza, por qué no hay App Sandbox, qué sí está activo— está en [docs/security.md](docs/security.md).
 
 La versión del producto se define en un solo lugar, `scripts/generate_project.py`; este documento no la
 repite para que no pueda quedar desincronizada. La sección **Entorno verificado**, más abajo, dice contra

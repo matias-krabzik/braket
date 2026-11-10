@@ -35,6 +35,29 @@ else
   skip "generate_project.py todavía no tiene --check" "C8"
 fi
 
+# ------------------------------------------------------- pruebas de los scripts
+# Los generadores y chequeos son scripts, y se prueban como scripts. Hasta ahora
+# existían pero nadie los corría.
+step "Pruebas de los scripts (BLOQUEANTE)"
+for prueba in scripts/tests/*.sh; do
+  if salida=$(zsh "$prueba" 2>&1); then
+    ok "${prueba:t}"
+  else
+    fail "${prueba:t}"
+    print -- "$salida" | grep '✗' | sed 's/^/      /'
+  fi
+done
+
+# --------------------------------------------------------- postura de seguridad
+step "Postura de seguridad declarada (BLOQUEANTE)"
+postura=$(python3 scripts/check_security_posture.py)
+if [[ -z "$postura" ]]; then
+  ok "sandbox, hardened runtime y firma coinciden con docs/security.md"
+else
+  fail "la configuración no coincide con docs/security.md (ver S6)"
+  print -- "$postura" | sed 's/^/      /'
+fi
+
 # ------------------------------------------------------------------- trinquetes
 step "Trinquetes de estilo (BLOQUEANTE: no empeorar)"
 long_lines=$(find Krabzik KrabzikTests -name '*.swift' | xargs awk 'length>140{c++} END{print c+0}')
