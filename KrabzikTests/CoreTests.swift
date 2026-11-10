@@ -363,11 +363,10 @@ final class CoreTests: XCTestCase {
         try Data("<?php\n".utf8).write(to: url)
         let defaults = try XCTUnwrap(UserDefaults(suiteName: "krabzik-editor-\(UUID())"))
         let controller = WorkspaceController(defaults: defaults)
-        let document = try EditorDocument(url: url, data: Data(contentsOf: url))
+        try await controller.docs.open(url)
+        let document = try XCTUnwrap(controller.selectedDocument)
         let surface = EditorSurface(document: document)
         document.editorStorage = surface
-        controller.documents = [document]
-        controller.selectedDocumentID = document.id
         XCTAssertTrue(surface.isObservingScroll)
         controller.closeDocument(document)
         for _ in 0..<100 where !controller.documents.isEmpty { try await Task.sleep(nanoseconds: 20_000_000) }

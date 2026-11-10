@@ -281,7 +281,7 @@ struct Workspace: Codable, Equatable {
 /// Todo lo que puede salir mal abriendo un proyecto o un archivo, con el mensaje que
 /// ve el usuario. Los cuatro casos de C7 llevan el campo en el mensaje porque el
 /// `.krabzik` es JSON legible y se puede corregir a mano.
-enum WorkspaceError: LocalizedError {
+enum WorkspaceError: LocalizedError, Equatable {
     case unsupportedVersion, duplicateProject, binaryFile, largeFile, externalChange, missingFolder
     /// Los tres de C7 llevan el campo y el subproyecto en el mensaje: el `.krabzik` es
     /// JSON legible y se puede corregir a mano si se sabe dónde mirar.

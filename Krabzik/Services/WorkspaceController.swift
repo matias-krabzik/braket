@@ -21,21 +21,19 @@ extension UTType {
 final class WorkspaceController {
     var workspace: Workspace?
     var workspaceURL: URL?
-    var documents: [EditorDocument] = []
-    var selectedDocumentID: URL?
     var selectedProjectID: UUID?
     private(set) var isSwitchingWorkspace = false
     var sidebarVisible = true
     var processesVisible = true
     var commandProject: CodeProject?
     var treeRevision = 0
-    var openingFiles: Set<URL> = []
     let runner = ProcessRunner()
     let database = DatabaseController()
     let agent: AgentController
     @ObservationIgnored let trust: TrustStore
     @ObservationIgnored let recents: RecentProjectsStore
     @ObservationIgnored let errors = ErrorCenter()
+    @ObservationIgnored let docs = DocumentStore()
     /// Confianza del proyecto abierto. En `.untrusted` el proyecto es solo lectura:
     /// no se ejecuta nada ni se habilita el agente. Ver docs/specs/S1-proyecto-no-confiable.md.
     private(set) var workspaceTrust: TrustStore.Trust = .trusted
@@ -49,9 +47,15 @@ final class WorkspaceController {
     @ObservationIgnored private var pendingOpen: Set<URL> = []
     @ObservationIgnored private let defaults: UserDefaults
 
-    var selectedDocument: EditorDocument? { documents.first { $0.id == selectedDocumentID } }
-    /// Reenvío para las vistas, que piden el historial al controlador.
+    // Reenvíos para las vistas, que le piden todo al controlador.
+    var documents: [EditorDocument] { docs.documents }
+    var selectedDocument: EditorDocument? { docs.selected }
+    var openingFiles: Set<URL> { docs.openingFiles }
     var recentProjects: [URL] { recents.urls }
+    var selectedDocumentID: URL? {
+        get { docs.selectedID }
+        set { docs.selectedID = newValue }
+    }
     /// Vacío en solo lectura: así los botones ▶ y el menú Proyecto quedan deshabilitados
     /// sin tener que repetir la condición en cada vista.
     var runnableProjects: [CodeProject] {
@@ -148,9 +152,7 @@ final class WorkspaceController {
         isSwitchingWorkspace = true
         defer { isSwitchingWorkspace = false }
         guard await prepareToLeave() else { return }
-        releaseEditors()
-        documents.removeAll()
-        selectedDocumentID = nil
+        docs.closeAll()
         selectedProjectID = nil
         workspace = nil
         workspaceURL = nil
@@ -177,9 +179,7 @@ final class WorkspaceController {
     }
 
     private func install(_ project: Workspace, at url: URL, trust decided: TrustStore.Trust) {
-        releaseEditors()
-        documents.removeAll()
-        selectedDocumentID = nil
+        docs.closeAll()
         workspace = project
         workspaceURL = url.standardizedFileURL
         workspaceTrust = decided
@@ -366,27 +366,13 @@ final class WorkspaceController {
     }
 
     func openFile(_ url: URL) {
-        let url = url.standardizedFileURL
-        if documents.contains(where: {
-            $0.id == url }) { selectedDocumentID = url
-            return
-        }
-        guard !pendingOpen.contains(url) else { return }
-        pendingOpen.insert(url)
-        openingFiles.insert(url)
         let currentWorkspace = workspaceURL
         Task {
-            defer {
-                pendingOpen.remove(url)
-                openingFiles.remove(url)
-            }
             do {
-                let data = try await Task.detached(priority: .userInitiated) { try DocumentIO.read(url) }.value
-                guard workspaceURL == currentWorkspace else { return }
-                let document = try EditorDocument(url: url, data: data)
-                documents.append(document)
-                selectedDocumentID = document.id
-            } catch { show(error) }
+                try await docs.open(url) { self.workspaceURL == currentWorkspace }
+            } catch {
+                show(error)
+            }
         }
     }
 
@@ -408,15 +394,8 @@ final class WorkspaceController {
     }
 
     @discardableResult func save(_ document: EditorDocument) async -> Bool {
-        guard !document.isSaving else { return false }
-        document.isSaving = true
-        defer { document.isSaving = false }
-        let data = Data(document.text.utf8), expected = document.originalData, url = document.url
         do {
-            try await Task.detached(priority: .userInitiated) { try DocumentIO.save(data, to: url, expected: expected) }.value
-            document.originalData = data
-            document.isDirty = Data(document.text.utf8) != data
-            return true
+            return try await docs.save(document)
         } catch {
             show(error)
             return false
@@ -430,10 +409,11 @@ final class WorkspaceController {
         panel.directoryURL = document.url.deletingLastPathComponent()
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            try Data(document.text.utf8).write(to: url, options: .atomic)
+            try docs.saveCopy(of: document, to: url)
             treeRevision += 1
+        } catch {
+            show(error)
         }
-        catch { show(error) }
     }
 
     func closeDocument(_ document: EditorDocument) {
@@ -447,12 +427,7 @@ final class WorkspaceController {
                 database.cancel(document.sqlExecution)
             }
             guard await confirmSave(document) else { return }
-            let index = documents.firstIndex { $0.id == document.id } ?? 0
-            document.releaseEditor()
-            documents.removeAll { $0.id == document.id }
-            if selectedDocumentID == document.id {
-                selectedDocumentID = documents.isEmpty ? nil : documents[min(index, documents.count - 1)].id
-            }
+            docs.close(document)
         }
     }
 
@@ -479,7 +454,7 @@ final class WorkspaceController {
             guard alert.runModal() == .alertFirstButtonReturn else { return false }
             agent.shutdown()
         }
-        for document in documents where document.isDirty {
+        for document in docs.dirty {
             if !(await confirmSave(document)) { return false }
         }
         if runner.hasActiveProcesses {
@@ -528,15 +503,9 @@ final class WorkspaceController {
     private func refreshAgentFiles(_ scope: AgentScope) {
         treeRevision += 1
         let currentWorkspace = workspaceURL
-        let candidates = documents.filter { scope.contains($0.url) }
         Task {
-            for document in candidates {
-                let url = document.url
-                let data = try? await Task.detached(priority: .utility) { try DocumentIO.read(url) }.value
-                guard workspaceURL == currentWorkspace, documents.contains(where: { $0 === document }) else { continue }
-                if let data { document.acceptExternalData(data) }
-                else { document.hasExternalChange = true }
-            }
+            await docs.refresh(matching: { scope.contains($0) },
+                               stillValid: { self.workspaceURL == currentWorkspace })
         }
     }
 
@@ -549,8 +518,11 @@ final class WorkspaceController {
             alert.addButton(withTitle: "Cancelar")
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
-        do { document.acceptExternalData(try DocumentIO.read(document.url), discardEdits: true) }
-        catch { show(error) }
+        do {
+            try docs.reload(document)
+        } catch {
+            show(error)
+        }
     }
 
     func openAgentFile(_ path: String) {
@@ -630,10 +602,6 @@ final class WorkspaceController {
 
     /// Suelta las vistas nativas antes de descartar los documentos: el `deinit` de
     /// `EditorSurface` no puede hacerlo bajo las reglas de concurrencia de Swift 6.
-    private func releaseEditors() {
-        for document in documents { document.releaseEditor() }
-    }
-
     /// Reporta un error para que la ventana lo muestre y el log lo guarde.
     func show(_ error: Error, context: StaticString = #function) {
         errors.report(error, context: context)

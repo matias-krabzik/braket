@@ -254,9 +254,11 @@ final class WorkspaceNavigationTests: XCTestCase {
         let controller = WorkspaceController(defaults: defaults)
         controller.confirmTrust = { _ in .trust }
         await controller.openWorkspace(url)
-        let document = try EditorDocument(url: directory.appendingPathComponent("test.sql"), data: Data("SELECT 1;".utf8))
-        controller.documents = [document]
-        controller.selectedDocumentID = document.id
+        // Se abre de verdad por el store: el controlador ya no deja inyectar documentos.
+        let archivo = directory.appendingPathComponent("test.sql")
+        try Data("SELECT 1;".utf8).write(to: archivo)
+        try await controller.docs.open(archivo)
+        XCTAssertEqual(controller.documents.count, 1)
         controller.selectedProjectID = UUID()
         controller.database.install([DatabaseConnection()])
 
