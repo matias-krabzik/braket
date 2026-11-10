@@ -1,4 +1,11 @@
 import Foundation
+import UniformTypeIdentifiers
+
+extension UTType {
+    /// El tipo de documento del proyecto, declarado en Info.plist. Lo usan los paneles de
+    /// abrir y guardar.
+    static let krabzikProject = UTType(exportedAs: "com.krabzik.project", conformingTo: .json)
+}
 
 /// Qué clase de subproyecto es, y con eso el comando que se propone al agregarlo.
 /// `detect(at:)` mira el disco: no es un dato que el usuario tenga que elegir.

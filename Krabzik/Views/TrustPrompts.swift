@@ -89,6 +89,7 @@ extension WorkspaceController {
         let controller = WorkspaceController()
         controller.confirmTrust = TrustPrompts.ask
         controller.confirmCommand = TrustPrompts.askCommand
+        controller.dialogs = .real
         return controller
     }
 }

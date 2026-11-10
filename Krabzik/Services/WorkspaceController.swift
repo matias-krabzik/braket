@@ -1,10 +1,5 @@
-import AppKit
+import Foundation
 import Observation
-import UniformTypeIdentifiers
-
-extension UTType {
-    static let krabzikProject = UTType(exportedAs: "com.krabzik.project", conformingTo: .json)
-}
 
 /// El estado de la ventana: qué proyecto está abierto, qué documentos, y los servicios
 /// que dependen de eso.
@@ -41,6 +36,9 @@ final class WorkspaceController {
     /// inyecta el diálogo real, con `WorkspaceController.forApp()`. Así un entorno sin interfaz
     /// —pruebas, CI— nunca queda esperando un modal, y si alguien olvida inyectarlo el proyecto
     /// queda cerrado en vez de confiado.
+    /// Los diálogos de la ventana. Por defecto no preguntan ni aceptan nada: los reales
+    /// los engancha `forApp()`, igual que `confirmTrust`.
+    @ObservationIgnored var dialogs = WorkspaceDialogs()
     @ObservationIgnored var confirmTrust: @MainActor (TrustPrompt) -> TrustDecision = { _ in .cancel }
     @ObservationIgnored var confirmCommand: @MainActor (CommandPrompt) -> CommandDecision = { _ in .cancel }
     @ObservationIgnored private var started = false
@@ -94,24 +92,12 @@ final class WorkspaceController {
     }
 
     func chooseWorkspace() {
-        guard !isSwitchingWorkspace else { return }
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.krabzikProject, .json]
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        panel.message = ""
-        panel.prompt = "Abrir"
-        if panel.runModal() == .OK, let url = panel.url { Task { await openWorkspace(url) } }
+        guard !isSwitchingWorkspace, let url = dialogs.chooseWorkspace() else { return }
+        Task { await openWorkspace(url) }
     }
 
     func createWorkspace() {
-        guard !isSwitchingWorkspace else { return }
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.krabzikProject]
-        panel.nameFieldStringValue = "Mi proyecto.krabzik"
-        panel.canCreateDirectories = true
-        panel.prompt = "Crear"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard !isSwitchingWorkspace, let url = dialogs.createWorkspace() else { return }
         Task {
             guard !isSwitchingWorkspace else { return }
             isSwitchingWorkspace = true
@@ -203,13 +189,8 @@ final class WorkspaceController {
 
     func addFolders() {
         guard let workspaceURL else { return }
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = true
-        panel.prompt = "Agregar"
-        guard panel.runModal() == .OK else { return }
-        let urls = panel.urls
+        let urls = dialogs.chooseFolders()
+        guard !urls.isEmpty else { return }
         Task {
             let detected = await Task.detached(priority: .userInitiated) {
                 urls.map { url -> CodeProject in
@@ -334,34 +315,21 @@ final class WorkspaceController {
     /// `nil` cuando la ruta no se puede ofrecer: en solo lectura no se resuelven
     /// rutas externas, que es por donde un `.krabzik` ajeno abriría archivos de cualquier parte.
     func scriptURL(_ path: String) -> URL? {
-        guard let base = workspaceURL?.deletingLastPathComponent() else { return nil }
-        if workspaceTrust == .untrusted, pathScope(path, relativeTo: base.appendingPathComponent("x")) == .external {
-            return nil
-        }
-        if path.hasPrefix("/") { return URL(fileURLWithPath: path) }
-        return base.appendingPathComponent(path)
+        guard let workspaceURL else { return nil }
+        return ScriptLibrary.url(for: path, workspaceURL: workspaceURL, trust: workspaceTrust)
     }
 
     func importScripts() {
         guard workspace != nil else { return }
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [UTType(filenameExtension: "sql") ?? .plainText]
-        panel.allowsMultipleSelection = true
-        panel.prompt = "Abrir"
-        guard panel.runModal() == .OK else { return }
-        for url in panel.urls {
+        for url in dialogs.chooseScripts() {
             rememberScript(url)
             openFile(url)
         }
     }
 
     private func rememberScript(_ url: URL) {
-        guard url.pathExtension.lowercased() == "sql", var updated = workspace, let workspaceURL else { return }
-        if updated.projects.contains(where: { url.path.hasPrefix($0.directory(relativeTo: workspaceURL).path + "/") }) { return }
-        let base = workspaceURL.deletingLastPathComponent().path + "/"
-        let path = url.path.hasPrefix(base) ? String(url.path.dropFirst(base.count)) : url.path
-        guard !updated.scripts.contains(path) else { return }
-        updated.scripts.append(path)
+        guard let workspace, let workspaceURL,
+              let updated = ScriptLibrary.remembering(url, in: workspace, at: workspaceURL) else { return }
         persist(updated)
     }
 
@@ -378,14 +346,12 @@ final class WorkspaceController {
 
     func createFile(in directory: URL? = nil) {
         guard workspace != nil else { return }
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = "nuevo.sql"
-        panel.directoryURL = directory ?? selectedDocument?.url.deletingLastPathComponent() ?? workspaceURL?.deletingLastPathComponent()
-        panel.canCreateDirectories = true
-        panel.prompt = "Crear"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let suggested = directory
+            ?? selectedDocument?.url.deletingLastPathComponent()
+            ?? workspaceURL?.deletingLastPathComponent()
+        guard let url = dialogs.createFile("nuevo.sql", suggested) else { return }
         do {
-            // The save panel supplies the explicit overwrite choice when a path exists.
+            // El panel de guardar ya resolvió la confirmación de sobrescribir.
             try Data().write(to: url, options: .atomic)
             rememberScript(url)
             treeRevision += 1
@@ -404,10 +370,9 @@ final class WorkspaceController {
 
     func saveCopy() {
         guard let document = selectedDocument else { return }
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = document.url.deletingPathExtension().lastPathComponent + "-copia." + document.url.pathExtension
-        panel.directoryURL = document.url.deletingLastPathComponent()
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let suggested = document.url.deletingPathExtension().lastPathComponent
+            + "-copia." + document.url.pathExtension
+        guard let url = dialogs.saveCopy(suggested, document.url.deletingLastPathComponent()) else { return }
         do {
             try docs.saveCopy(of: document, to: url)
             treeRevision += 1
@@ -419,11 +384,7 @@ final class WorkspaceController {
     func closeDocument(_ document: EditorDocument) {
         Task {
             if document.sqlExecution.isRunning {
-                let alert = NSAlert()
-                alert.messageText = "¿Cancelar la consulta y cerrar el archivo?"
-                alert.addButton(withTitle: "Cancelar consulta")
-                alert.addButton(withTitle: "Volver")
-                guard alert.runModal() == .alertFirstButtonReturn else { return }
+                guard dialogs.confirmCancelQuery() else { return }
                 database.cancel(document.sqlExecution)
             }
             guard await confirmSave(document) else { return }
@@ -431,39 +392,26 @@ final class WorkspaceController {
         }
     }
 
+    /// `true` si se puede seguir: se guardó, o el usuario decidió descartar.
     private func confirmSave(_ document: EditorDocument) async -> Bool {
         guard document.isDirty else { return true }
-        let alert = NSAlert()
-        alert.messageText = "¿Guardar \(document.url.lastPathComponent)?"
-        alert.informativeText = "Hay cambios sin guardar."
-        alert.addButton(withTitle: "Guardar")
-        alert.addButton(withTitle: "Cancelar")
-        alert.addButton(withTitle: "No guardar")
-        let result = alert.runModal()
-        if result == .alertFirstButtonReturn { return await save(document) }
-        return result == .alertThirdButtonReturn
+        switch dialogs.confirmSave(document.url.lastPathComponent) {
+        case .save: return await save(document)
+        case .discard: return true
+        case .cancel: return false
+        }
     }
 
     func prepareToLeave() async -> Bool {
         if agent.isRunning {
-            let alert = NSAlert()
-            alert.messageText = "¿Detener Codex?"
-            alert.informativeText = "Los cambios ya realizados se conservarán."
-            alert.addButton(withTitle: "Detener y continuar")
-            alert.addButton(withTitle: "Cancelar")
-            guard alert.runModal() == .alertFirstButtonReturn else { return false }
+            guard dialogs.confirmStopAgent() else { return false }
             agent.shutdown()
         }
         for document in docs.dirty {
             if !(await confirmSave(document)) { return false }
         }
         if runner.hasActiveProcesses {
-            let alert = NSAlert()
-            alert.messageText = "¿Detener los procesos?"
-            alert.informativeText = "Los procesos de este proyecto siguen en ejecución."
-            alert.addButton(withTitle: "Detener")
-            alert.addButton(withTitle: "Cancelar")
-            guard alert.runModal() == .alertFirstButtonReturn else { return false }
+            guard dialogs.confirmStopProcesses() else { return false }
             runner.stopAll()
         }
         guard await database.prepareToLeave() else { return false }
@@ -484,15 +432,10 @@ final class WorkspaceController {
                 let scope = try AgentScope.make(workspace: workspace, url: workspaceURL,
                                                 projectID: agent.selectedProjectID,
                                                 allowExternal: workspaceTrust == .trusted)
-                let dirty = documents.filter { $0.isDirty && scope.contains($0.url) }
+                let dirty = docs.dirty.filter { scope.contains($0.url) }
                 if !dirty.isEmpty {
-                    let alert = NSAlert()
-                    alert.messageText = "¿Guardar antes de enviar a Codex?"
-                    alert.informativeText = dirty.map { $0.url.lastPathComponent }.joined(separator: ", ")
-                    alert.addButton(withTitle: "Guardar y enviar")
-                    alert.addButton(withTitle: "Cancelar")
-                    guard alert.runModal() == .alertFirstButtonReturn else { return }
-                    for document in dirty { guard await save(document) else { return } }
+                    guard dialogs.confirmSaveBeforeSending(dirty.map { $0.url.lastPathComponent }) else { return }
+                    for document in dirty where !(await save(document)) { return }
                 }
                 guard self.workspaceURL == workspaceURL, !isSwitchingWorkspace else { return }
                 agent.send(prompt, scope: scope)
@@ -510,13 +453,8 @@ final class WorkspaceController {
     }
 
     func reloadDocument(_ document: EditorDocument) {
-        if document.isDirty {
-            let alert = NSAlert()
-            alert.messageText = "¿Recargar \(document.url.lastPathComponent)?"
-            alert.informativeText = "Se descartarán tus cambios sin guardar."
-            alert.addButton(withTitle: "Recargar")
-            alert.addButton(withTitle: "Cancelar")
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        if document.isDirty, !dialogs.confirmDiscardChanges(document.url.lastPathComponent) {
+            return
         }
         do {
             try docs.reload(document)
