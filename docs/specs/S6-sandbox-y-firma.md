@@ -110,3 +110,26 @@ contra los valores que el ADR declara, de modo que cambiarlos sin actualizar el 
 - La opción B introduce secretos en el flujo de release (credenciales de notarización). Si se toma, deben ir
   en el llavero o en variables de entorno del entorno de firma, nunca en el repositorio, y el ADR tiene que
   decirlo.
+
+## Resuelto
+
+**2026-11-10**, commit `b18a1ca`. Se eligió la **opción A: uso local**.
+
+| Criterio | Estado |
+|---|---|
+| 1 · `docs/security.md` con las cinco secciones, enlazado desde el README | hecho: modelo de amenaza (con la tabla de vectores y su spec), por qué no hay App Sandbox, qué sí está activo, alcance de la distribución, revisión |
+| 2 · dice qué opción se eligió y con qué fecha | opción A, 2026-11-09, en «Alcance de la distribución» |
+| 3 · no hay excepciones al hardened runtime | `scripts/check_security_posture.py` las busca en `*.py`, `*.swift`, `*.plist` y `*.entitlements` bajo `Krabzik/` y `scripts/`. Las únicas apariciones son en `.md` —este spec y el ADR— que las nombran para prohibirlas, y el ADR lo dice |
+| 4 · opción B | no aplica |
+| 5 · la configuración coincide con lo que afirma el ADR | lo comprueba el chequeo nuevo, que es un paso bloqueante de `scripts/verify.sh` |
+
+### Decisiones
+
+- **No se creó un `.entitlements` vacío.** El spec lo dejaba como opcional. Un archivo sin excepciones no
+  agrega información y sí agrega un lugar donde alguien puede meter una sin pensarlo; el chequeo
+  automático cubre el caso mejor que el archivo.
+- **El chequeo vive en un script aparte**, no embebido en `verify.sh`: así tiene su propia prueba
+  (`scripts/tests/test_check_security_posture.sh`), que inyecta las cuatro desviaciones posibles y
+  comprueba que cada una falle. Un gate que solo sabe decir «todo bien» no es un gate.
+- **`verify.sh` ahora corre `scripts/tests/*.sh`.** Estaban escritos desde C8 y no los corría nadie, ni
+  local ni CI. Esto no estaba en el spec; apareció al querer que el chequeo nuevo fuera verificable.

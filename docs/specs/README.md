@@ -38,12 +38,12 @@ Dos hallazgos de la auditoría se resolvieron durante esa ventana y los specs ya
 
 | Spec | Título | Severidad | Estado |
 |---|---|---|---|
-| [S1](S1-proyecto-no-confiable.md) | Un `.krabzik` ajeno no debe poder ejecutar código | Alta | pendiente |
-| [S2](S2-verificar-ejecutable-codex.md) | Verificar el ejecutable de Codex antes de lanzarlo | Media | **resuelto** |
+| [S1](S1-proyecto-no-confiable.md) | Un `.krabzik` ajeno no debe poder ejecutar código | Alta | **resuelto** |
+| [S2](S2-verificar-ejecutable-codex.md) | Verificar el ejecutable de Codex antes de lanzarlo | Media | **resuelto** · corregido después |
 | [S3](S3-tls-solo-loopback.md) | «Sin TLS» solo para conexiones locales | Media | **resuelto** |
 | [S4](S4-no-retener-password.md) | No retener la contraseña en memoria durante la sesión | Media-baja | **resuelto** |
 | [S5](S5-contenido-del-modelo.md) | Marcar y sanear el contenido que viene del modelo | Baja | **resuelto** |
-| [S6](S6-sandbox-y-firma.md) | Decidir y documentar sandbox, firma y distribución | Estructural | pendiente |
+| [S6](S6-sandbox-y-firma.md) | Decidir y documentar sandbox, firma y distribución | Estructural | **resuelto** |
 | [S7](S7-gobernanza-fork-mysqlnio.md) | Gobernanza del fork local de MySQLNIO | Proceso | pendiente |
 
 ## Calidad y prácticas
@@ -92,5 +92,16 @@ compilador. Habilita el punto 1 de C3.
 inyectando fallos. Con `swiftlint` y `swiftformat` ya instalados, `verify.sh` tiene seis pasos bloqueantes en verde y dos
 omitidos, que esperan a C8 y S7. El spec lista qué criterio depende de qué.
 
-Los otros 15 están sin implementar. Al cerrar uno, marcarlo en la tabla de este índice y dejar en el propio
-spec una sección `## Resuelto` con la fecha, los commits y los criterios verificados.
+**S1 resuelto** el 2026-11-10 (commit `08d8256`): un proyecto que el usuario no confió se abre en solo
+lectura, sin montar raíces externas, sin ejecutar procesos y sin Codex. Habilita C7, que acota el formato.
+
+**S6 resuelto** el 2026-11-10 (commit `b18a1ca`), opción A (uso local): `docs/security.md` declara la
+postura y `scripts/check_security_posture.py` falla si el proyecto se separa del documento. `verify.sh`
+pasó a tener ocho pasos bloqueantes y corre también `scripts/tests/*.sh`.
+
+**S2 corregido** el 2026-11-10 (commit `4d86a40`): la identidad del ejecutable de Codex pasó a ser el
+SHA-256 de su contenido. La versión anterior —tamaño, `mtime` e inode— podía heredar la aprobación a un
+binario reemplazado en el lugar.
+
+Al cerrar un spec, marcarlo en la tabla de este índice y dejar en el propio spec una sección `## Resuelto`
+con la fecha, los commits y los criterios verificados.

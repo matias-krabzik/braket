@@ -184,3 +184,22 @@ mira el sistema real no es probable si no se le puede decir qué mirar.
 Reescribir `AgentRequestView` y el bloque de aprobación bajó tres trinquetes de [C3](C3-ci-lint-warnings.md):
 líneas de más de 140 columnas 64 → 57, bloques `catch` vacíos 10 → 8, avisos de SwiftLint 66 → 60. Los topes
 se bajaron al nuevo nivel.
+
+### Corrección posterior · identidad por contenido
+
+**2026-11-10**, commit `4d86a40`.
+
+La identidad del binario era ruta + tamaño + `mtime` + inode, elegida para no leer decenas de MB en cada
+arranque. No alcanza, y lo encontró la propia prueba de S2 al fallar de forma intermitente: sobrescribir el
+archivo en el lugar conserva el inode, el tamaño se puede igualar, y `mtime` lo fija cualquiera con `touch`
+—además se guardaba con precisión de un segundo—. Con los tres valores iguales, un reemplazo heredaba la
+aprobación del usuario, que es exactamente lo que el spec quería evitar.
+
+`BinaryIdentity` es ahora ruta + tamaño + **SHA-256 del contenido**, leído por bloques de 1 MB. Medido: 9 ms
+por 18,5 MB, una vez por conexión, contra un `posix_spawn` y un handshake JSON-RPC que ya estaban ahí. El
+diálogo de aprobación muestra el prefijo del hash. Las aprobaciones guardadas con el formato anterior no
+decodifican, así que se vuelve a preguntar una sola vez.
+
+La prueba `testPanelDoesNotSpawnWithoutApprovedBinary` ahora fuerza el peor caso —mismo tamaño, mismo inode,
+mismo segundo de `mtime`— y es determinista. Antes pasaba o fallaba según en qué momento del segundo
+cayeran los dos `write`.

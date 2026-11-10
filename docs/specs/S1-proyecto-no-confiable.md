@@ -195,3 +195,39 @@ hoja real. Las pruebas pasan un closure determinista.
 - **Fatiga de confirmaciones.** Por eso la aprobación es por comando y persistente, y el proyecto propio
   no pide nada. Si durante la implementación aparece un caso que pide confirmar seguido, es un bug del
   spec, no del usuario.
+
+## Resuelto
+
+**2026-11-10**, commit `08d8256`.
+
+| Criterio | Cómo se verificó |
+|---|---|
+| 1 · un `.krabzik` ajeno no ejecuta nada | `testUntrustedWorkspaceCannotRunProcesses` abre un proyecto cuyo comando es `touch <marcador>` y comprueba que el marcador **no** existe. `testCancellingTheTrustPromptDoesNotOpenTheProject` cubre el cancelar. Las tres vías de apertura pasan por `openWorkspace`, incluida la del doble clic (el `AppDelegate` llama ahí), así que el gate es uno solo |
+| 2 · en solo lectura ▶, el panel y ⌘R deshabilitados, y Codex no se habilita | `runnableProjects` devuelve vacío cuando el proyecto no es confiable, y de eso dependen el ▶ de la barra, el ⌘R de `KrabzikApp` y la aparición del panel de procesos. El botón ✦ y el ⌥⌘A dependen de `isReadOnly`. Esto se verificó leyendo el código y con el estado del controlador en las pruebas; el estado deshabilitado de un botón de SwiftUI no se prueba desde XCTest |
+| 3 · la confianza sobrevive a reabrir la app | `testTrustSurvivesRelaunchAndCommandEditRevokesApproval` construye un segundo controlador sobre los mismos `UserDefaults` y falla si vuelve a preguntar |
+| 4 · editar el comando revoca la aprobación | misma prueba: la aprobación se guarda con `SHA256` del comando, así que editarlo deja de coincidir |
+| 5 · una raíz externa no se monta sin haberse listado | `testExternalRootsAreNotMountedUntilTrusted` |
+| 6 · `AgentScope.make` rechaza raíces externas no confiables | `testAgentScopeRejectsUntrustedExternalRoots` |
+| 7 · el flujo normal no pide confirmaciones extra | `testFreshlyCreatedWorkspaceNeedsNoConfirmation` y `testLegacyRecentProjectsAreMigratedAsTrusted` |
+
+### Decisiones
+
+- **Dos closures síncronos en vez de uno `async`.** El spec proponía
+  `confirm: (TrustPrompt) async -> TrustDecision`. Quedó como `confirmTrust` y `confirmCommand`, ambos
+  síncronos y `@MainActor`: el diálogo es un `NSAlert` modal, que es síncrono por naturaleza, y son dos
+  preguntas distintas con decisiones distintas (`TrustDecision` tiene «solo lectura», que no aplica a un
+  comando).
+- **El valor por defecto niega.** No es el que proponía el spec («el default que muestra la hoja real»).
+  La interfaz engancha los diálogos reales con `WorkspaceController.forApp()`, y el default del
+  controlador devuelve `.cancel`. Motivo: con el default interactivo, cualquier prueba que abra un
+  proyecto y olvide inyectar queda esperando un modal para siempre. Además es la opción segura si alguien
+  agrega otro punto de creación y no lo inyecta: el proyecto queda cerrado, no confiado.
+- **La migración marca como confiados los proyectos del historial.** Quien ya los venía usando no tiene
+  que volver a aprobar nada. Se hace una sola vez, con la bandera `trustMigrationDone`.
+
+### Errores cometidos
+
+- La primera corrida de pruebas quedó **4,3 horas colgada** en el `NSAlert` de una prueba que no inyectaba
+  la decisión, y terminó con 16 fallos en las cinco pruebas de navegación previas. Dos arreglos: las
+  pruebas declaran explícitamente la confianza, y `scripts/verify.sh` corre con un tope de 2 minutos por
+  prueba, así que el mismo error ahora falla en minutos y dice cuál fue.
