@@ -22,13 +22,17 @@ struct AgentPanel: View {
                 Spacer()
                 Text(agent.account).font(.system(size: 10)).foregroundStyle(.secondary).help(agent.model)
                 Button { agent.clearConversation() } label: { Image(systemName: "square.and.pencil") }
-                    .disabled(agent.isRunning || agent.messages.isEmpty).help("Nueva conversación").accessibilityLabel("Nueva conversación")
+                    .disabled(agent.isRunning || agent.messages.isEmpty)
+                    .help("Nueva conversación")
+                    .accessibilityLabel("Nueva conversación")
                 Button { agent.visible = false } label: { Image(systemName: "xmark") }
                     .help("Cerrar panel Codex").accessibilityLabel("Cerrar panel Codex")
             }.buttonStyle(.plain).padding(.horizontal, 14).frame(height: 39).background(Theme.bar)
             Divider()
             if agent.isConnecting {
-                Spacer(); ProgressView().controlSize(.small); Spacer()
+                Spacer()
+                ProgressView().controlSize(.small)
+                Spacer()
             } else if !agent.connected || agent.account.isEmpty {
                 VStack(spacing: 14) {
                     if agent.loginPending {
@@ -70,7 +74,8 @@ struct AgentPanel: View {
                         HStack {
                             Text("\(agent.changes.count) archivos modificados").font(.system(size: 10)).foregroundStyle(.secondary)
                             Spacer()
-                            Button("Ver cambios") { showingDiff = true }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(Theme.blue)
+                            Button("Ver cambios") { showingDiff = true }.buttonStyle(.plain).font(.system(size: 11))
+                                .foregroundStyle(Theme.blue)
                         }
                         ScrollView {
                             VStack(alignment: .leading, spacing: 5) {
@@ -78,7 +83,8 @@ struct AgentPanel: View {
                                     Button { controller.openAgentFile(change.path) } label: {
                                         HStack(spacing: 7) {
                                             Text(change.kind == "add" ? "+" : change.kind == "delete" ? "−" : "M")
-                                                .foregroundStyle(change.kind == "delete" ? Color.red : Theme.blue).font(.system(size: 10, design: .monospaced))
+                                                .foregroundStyle(change.kind == "delete" ? Color.red : Theme.blue)
+                                                .font(.system(size: 10, design: .monospaced))
                                             Text(controller.agentFileLabel(change.path)).lineLimit(1).truncationMode(.middle)
                                         }.font(.system(size: 11))
                                     }.buttonStyle(.plain).disabled(change.kind == "delete").help(change.path)
@@ -87,12 +93,18 @@ struct AgentPanel: View {
                         }.frame(maxHeight: 100)
                     }.padding(12)
                 }
-                if let request = agent.requests.first { Divider(); AgentRequestView(request: request, agent: agent).id(request.id).padding(12) }
+                if let request = agent.requests.first {
+                    Divider()
+                    AgentRequestView(request: request, agent: agent).id(request.id).padding(12)
+                }
                 Divider()
                 VStack(spacing: 8) {
                     AgentComposer(text: $agent.draft, enabled: !agent.isRunning, send: controller.sendToAgent).frame(height: 82)
                         .overlay(alignment: .topLeading) {
-                            if agent.draft.isEmpty { Text("Pedile un cambio a Codex…").font(.system(size: 12)).foregroundStyle(.tertiary).padding(5).allowsHitTesting(false) }
+                            if agent.draft
+                                .isEmpty {
+                                Text("Pedile un cambio a Codex…").font(.system(size: 12)).foregroundStyle(.tertiary).padding(5)
+                                .allowsHitTesting(false) }
                         }
                     HStack {
                         Spacer()
@@ -101,7 +113,8 @@ struct AgentPanel: View {
                                 .disabled(agent.isStopping).help("Detener Codex").accessibilityLabel("Detener Codex")
                         } else {
                             Button(action: controller.sendToAgent) { Image(systemName: "arrow.up") }
-                                .disabled(agent.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || controller.workspace?.projects.isEmpty != false)
+                                .disabled(agent.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || controller.workspace?
+                                    .projects.isEmpty != false)
                                 .help("Enviar a Codex (⌘↩)").accessibilityLabel("Enviar a Codex")
                         }
                     }.buttonStyle(.bordered).controlSize(.small)
@@ -136,7 +149,9 @@ struct AgentPanel: View {
         }
         .sheet(isPresented: $showingDiff) {
             VStack(spacing: 0) {
-                HStack { Text("Cambios de Codex").font(.headline); Spacer(); Button("Cerrar") { showingDiff = false }.keyboardShortcut(.cancelAction) }.padding(18)
+                HStack { Text("Cambios de Codex").font(.headline)
+                Spacer()
+                Button("Cerrar") { showingDiff = false }.keyboardShortcut(.cancelAction) }.padding(18)
                 Divider()
                 ScrollView([.horizontal, .vertical]) {
                     Text(agent.diff.isEmpty ? agent.changes.map { $0.path + "\n" + $0.diff }.joined(separator: "\n\n") : agent.diff)
@@ -308,23 +323,34 @@ private struct AgentComposer: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView(), view = ComposerTextView()
-        view.isRichText = false; view.isAutomaticQuoteSubstitutionEnabled = false; view.isAutomaticDashSubstitutionEnabled = false
-        view.isAutomaticTextReplacementEnabled = false; view.font = .systemFont(ofSize: 12)
-        view.textColor = EditorPalette.text; view.backgroundColor = EditorPalette.background
+        view.isRichText = false
+        view.isAutomaticQuoteSubstitutionEnabled = false
+        view.isAutomaticDashSubstitutionEnabled = false
+        view.isAutomaticTextReplacementEnabled = false
+        view.font = .systemFont(ofSize: 12)
+        view.textColor = EditorPalette.text
+        view.backgroundColor = EditorPalette.background
         view.textContainerInset = NSSize(width: 1, height: 5)
-        view.isVerticallyResizable = true; view.isHorizontallyResizable = false
-        view.autoresizingMask = [.width]; view.textContainer?.widthTracksTextView = true
+        view.isVerticallyResizable = true
+        view.isHorizontallyResizable = false
+        view.autoresizingMask = [.width]
+        view.textContainer?.widthTracksTextView = true
         view.textContainer?.containerSize = NSSize(width: 300, height: CGFloat.greatestFiniteMagnitude)
-        view.minSize = .zero; view.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        view.delegate = context.coordinator; view.setAccessibilityLabel("Mensaje para Codex")
-        scroll.documentView = view; scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true
+        view.minSize = .zero
+        view.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        view.delegate = context.coordinator
+        view.setAccessibilityLabel("Mensaje para Codex")
+        scroll.documentView = view
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
         return scroll
     }
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.owner = self
         guard let view = scroll.documentView as? ComposerTextView else { return }
         if view.string != text { view.string = text }
-        view.isEditable = enabled; view.send = send
+        view.isEditable = enabled
+        view.send = send
     }
     final class Coordinator: NSObject, NSTextViewDelegate {
         var owner: AgentComposer
@@ -335,7 +361,8 @@ private struct AgentComposer: NSViewRepresentable {
         var send: (() -> Void)?
         override func performKeyEquivalent(with event: NSEvent) -> Bool {
             if event.keyCode == 36, event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command {
-                if isEditable { send?() }; return true
+                if isEditable { send?() }
+                return true
             }
             return super.performKeyEquivalent(with: event)
         }

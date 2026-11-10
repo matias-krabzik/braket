@@ -70,7 +70,17 @@ struct FileTree: NSViewRepresentable {
         var lastURL: URL?
         var generation = UUID()
         private let queue = DispatchQueue(label: "com.krabzik.files", qos: .userInitiated)
-        nonisolated private static let excluded: Set<String> = [".git", "node_modules", "vendor", ".build", "DerivedData", "dist", ".next", ".angular", ".DS_Store"]
+        nonisolated private static let excluded: Set<String> = [
+            ".git",
+            "node_modules",
+            "vendor",
+            ".build",
+            "DerivedData",
+            "dist",
+            ".next",
+            ".angular",
+            ".DS_Store"
+        ]
 
         init(controller: WorkspaceController) { self.controller = controller }
 
@@ -117,7 +127,8 @@ struct FileTree: NSViewRepresentable {
             let cell = NSTableCellView()
             let icon = NSImageView()
             icon.image = NSImage(systemSymbolName: node.isDirectory ? "folder.fill" : fileSymbol(node.url), accessibilityDescription: nil)
-            icon.contentTintColor = node.isDirectory ? NSColor(calibratedRed: 0.49, green: 0.68, blue: 0.87, alpha: 1) : .secondaryLabelColor
+            icon.contentTintColor = node
+                .isDirectory ? NSColor(calibratedRed: 0.49, green: 0.68, blue: 0.87, alpha: 1) : .secondaryLabelColor
             let label = NSTextField(labelWithString: node.name)
             label.font = .systemFont(ofSize: 12, weight: node.project == nil ? .regular : .medium)
             label.lineBreakMode = .byTruncatingMiddle
@@ -143,7 +154,8 @@ struct FileTree: NSViewRepresentable {
         }
 
         private func fileSymbol(_ url: URL) -> String {
-            ["swift", "php", "ts", "js", "jsx", "tsx", "html", "css", "astro", "sql"].contains(url.pathExtension) ? "chevron.left.forwardslash.chevron.right" : "doc"
+            ["swift", "php", "ts", "js", "jsx", "tsx", "html", "css", "astro", "sql"]
+                .contains(url.pathExtension) ? "chevron.left.forwardslash.chevron.right" : "doc"
         }
 
         @objc func clicked() {
@@ -214,22 +226,26 @@ struct FileTree: NSViewRepresentable {
             guard let outline, outline.clickedRow >= 0, let node = outline.item(atRow: outline.clickedRow) as? FileNode else { return }
             if node.isDirectory {
                 let new = NSMenuItem(title: "Nuevo archivo…", action: #selector(newFile(_:)), keyEquivalent: "")
-                new.target = self; new.representedObject = node
+                new.target = self
+                new.representedObject = node
                 menu.addItem(new)
             }
             if let project = node.project {
                 let command = NSMenuItem(title: "Comando…", action: #selector(editCommand(_:)), keyEquivalent: "")
-                command.target = self; command.representedObject = project
+                command.target = self
+                command.representedObject = project
                 menu.addItem(command)
                 menu.addItem(.separator())
                 let remove = NSMenuItem(title: "Quitar del proyecto", action: #selector(removeRoot(_:)), keyEquivalent: "")
-                remove.target = self; remove.representedObject = project
+                remove.target = self
+                remove.representedObject = project
                 menu.addItem(remove)
             }
         }
 
         @objc func newFile(_ item: NSMenuItem) { if let node = item.representedObject as? FileNode { controller.createFile(in: node.url) } }
         @objc func editCommand(_ item: NSMenuItem) { controller.commandProject = item.representedObject as? CodeProject }
-        @objc func removeRoot(_ item: NSMenuItem) { if let project = item.representedObject as? CodeProject { controller.removeProject(project.id) } }
+        @objc func removeRoot(_ item: NSMenuItem) {
+            if let project = item.representedObject as? CodeProject { controller.removeProject(project.id) } }
     }
 }

@@ -7,11 +7,14 @@
 # Con esta lista las 32 diferencias que quedaban (20 de orden de import y 12 de
 # `{ }` -> `{}`) se aplicaron al implementar C3, así que verify.sh ya lo corre
 # como paso BLOQUEANTE. C4 agrega `wrap` y `--semicolons never`.
---rules semicolons,trailingSpace,sortImports,emptyBraces,consecutiveBlankLines
+--rules semicolons,trailingSpace,sortImports,emptyBraces,consecutiveBlankLines,wrap,wrapArguments
+--semicolons never
 
-# Objetivo de ancho. Todavía no se aplica porque la regla `wrap` no está en la
-# lista: el ancho lo controla line_length en .swiftlint.yml. C4 agrega `wrap`.
+# Ancho máximo, aplicado por la regla `wrap`.
 --maxwidth 140
+--wraparguments after-first
+--wrapparameters after-first
+--wrapcollections preserve
 --indent 4
 --swiftversion 6.0
 --exclude Vendor,.build,Examples

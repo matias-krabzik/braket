@@ -22,13 +22,15 @@ struct KrabzikApp: App {
                     .keyboardShortcut("w", modifiers: [.command, .shift])
                     .disabled(controller.workspace == nil || controller.isSwitchingWorkspace)
                 Divider()
-                Button("Agregar subproyecto…", action: controller.addFolders).keyboardShortcut("o", modifiers: [.command, .shift]).disabled(controller.workspace == nil)
+                Button("Agregar subproyecto…", action: controller.addFolders).keyboardShortcut("o", modifiers: [.command, .shift])
+                    .disabled(controller.workspace == nil)
                 Button("Nuevo archivo…") { controller.createFile() }.keyboardShortcut("n").disabled(controller.workspace == nil)
             }
             CommandGroup(replacing: .saveItem) {
                 Button("Guardar") { if let document = controller.selectedDocument { Task { await controller.save(document) } } }
                     .keyboardShortcut("s").disabled(controller.selectedDocument == nil)
-                Button("Guardar copia…", action: controller.saveCopy).keyboardShortcut("s", modifiers: [.command, .shift]).disabled(controller.selectedDocument == nil)
+                Button("Guardar copia…", action: controller.saveCopy).keyboardShortcut("s", modifiers: [.command, .shift])
+                    .disabled(controller.selectedDocument == nil)
             }
             CommandGroup(replacing: .windowSize) {
                 Button("Mostrar explorador") { controller.sidebarVisible.toggle() }.keyboardShortcut("1", modifiers: [.command, .option])
@@ -44,7 +46,8 @@ struct KrabzikApp: App {
                 Button("Abrir script…", action: controller.importScripts).disabled(controller.workspace == nil)
                 Button("Ejecutar selección o script", action: controller.executeSQL)
                     .keyboardShortcut(.return, modifiers: [.command])
-                    .disabled(controller.selectedDocument?.language != "SQL" || controller.selectedDatabase == nil || controller.selectedDocument?.sqlExecution.isRunning == true)
+                    .disabled(controller.selectedDocument?.language != "SQL" || controller.selectedDatabase == nil || controller
+                        .selectedDocument?.sqlExecution.isRunning == true)
                 Button("Nueva conexión…") { controller.database.editingConnection = DatabaseConnection() }
                     .disabled(controller.workspace == nil)
             }
@@ -71,8 +74,8 @@ struct KrabzikApp: App {
         // A single SwiftUI Window cannot create external-event scenes. Handle
         // Finder documents directly so the home screen and editor keep one window.
         NSAppleEventManager.shared().setEventHandler(self,
-            andSelector: #selector(openDocuments(_:withReplyEvent:)),
-            forEventClass: AEEventClass(kCoreEventClass), andEventID: AEEventID(kAEOpenDocuments))
+                                                     andSelector: #selector(openDocuments(_:withReplyEvent:)),
+                                                     forEventClass: AEEventClass(kCoreEventClass), andEventID: AEEventID(kAEOpenDocuments))
     }
 
     @objc private func openDocuments(_ event: NSAppleEventDescriptor, withReplyEvent reply: NSAppleEventDescriptor) {
@@ -106,7 +109,10 @@ struct KrabzikApp: App {
         checkingTermination = true
         Task {
             let allowed = await controller.prepareToLeave()
-            if allowed { controller.runner.terminateImmediately(); await controller.database.client.shutdown() }
+            if allowed {
+                controller.runner.terminateImmediately()
+                await controller.database.client.shutdown()
+            }
             checkingTermination = false
             sender.reply(toApplicationShouldTerminate: allowed)
         }

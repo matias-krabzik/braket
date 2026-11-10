@@ -81,8 +81,14 @@ final class EditorDocument: Identifiable {
     func acceptExternalData(_ data: Data, discardEdits: Bool = false) {
         guard data != originalData || discardEdits else { return }
         guard (!isDirty && !isSaving) || discardEdits, data.count <= 5 * 1024 * 1024,
-              !data.contains(0), let value = String(data: data, encoding: .utf8) else { hasExternalChange = true; return }
-        text = value; originalData = data; isDirty = false; hasExternalChange = false
+              !data.contains(0), let value = String(data: data, encoding: .utf8) else {
+                  hasExternalChange = true
+                  return
+              }
+        text = value
+        originalData = data
+        isDirty = false
+        hasExternalChange = false
         (editorStorage as? EditorSurface)?.reloadFromDocument()
     }
 }

@@ -55,9 +55,13 @@ actor MySQLClient {
     private var cancelled: Set<UUID> = []
     private var epoch = UUID()
 
+    /// El grupo de eventos se crea la primera vez que se usa y vive hasta `shutdown()`:
+    /// un hilo para todas las conexiones del IDE.
     private func eventLoop() -> any EventLoop {
-        if group == nil { group = MultiThreadedEventLoopGroup(numberOfThreads: 1) }
-        return group!.next()
+        if let group { return group.next() }
+        let created = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        group = created
+        return created.next()
     }
 
     private func open(_ config: DatabaseConnection, password: String) async throws -> MySQLConnection {
@@ -71,14 +75,17 @@ actor MySQLClient {
         let level = MySQLLogHandler.configuredLevel()
         var logger = Logger(label: "com.krabzik.mysql") { _ in MySQLLogHandler(logLevel: level) }
         logger.logLevel = level
-        let connection = try await MySQLConnection.connect(
-            to: address, username: config.username, database: config.database,
-            password: password.isEmpty ? nil : password, tlsConfiguration: config.tls == .verified ? .makeClientConfiguration() : nil,
-            serverHostname: config.tls == .verified ? config.host : nil, logger: logger, on: loop
-        ).get()
+        let connection = try await MySQLConnection.connect(to: address, username: config.username, database: config.database,
+                                                           password: password.isEmpty ? nil : password,
+                                                           tlsConfiguration: config.tls == .verified ? .makeClientConfiguration() : nil,
+                                                           serverHostname: config.tls == .verified ? config.host : nil, logger: logger,
+                                                           on: loop).get()
         if config.tls == .verified {
             do { _ = try await connection.channel.pipeline.handler(type: NIOSSLClientHandler.self).map { _ in true }.get() }
-            catch { try? await connection.close().get(); throw DatabaseFailure("El servidor no ofrece TLS.") }
+            catch {
+                try? await connection.close().get()
+                throw DatabaseFailure("El servidor no ofrece TLS.")
+            }
         }
         // El host y el usuario van como privados; el modo de TLS es lo que importa poder
         // leer sin autorización especial.
@@ -105,7 +112,8 @@ actor MySQLClient {
             guard token == epoch else { throw CancellationError() }
             sessions[config.id] = value
             return value
-        } catch { try? await connection.close().get(); throw error }
+        } catch { try? await connection.close().get()
+        throw error }
     }
 
     func connect(_ config: DatabaseConnection, password: String) async throws -> DatabaseSessionInfo {
@@ -117,8 +125,14 @@ actor MySQLClient {
 
     func test(_ config: DatabaseConnection, password: String) async throws {
         let connection = try await open(config, password: password)
-        do { _ = try await connection.simpleQuery("SELECT 1").get(); try await connection.close().get() }
-        catch { try? await connection.close().get(); throw error }
+        do {
+            _ = try await connection.simpleQuery("SELECT 1").get()
+            try await connection.close().get()
+        }
+        catch {
+            try? await connection.close().get()
+            throw error
+        }
     }
 
     func execute(_ text: String, startingLine: Int, configuration: DatabaseConnection, password: String,
@@ -127,9 +141,16 @@ actor MySQLClient {
         let id = configuration.id
         guard busy.insert(id).inserted else { throw DatabaseFailure("La conexión está ocupada.") }
         jobs[operation] = id
-        defer { busy.remove(id); jobs.removeValue(forKey: operation); cancelled.remove(operation) }
+        defer {
+            busy.remove(id)
+            jobs.removeValue(forKey: operation)
+            cancelled.remove(operation)
+        }
         var session = try await session(configuration, password: password)
-        if cancelled.contains(operation) || Task.isCancelled { await disconnect(id); throw CancellationError() }
+        if cancelled.contains(operation) || Task.isCancelled {
+            await disconnect(id)
+            throw CancellationError()
+        }
         var cursor = SQLScript(text, startingLine: startingLine)
         var statementNumber = 0, remainingBytes = 8_000_000, resultCount = 0
         while let statement = try cursor.next(noBackslashEscapes: session.flags.contains(.SERVER_STATUS_NO_BACKSLASH_ESCAPES)) {

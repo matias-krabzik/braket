@@ -9,7 +9,8 @@ struct DatabaseSidebar: View {
             HStack {
                 Text("Bases de datos").font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
                 Spacer()
-                Button { controller.database.editingConnection = DatabaseConnection() } label: { Image(systemName: "plus").font(.system(size: 11)) }
+                Button { controller.database.editingConnection = DatabaseConnection() } label: {
+                    Image(systemName: "plus").font(.system(size: 11)) }
                     .buttonStyle(.plain).help("Agregar conexión MySQL").accessibilityLabel("Agregar conexión MySQL")
             }.padding(.horizontal, 15).padding(.top, 13).padding(.bottom, 5)
             ForEach(controller.workspace?.connections ?? []) { connection in
@@ -91,7 +92,9 @@ private struct DatabaseRow: View {
                     Text(connection.name).lineLimit(1)
                     Spacer()
                     if state.status == .connecting { ProgressView().controlSize(.mini) }
-                    else { Circle().fill(state.status == .connected ? Color.green.opacity(0.75) : .secondary.opacity(0.4)).frame(width: 6, height: 6) }
+                    else { Circle().fill(state.status == .connected ? Color.green.opacity(0.75) : .secondary.opacity(0.4)).frame(width: 6,
+                                                                                                                                 height: 6)
+                                                                                                                                 }
                 }
                 .font(.system(size: 12)).padding(.horizontal, 10).frame(height: 30)
                 .background(selected ? Theme.blue.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 5))
@@ -172,27 +175,40 @@ struct ConnectionSheet: View {
     private var insecureRemote: Bool { connection.tls == .disabled && !connection.isLoopbackHost }
 
     private func row<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
-        GridRow { Text(label).font(.system(size: 12)).foregroundStyle(.secondary); content() }
+        GridRow {
+            Text(label).font(.system(size: 12)).foregroundStyle(.secondary)
+            content()
+        }
     }
 
     private func test() {
-        busy = true; message = nil
+        busy = true
+        message = nil
         Task {
             defer { busy = false }
             do {
                 let value = try connection.validated()
                 try await controller.database.client.test(value, password: password)
-                succeeded = true; message = "Conexión correcta"
-            } catch { succeeded = false; message = MySQLClient.message(error) }
+                succeeded = true
+                message = "Conexión correcta"
+            } catch { succeeded = false
+            message = MySQLClient.message(error) }
         }
     }
 
     private func save() {
-        busy = true; message = nil
+        busy = true
+        message = nil
         Task {
             defer { busy = false }
-            do { try await controller.saveConnection(connection, password: password); dismiss() }
-            catch { succeeded = false; message = MySQLClient.message(error) }
+            do {
+                try await controller.saveConnection(connection, password: password)
+                dismiss()
+            }
+            catch {
+                succeeded = false
+                message = MySQLClient.message(error)
+            }
         }
     }
 }
@@ -203,7 +219,9 @@ struct SQLToolbar: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Picker("Conexión", selection: Binding(get: { controller.database.selectedConnectionID }, set: { controller.database.selectedConnectionID = $0 })) {
+            Picker("Conexión",
+                   selection: Binding(get: { controller.database.selectedConnectionID },
+                                      set: { controller.database.selectedConnectionID = $0 })) {
                 Text("Conexión").tag(nil as UUID?)
                 ForEach(controller.workspace?.connections ?? []) { connection in
                     Text(connection.name).tag(Optional(connection.id))
@@ -223,7 +241,9 @@ struct SQLToolbar: View {
                     .disabled(document.sqlExecution.isCancelling).help("Cancelar consulta").accessibilityLabel("Cancelar consulta")
             } else {
                 Button(action: controller.executeSQL) { Image(systemName: "play.fill") }
-                    .disabled(controller.selectedDatabase == nil || controller.selectedDatabase.map { controller.database.states[$0.id]?.busy == true || controller.database.states[$0.id]?.status == .connecting } == true)
+                    .disabled(controller.selectedDatabase == nil || controller.selectedDatabase
+                        .map { controller.database.states[$0.id]?.busy == true || controller.database.states[$0.id]?.status == .connecting
+                        } == true)
                     .help("Ejecutar selección o script (⌘↩)").accessibilityLabel("Ejecutar SQL")
             }
         }
@@ -243,19 +263,23 @@ struct SQLResultsPanel: View {
                 if execution.isRunning { ProgressView().controlSize(.mini) }
                 if execution.results.count > 1 {
                     Picker("Resultado", selection: $execution.selectedResultID) {
-                        ForEach(execution.results) { result in Text("\(result.statement) · línea \(result.line)").tag(Optional(result.id)) }
+                        ForEach(execution.results) { result in
+                            Text("\(result.statement) · línea \(result.line)").tag(Optional(result.id))
+                        }
                     }.labelsHidden().fixedSize()
                 }
                 Spacer()
                 Text(execution.connectionName).font(.system(size: 10)).foregroundStyle(.secondary).help(execution.destination)
-                Button(action: hide) { Image(systemName: "chevron.down").font(.system(size: 10)) }.buttonStyle(.plain).help("Ocultar resultados")
+                Button(action: hide) { Image(systemName: "chevron.down").font(.system(size: 10)) }.buttonStyle(.plain)
+                    .help("Ocultar resultados")
             }.padding(.horizontal, 15).frame(height: 32).background(Theme.bar)
             Rectangle().fill(Theme.border).frame(height: 1)
             if let result = execution.selectedResult {
                 if !result.columns.isEmpty { SQLResultTable(result: result) }
                 else {
                     Text(result.error ?? "\(result.affectedRows) filas afectadas")
-                        .font(.system(size: 12, design: .monospaced)).foregroundStyle(result.error == nil ? Color.secondary : .red.opacity(0.9))
+                        .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(result.error == nil ? Color.secondary : .red.opacity(0.9))
                         .textSelection(.enabled).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(16)
                 }
                 HStack {
@@ -285,7 +309,8 @@ private struct SQLResultTable: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView()
-        scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = true
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = true
         scroll.autohidesScrollers = true
         let table = NSTableView()
         table.backgroundColor = EditorPalette.background
@@ -296,7 +321,8 @@ private struct SQLResultTable: NSViewRepresentable {
         table.gridColor = .separatorColor.withAlphaComponent(0.25)
         table.allowsMultipleSelection = true
         table.columnAutoresizingStyle = .noColumnAutoresizing
-        table.delegate = context.coordinator; table.dataSource = context.coordinator
+        table.delegate = context.coordinator
+        table.dataSource = context.coordinator
         scroll.documentView = table
         return scroll
     }
@@ -310,7 +336,8 @@ private struct SQLResultTable: NSViewRepresentable {
             column.title = name
             let length = max(name.count, result.rows.prefix(25).map { $0[index]?.count ?? 4 }.max() ?? 0)
             column.width = CGFloat(min(380, max(95, length * 7 + 24)))
-            column.minWidth = 60; column.maxWidth = 1600
+            column.minWidth = 60
+            column.maxWidth = 1600
             table.addTableColumn(column)
         }
         table.reloadData()

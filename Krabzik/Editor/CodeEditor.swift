@@ -126,9 +126,13 @@ private final class ObserverToken: @unchecked Sendable {
         scrollView.hasVerticalRuler = true
         scrollView.rulersVisible = true
         scrollView.contentView.postsBoundsChangedNotifications = true
-        scrollObserver = ObserverToken(NotificationCenter.default.addObserver(
-            forName: NSView.boundsDidChangeNotification, object: scrollView.contentView, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.gutter.needsDisplay = true; self?.scheduleHighlight() }
+        scrollObserver = ObserverToken(NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification,
+                                                                              object: scrollView.contentView,
+                                                                              queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.gutter.needsDisplay = true
+                    self?.scheduleHighlight()
+                }
             })
     }
 
@@ -142,7 +146,10 @@ private final class ObserverToken: @unchecked Sendable {
         textView.undoManager?.removeAllActions()
         textView.textStorage?.setAttributes(baseAttributes, range: NSRange(location: 0, length: (document.text as NSString).length))
         textView.setSelectedRange(NSRange(location: min(selection.location, (document.text as NSString).length), length: 0))
-        editRevision += 1; gutter.needsDisplay = true; scheduleHighlight(); updatePosition()
+        editRevision += 1
+        gutter.needsDisplay = true
+        scheduleHighlight()
+        updatePosition()
     }
 
     /// Expuesto para las pruebas: indica si el surface sigue observando el scroll.
@@ -248,7 +255,10 @@ private final class ObserverToken: @unchecked Sendable {
               let content = layout.textContentManager,
               let viewport = layout.textViewportLayoutController.viewportRange else { return }
         let visible = surface.scrollView.contentView.bounds
-        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular), .foregroundColor: EditorPalette.muted]
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular),
+            .foregroundColor: EditorPalette.muted
+        ]
         layout.enumerateTextLayoutFragments(from: viewport.location, options: []) { fragment in
             let frame = fragment.layoutFragmentFrame
             if frame.minY > visible.maxY { return false }
@@ -264,14 +274,40 @@ private final class ObserverToken: @unchecked Sendable {
 }
 
 enum SyntaxStyler {
+    /// Palabras clave que se colorean. La lista conserva el orden con el que se escribió
+    /// y la expresión **distingue mayúsculas**: las de SQL están en mayúsculas porque es
+    /// la convención con la que se escribe, y por eso `select` en minúsculas no se colorea
+    /// (lo fija `SyntaxStylerTests.testUppercaseKeywordsEndUpWithTheTypeColor`).
+    private static let keywords = [
+        "class", "struct", "enum", "protocol", "extension", "func", "function", "public",
+        "private", "protected", "static", "final", "let", "var", "const", "return",
+        "if", "else", "for", "while", "switch", "case", "break", "continue",
+        "import", "use", "namespace", "extends", "implements", "new", "async", "await",
+        "try", "catch", "throw", "throws", "in", "where", "guard", "self",
+        "this", "export", "from", "default", "interface", "type", "SELECT", "FROM",
+        "WHERE", "INSERT", "INTO", "VALUES", "CREATE", "TABLE", "JOIN", "ON",
+        "ORDER", "BY", "LIMIT", "UPDATE", "SET", "DELETE", "PRIMARY", "KEY",
+        "NOT", "NULL", "INT", "VARCHAR", "DECIMAL"
+    ]
     private static let tokens: [(NSRegularExpression, NSColor)] = [
-        (#"\b(class|struct|enum|protocol|extension|func|function|public|private|protected|static|final|let|var|const|return|if|else|for|while|switch|case|break|continue|import|use|namespace|extends|implements|new|async|await|try|catch|throw|throws|in|where|guard|self|this|export|from|default|interface|type|SELECT|FROM|WHERE|INSERT|INTO|VALUES|CREATE|TABLE|JOIN|ON|ORDER|BY|LIMIT|UPDATE|SET|DELETE|PRIMARY|KEY|NOT|NULL|INT|VARCHAR|DECIMAL)\b"#, EditorPalette.purple),
+        (#"\b("# + keywords.joined(separator: "|") + #")\b"#, EditorPalette.purple),
         (#"\b(true|false|nil|null|undefined|\d+(\.\d+)?)\b"#, EditorPalette.orange),
         (#"\b[A-Z][A-Za-z0-9_]*\b"#, EditorPalette.blue),
         (#"\$[A-Za-z_][A-Za-z0-9_]*"#, EditorPalette.purple),
         (#"\b[a-zA-Z_]\w*(?=\s*\()"#, EditorPalette.blue)
-    ].compactMap { pattern, color in (try? NSRegularExpression(pattern: pattern)).map { ($0, color) } }
-    private static let literals = try! NSRegularExpression(pattern: #"(\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|(//[^\n]*|/\*[\s\S]*?\*/|(?m)^\s*--[^\n]*)"#)
+    ]
+    // Las expresiones son literales de este archivo y las cubre
+    // SyntaxStylerTests.testPatternsCompile, así que un `try!` falla en las pruebas, antes
+    // de llegar a la app. Antes esto era `try?` + compactMap: un patrón roto desaparecía
+    // en silencio y el editor coloreaba de menos sin que nada lo dijera.
+    // swiftlint:disable force_try
+    .map { pattern, color in (try! NSRegularExpression(pattern: pattern), color) }
+
+    private static let literals =
+        try! NSRegularExpression(pattern:
+            #"(\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)"#   // cadenas entre ", ' o `
+            + #"|(//[^\n]*|/\*[\s\S]*?\*/|(?m)^\s*--[^\n]*)"#)   // comentarios //, /* */ y --
+    // swiftlint:enable force_try
 
     static func apply(to storage: NSTextStorage, range: NSRange, language: String) {
         guard language != "Texto", language != "Markdown", range.length > 0 else { return }
@@ -280,12 +316,14 @@ enum SyntaxStyler {
         storage.addAttribute(.foregroundColor, value: EditorPalette.text, range: range)
         for (regex, color) in tokens {
             for match in regex.matches(in: segment, range: NSRange(location: 0, length: (segment as NSString).length)) {
-                storage.addAttribute(.foregroundColor, value: color, range: NSRange(location: range.location + match.range.location, length: match.range.length))
+                storage.addAttribute(.foregroundColor, value: color,
+                                     range: NSRange(location: range.location + match.range.location, length: match.range.length))
             }
         }
         for match in literals.matches(in: segment, range: NSRange(location: 0, length: (segment as NSString).length)) {
             let color = match.range(at: 1).location == NSNotFound ? EditorPalette.muted : EditorPalette.green
-            storage.addAttribute(.foregroundColor, value: color, range: NSRange(location: range.location + match.range.location, length: match.range.length))
+            storage.addAttribute(.foregroundColor, value: color,
+                                 range: NSRange(location: range.location + match.range.location, length: match.range.length))
         }
         storage.endEditing()
     }

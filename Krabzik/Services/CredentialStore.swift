@@ -11,7 +11,13 @@ enum CredentialStore {
     private static func query(_ connection: DatabaseConnection) -> [String: Any] {
         // Bind the password to the endpoint as well as its ID. A modified project file
         // must not redirect an existing credential to a different server or user.
-        let account = "\(connection.id.uuidString)|\(connection.host.lowercased())|\(connection.port)|\(connection.username)|\(connection.tls.rawValue)"
+        let account = [
+            connection.id.uuidString,
+            connection.host.lowercased(),
+            String(connection.port),
+            connection.username,
+            connection.tls.rawValue
+        ].joined(separator: "|")
         return [kSecClass as String: kSecClassGenericPassword,
                 kSecAttrService as String: service, kSecAttrAccount as String: account]
     }
@@ -30,7 +36,10 @@ enum CredentialStore {
     }
 
     static func save(_ password: String, for connection: DatabaseConnection) throws {
-        if password.isEmpty { try remove(for: connection); return }
+        if password.isEmpty {
+            try remove(for: connection)
+            return
+        }
         let request = query(connection)
         let changes = [kSecValueData as String: Data(password.utf8)]
         var status = SecItemUpdate(request as CFDictionary, changes as CFDictionary)

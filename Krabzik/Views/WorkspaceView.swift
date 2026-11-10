@@ -81,7 +81,8 @@ struct WorkspaceView: View {
                 ToolbarItem(placement: .primaryAction) {
                     Button(action: controller.startAll) { Image(systemName: "play.fill") }
                         .help("Iniciar proyecto")
-                        .disabled(controller.runnableProjects.isEmpty || controller.runnableProjects.allSatisfy { controller.runner.runs[$0.id]?.status.active == true })
+                        .disabled(controller.runnableProjects.isEmpty || controller.runnableProjects
+                            .allSatisfy { controller.runner.runs[$0.id]?.status.active == true })
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
@@ -96,10 +97,12 @@ struct WorkspaceView: View {
         .sheet(item: $controller.commandProject) { project in
             CommandSheet(project: project) { controller.updateProject($0) }
         }
-        .sheet(item: Binding(get: { controller.database.editingConnection }, set: { controller.database.editingConnection = $0 })) { connection in
+        .sheet(item: Binding(get: { controller.database.editingConnection },
+                             set: { controller.database.editingConnection = $0 })) { connection in
             ConnectionSheet(connection: connection, controller: controller)
         }
-        .alert("No se pudo completar", isPresented: Binding(get: { controller.errorMessage != nil }, set: { if !$0 { controller.errorMessage = nil } })) {
+        .alert("No se pudo completar",
+               isPresented: Binding(get: { controller.errorMessage != nil }, set: { if !$0 { controller.errorMessage = nil } })) {
             Button("Aceptar") { controller.errorMessage = nil }
         } message: { Text(controller.errorMessage ?? "") }
         .task { await controller.start() }
@@ -271,7 +274,8 @@ private struct CommandSheet: View {
             HStack {
                 Spacer()
                 Button("Cancelar") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Guardar") { save(project); dismiss() }.keyboardShortcut(.defaultAction)
+                Button("Guardar") { save(project)
+                dismiss() }.keyboardShortcut(.defaultAction)
             }
         }
         .padding(24).frame(width: 460)

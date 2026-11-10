@@ -164,11 +164,14 @@ final class DatabaseTests: XCTestCase {
     private func configuration() throws -> DatabaseConnection {
         let marker = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent(".build/mysql-test-port")
-        guard let value = try? String(contentsOf: marker, encoding: .utf8), let port = Int(value.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+        guard let value = try? String(contentsOf: marker, encoding: .utf8),
+              let port = Int(value.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             throw XCTSkip("Requiere la instancia de prueba local indicada en .build/mysql-test-port.")
         }
         var config = DatabaseConnection()
-        config.port = port; config.database = "krabzik_qa"; config.tls = .disabled
+        config.port = port
+        config.database = "krabzik_qa"
+        config.tls = .disabled
         return config
     }
 
@@ -202,20 +205,23 @@ final class DatabaseTests: XCTestCase {
             let next = try await execute("SELECT COUNT(*) FROM sample", client: client, config: config)
             XCTAssertEqual(next[0].rows[0][0], "2")
             await client.shutdown()
-        } catch { await client.shutdown(); throw error }
+        } catch { await client.shutdown()
+        throw error }
     }
 
     func testMySQLTransactionRollbackAndStopOnFirstError() async throws {
         let config = try configuration(), client = MySQLClient()
         do {
-            _ = try await execute("CREATE TEMPORARY TABLE tx (id INT PRIMARY KEY); BEGIN; INSERT INTO tx VALUES(1);", client: client, config: config)
+            _ = try await execute("CREATE TEMPORARY TABLE tx (id INT PRIMARY KEY); BEGIN; INSERT INTO tx VALUES(1);", client: client,
+                                  config: config)
             let info = await client.info(config.id)
             XCTAssertEqual(info?.inTransaction, true)
             let results = try await execute("ROLLBACK; SELECT COUNT(*) FROM tx;", client: client, config: config)
             XCTAssertEqual(results[1].rows[0][0], "0")
             let sink = ResultSink()
             do {
-                _ = try await client.execute("INSERT INTO tx VALUES(2); INVALID SQL; INSERT INTO tx VALUES(3);", startingLine: 1, configuration: config, password: "", operation: UUID()) { await sink.append($0) }
+                _ = try await client.execute("INSERT INTO tx VALUES(2); INVALID SQL; INSERT INTO tx VALUES(3);", startingLine: 1,
+                                             configuration: config, password: "", operation: UUID()) { await sink.append($0) }
                 XCTFail("El script debe detenerse en el error")
             } catch {}
             let partial = await sink.values
@@ -224,19 +230,24 @@ final class DatabaseTests: XCTestCase {
             let rows = try await execute("SELECT id FROM tx", client: client, config: config)
             XCTAssertEqual(rows[0].rows, [["2"]])
             await client.shutdown()
-        } catch { await client.shutdown(); throw error }
+        } catch { await client.shutdown()
+        throw error }
     }
 
     func testMySQLBoundsResultsAndPreservesDuplicateColumnNames() async throws {
         let config = try configuration(), client = MySQLClient()
         do {
-            let results = try await execute("SET SESSION cte_max_recursion_depth=2000; WITH RECURSIVE n AS (SELECT 1 AS x UNION ALL SELECT x+1 FROM n WHERE x<1500) SELECT x AS same, x AS same FROM n", client: client, config: config)
+            let recursiva = "SET SESSION cte_max_recursion_depth=2000;"
+                + " WITH RECURSIVE n AS (SELECT 1 AS x UNION ALL SELECT x+1 FROM n WHERE x<1500)"
+                + " SELECT x AS same, x AS same FROM n"
+            let results = try await execute(recursiva, client: client, config: config)
             XCTAssertEqual(results[1].columns, ["same", "same"])
             XCTAssertEqual(results[1].rowCount, 1500)
             XCTAssertEqual(results[1].rows.count, 1000)
             XCTAssertTrue(results[1].truncated)
             await client.shutdown()
-        } catch { await client.shutdown(); throw error }
+        } catch { await client.shutdown()
+        throw error }
     }
 
     func testMySQLCancellationClosesActualServerSession() async throws {
@@ -244,15 +255,22 @@ final class DatabaseTests: XCTestCase {
         let operation = UUID()
         do {
             let idRows = try await execute("SELECT CONNECTION_ID()", client: client, config: config)
-            let serverID = idRows[0].rows[0][0]!
-            let job = Task { try await client.execute("SELECT SLEEP(30)", startingLine: 1, configuration: config, password: "", operation: operation) { _ in } }
+            let serverID = try XCTUnwrap(idRows[0].rows[0][0])
+            let job = Task { try await client.execute("SELECT SLEEP(30)", startingLine: 1, configuration: config, password: "",
+                                                      operation: operation) { _ in } }
             try await Task.sleep(nanoseconds: 200_000_000)
             await client.cancel(operation)
-            do { _ = try await job.value; XCTFail("La consulta debe cancelarse") } catch is CancellationError {}
-            let rows = try await execute("SELECT COUNT(*) FROM information_schema.processlist WHERE ID = \(serverID)", client: observer, config: config)
+            do {
+                _ = try await job.value
+                XCTFail("La consulta debe cancelarse") } catch is CancellationError {}
+            let rows = try await execute("SELECT COUNT(*) FROM information_schema.processlist WHERE ID = \(serverID)", client: observer,
+                                         config: config)
             XCTAssertEqual(rows[0].rows[0][0], "0")
-            await client.shutdown(); await observer.shutdown()
-        } catch { await client.shutdown(); await observer.shutdown(); throw error }
+            await client.shutdown()
+            await observer.shutdown()
+        } catch { await client.shutdown()
+        await observer.shutdown()
+        throw error }
     }
 
     /// Cubre el parche 0001 del vendoring (rechazar TLS que el servidor no anuncia).
@@ -261,9 +279,14 @@ final class DatabaseTests: XCTestCase {
         var config = try configuration()
         let client = MySQLClient()
         config.username = "krabzik_nonexistent_user"
-        do { try await client.test(config, password: "invalid"); XCTFail("Debe rechazar al usuario inexistente") } catch {}
-        config.username = "root"; config.tls = .verified
-        do { try await client.test(config, password: ""); XCTFail("No debe aceptar el certificado autofirmado") } catch {}
+        do {
+            try await client.test(config, password: "invalid")
+            XCTFail("Debe rechazar al usuario inexistente") } catch {}
+        config.username = "root"
+        config.tls = .verified
+        do {
+            try await client.test(config, password: "")
+            XCTFail("No debe aceptar el certificado autofirmado") } catch {}
         await client.shutdown()
     }
 
@@ -277,12 +300,18 @@ final class DatabaseTests: XCTestCase {
         let user = "qa_\(suffix)", procedure = "qa_proc_\(suffix)"
         let password = "Prueba-\(UUID().uuidString)"
         do {
-            _ = try await execute("CREATE USER '\(user)'@'%' IDENTIFIED WITH caching_sha2_password BY '\(password)'; GRANT ALL ON krabzik_qa.* TO '\(user)'@'%';", client: admin, config: adminConfig)
-            var config = adminConfig; config.id = UUID(); config.username = user
+            let alta = "CREATE USER '\(user)'@'%' IDENTIFIED WITH caching_sha2_password"
+                + " BY '\(password)'; GRANT ALL ON krabzik_qa.* TO '\(user)'@'%';"
+            _ = try await execute(alta, client: admin, config: adminConfig)
+            var config = adminConfig
+            config.id = UUID()
+            config.username = user
             // First connection exercises full RSA auth; the next exercises cached auth.
             try await client.test(config, password: password)
             try await client.test(config, password: password)
-            do { try await client.test(config, password: "wrong"); XCTFail("Debe rechazar una contraseña incorrecta") } catch {}
+            do {
+                try await client.test(config, password: "wrong")
+                XCTFail("Debe rechazar una contraseña incorrecta") } catch {}
             let sink = ResultSink()
             _ = try await client.execute("""
             DELIMITER $$
@@ -302,10 +331,14 @@ final class DatabaseTests: XCTestCase {
             XCTAssertEqual(results[2].rows, [["2"]])
             XCTAssertEqual(results.last?.rows, [["\\"]])
             _ = try await execute("DROP USER '\(user)'@'%';", client: admin, config: adminConfig)
-            await client.shutdown(); await admin.shutdown()
+            await client.shutdown()
+            await admin.shutdown()
         } catch {
-            _ = try? await execute("DROP PROCEDURE IF EXISTS \(procedure); DROP USER IF EXISTS '\(user)'@'%';", client: admin, config: adminConfig)
-            await client.shutdown(); await admin.shutdown(); throw error
+            _ = try? await execute("DROP PROCEDURE IF EXISTS \(procedure); DROP USER IF EXISTS '\(user)'@'%';", client: admin,
+                                   config: adminConfig)
+            await client.shutdown()
+            await admin.shutdown()
+            throw error
         }
     }
 
@@ -357,9 +390,11 @@ final class DatabaseTests: XCTestCase {
         defer { try? CredentialStore.remove(for: config) }
         try CredentialStore.save("Krabzik ephemeral test", for: config)
         XCTAssertEqual(try CredentialStore.read(for: config), "Krabzik ephemeral test")
-        var changed = config; changed.host = "other.example"
+        var changed = config
+        changed.host = "other.example"
         XCTAssertEqual(try CredentialStore.read(for: changed), "")
-        changed = config; changed.tls = .disabled
+        changed = config
+        changed.tls = .disabled
         XCTAssertEqual(try CredentialStore.read(for: changed), "")
         try CredentialStore.save("", for: config)
         XCTAssertEqual(try CredentialStore.read(for: config), "")
@@ -378,8 +413,10 @@ final class DatabaseTests: XCTestCase {
                     return closeImmediately ? channel.close() : channel.eventLoop.makeSucceededVoidFuture()
                 }.bind(host: "127.0.0.1", port: 0).get()
                 do {
-                    let connection = try await MySQLConnection.connect(to: server.localAddress!, username: "test", database: "",
-                        tlsConfiguration: nil, connectTimeout: .milliseconds(150), on: group.next()).get()
+                    let address = try XCTUnwrap(server.localAddress)
+                    let connection = try await MySQLConnection.connect(to: address, username: "test", database: "",
+                                                                       tlsConfiguration: nil, connectTimeout: .milliseconds(150),
+                                                                       on: group.next()).get()
                     try await connection.close().get()
                     XCTFail("Un servidor sin handshake no debe quedar conectado")
                 } catch {}
@@ -388,6 +425,7 @@ final class DatabaseTests: XCTestCase {
                 try await server.close().get()
             }
             try await group.shutdownGracefully()
-        } catch { try? await group.shutdownGracefully(); throw error }
+        } catch { try? await group.shutdownGracefully()
+        throw error }
     }
 }

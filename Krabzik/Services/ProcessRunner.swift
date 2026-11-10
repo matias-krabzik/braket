@@ -118,7 +118,10 @@ final class ProcessRunner {
         run.revision += 1
 
         var descriptors: [Int32] = [0, 0]
-        guard pipe(&descriptors) == 0 else { run.status = .failed("No se pudo abrir la salida"); return }
+        guard pipe(&descriptors) == 0 else {
+            run.status = .failed("No se pudo abrir la salida")
+            return
+        }
         let readFD = descriptors[0], writeFD = descriptors[1]
         _ = fcntl(readFD, F_SETFD, FD_CLOEXEC)
         _ = fcntl(writeFD, F_SETFD, FD_CLOEXEC)
@@ -127,7 +130,10 @@ final class ProcessRunner {
         var attributes: posix_spawnattr_t?
         posix_spawn_file_actions_init(&actions)
         posix_spawnattr_init(&attributes)
-        defer { posix_spawn_file_actions_destroy(&actions); posix_spawnattr_destroy(&attributes) }
+        defer {
+            posix_spawn_file_actions_destroy(&actions)
+            posix_spawnattr_destroy(&attributes)
+        }
         posix_spawn_file_actions_adddup2(&actions, writeFD, STDOUT_FILENO)
         posix_spawn_file_actions_adddup2(&actions, writeFD, STDERR_FILENO)
         posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0)
@@ -143,7 +149,10 @@ final class ProcessRunner {
         let arguments = ["/bin/zsh", "-l", "-c", "cd -- \(Shell.quote(directory.path)) && \(project.command)"]
         let argv = arguments.map { strdup($0) } + [nil]
         let envp = environment.map { strdup("\($0.key)=\($0.value)") } + [nil]
-        defer { argv.forEach { free($0) }; envp.forEach { free($0) } }
+        defer {
+            argv.forEach { free($0) }
+            envp.forEach { free($0) }
+        }
         var pid: pid_t = 0
         let result = posix_spawn(&pid, "/bin/zsh", &actions, &attributes, argv, envp)
         Darwin.close(writeFD)

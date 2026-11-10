@@ -29,7 +29,8 @@ final class DatabaseController {
         selectedConnectionID = connection.id
         let state = state(connection.id)
         guard state.status == .disconnected, !state.busy else { return }
-        state.status = .connecting; state.error = nil
+        state.status = .connecting
+        state.error = nil
         connectionTasks[connection.id] = Task {
             defer { connectionTasks.removeValue(forKey: connection.id) }
             do {
@@ -57,7 +58,9 @@ final class DatabaseController {
             guard alert.runModal() == .alertFirstButtonReturn else { return false }
         }
         await client.disconnect(connection.id)
-        state.status = .disconnected; state.inTransaction = false; state.error = nil
+        state.status = .disconnected
+        state.inTransaction = false
+        state.error = nil
         return true
     }
 
@@ -68,15 +71,25 @@ final class DatabaseController {
         guard !query.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let operation = UUID()
         execution.operationID = operation
-        execution.results = []; execution.selectedResultID = nil; execution.error = nil
+        execution.results = []
+        execution.selectedResultID = nil
+        execution.error = nil
         execution.cancelNote = nil
         execution.connectionName = connection.name
         execution.destination = connection.destination
-        execution.isRunning = true; execution.isCancelling = false
-        state.busy = true; state.error = nil
+        execution.isRunning = true
+        execution.isCancelling = false
+        state.busy = true
+        state.error = nil
         resultsVisible = true
         execution.task = Task {
-            defer { execution.isRunning = false; execution.isCancelling = false; execution.task = nil; execution.operationID = nil; state.busy = false }
+            defer {
+                execution.isRunning = false
+                execution.isCancelling = false
+                execution.task = nil
+                execution.operationID = nil
+                state.busy = false
+            }
             do {
                 try Task.checkCancellation()
                 let password = try CredentialStore.read(for: connection)
@@ -93,8 +106,11 @@ final class DatabaseController {
             } catch {
                 execution.error = MySQLClient.message(error)
                 if let info = await client.info(connection.id) {
-                    state.status = .connected; state.currentDatabase = info.database; state.inTransaction = info.inTransaction
-                } else { state.status = .disconnected; state.inTransaction = false }
+                    state.status = .connected
+                    state.currentDatabase = info.database
+                    state.inTransaction = info.inTransaction
+                } else { state.status = .disconnected
+                state.inTransaction = false }
             }
         }
     }
@@ -123,7 +139,10 @@ final class DatabaseController {
             guard alert.runModal() == .alertFirstButtonReturn else { return false }
         }
         await client.closeAll()
-        for state in states.values { state.status = .disconnected; state.inTransaction = false }
+        for state in states.values {
+            state.status = .disconnected
+            state.inTransaction = false
+        }
         return true
     }
 }

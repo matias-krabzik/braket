@@ -33,7 +33,11 @@ struct ConsoleView: NSViewRepresentable {
         let oldOutput = text.string
         if newOutput.hasPrefix(oldOutput), let storage = text.textStorage {
             let addition = String(newOutput.dropFirst(oldOutput.count))
-            storage.append(NSAttributedString(string: addition, attributes: [.font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular), .foregroundColor: EditorPalette.text]))
+            storage.append(NSAttributedString(string: addition,
+                                              attributes: [
+                                                  .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
+                                                  .foregroundColor: EditorPalette.text
+                                              ]))
         } else { text.string = newOutput }
         if wasAtBottom { text.scrollToEndOfDocument(nil) }
     }

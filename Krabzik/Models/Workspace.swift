@@ -115,7 +115,9 @@ struct Workspace: Codable, Equatable {
     var scripts: [String] = []
 
     init(name: String, projects: [CodeProject] = [], connections: [DatabaseConnection] = []) {
-        self.name = name; self.projects = projects; self.connections = connections
+        self.name = name
+        self.projects = projects
+        self.connections = connections
     }
 
     private enum CodingKeys: String, CodingKey { case version, name, projects, connections, scripts }

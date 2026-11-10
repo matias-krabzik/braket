@@ -13,13 +13,14 @@ final class AgentTests: XCTestCase {
         XCTAssertFalse(AgentController.clientVersion.isEmpty)
     }
 
-    func testModelTextStripsControlAndBidiCharacters() {
+    func testModelTextStripsControlAndBidiCharacters() throws {
         // Lo hostil se va...
         let bidi = "facturas/\u{202E}txt.ogap\u{202C}"
         XCTAssertEqual(ModelText.display(bidi, limit: 100), "facturas/txt.ogap")
         XCTAssertTrue(ModelText.needsSanitizing(bidi))
         for scalar in [0x00, 0x07, 0x1B, 0x7F, 0x200B, 0x202A, 0x2066, 0xFEFF] {
-            let raw = "a\(Character(Unicode.Scalar(scalar)!))b"
+            let unicode = try XCTUnwrap(Unicode.Scalar(scalar))
+            let raw = "a\(Character(unicode))b"
             XCTAssertEqual(ModelText.display(raw, limit: 100), "ab", "escalar \(scalar)")
         }
         // ...y lo legítimo queda intacto: tabuladores, saltos simples y acentos.
@@ -146,8 +147,14 @@ final class AgentTests: XCTestCase {
     }
 
     func testJSONLinesPreserveUnicodeAndSplitMessages() throws {
-        let messages = [RPCMessage(id: .number(1), result: .string("Café 🦀")), RPCMessage(method: "item/agentMessage/delta", params: .object(["delta": .string("línea\notra")]))]
-        let data = try messages.reduce(into: Data()) { $0.append(try JSONEncoder().encode($1)); $0.append(10) }
+        let messages = [
+            RPCMessage(id: .number(1), result: .string("Café 🦀")),
+            RPCMessage(method: "item/agentMessage/delta", params: .object(["delta": .string("línea\notra")]))
+        ]
+        let data = try messages.reduce(into: Data()) { buffer, message in
+            buffer.append(try JSONEncoder().encode(message))
+            buffer.append(10)
+        }
         for split in 0...data.count {
             var framer = JSONLineFramer()
             let lines = try framer.append(data.prefix(split)) + framer.append(data.dropFirst(split))
@@ -185,7 +192,8 @@ final class AgentTests: XCTestCase {
         document.acceptExternalData(Data("let a = 2\n".utf8))
         XCTAssertEqual(surface.textView.string, "let a = 2\n")
         XCTAssertFalse(document.isDirty)
-        document.text = "mi edición"; document.isDirty = true
+        document.text = "mi edición"
+        document.isDirty = true
         document.acceptExternalData(Data("let a = 3\n".utf8))
         XCTAssertEqual(document.text, "mi edición")
         XCTAssertTrue(document.hasExternalChange)
@@ -203,13 +211,19 @@ final class AgentTests: XCTestCase {
         let transport = CodexTransport()
         defer { transport.stop() }
         try transport.start(executable: URL(fileURLWithPath: "/usr/bin/python3"), arguments: ["-u", script.path])
-        do { _ = try await transport.request("hang", timeout: 0.1); XCTFail("Debe vencer") } catch {}
+        do {
+            _ = try await transport.request("hang", timeout: 0.1)
+            XCTFail("Debe vencer")
+        } catch {}
         let result = try await transport.request("echo", .string("🦀"))
         XCTAssertEqual(result, .string("🦀"))
         let job = Task { try await transport.request("hang", timeout: 10) }
         await Task.yield()
         transport.stop()
-        do { _ = try await job.value; XCTFail("Debe completar con error al cerrar") } catch {}
+        do {
+            _ = try await job.value
+            XCTFail("Debe completar con error al cerrar")
+        } catch {}
     }
 
     @MainActor func testAgentApprovalStreamingAndFileEvents() async throws {
@@ -220,7 +234,8 @@ final class AgentTests: XCTestCase {
         let agent = AgentController()
         defer { agent.shutdown() }
         try agent.transport.start(executable: URL(fileURLWithPath: "/usr/bin/python3"), arguments: ["-u", script.path])
-        agent.connected = true; agent.account = "ChatGPT"
+        agent.connected = true
+        agent.account = "ChatGPT"
         var refreshes = 0
         agent.onFilesChanged = { _ in refreshes += 1 }
         agent.send("Cambiar el archivo", scope: AgentScope(names: ["Test"], roots: [base]))
@@ -238,13 +253,16 @@ final class AgentTests: XCTestCase {
         XCTAssertGreaterThan(refreshes, 0)
         // Old notifications must not contaminate a cleared/new conversation.
         agent.clearConversation()
-        agent.receive(RPCMessage(method: "item/agentMessage/delta", params: .object(["threadId": .string("thread-test"), "itemId": .string("late"), "delta": .string("old")])))
+        agent.receive(RPCMessage(method: "item/agentMessage/delta",
+                                 params: .object(["threadId": .string("thread-test"), "itemId": .string("late"), "delta": .string("old")])))
         XCTAssertTrue(agent.messages.isEmpty)
     }
 
     @MainActor func testLiveCodexReadsAndEditsTwoSubprojects() async throws {
-        let marker = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent(".build/codex-live-tests")
-        guard FileManager.default.fileExists(atPath: marker.path) else { throw XCTSkip("Prueba con suscripción: crear .build/codex-live-tests para habilitarla.") }
+        let marker = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent(".build/codex-live-tests")
+        guard FileManager.default.fileExists(atPath: marker.path)
+            else { throw XCTSkip("Prueba con suscripción: crear .build/codex-live-tests para habilitarla.") }
         let base = try fixture()
         defer { try? FileManager.default.removeItem(at: base) }
         let roots = [base.appendingPathComponent("api"), base.appendingPathComponent("client")]
@@ -257,11 +275,16 @@ final class AgentTests: XCTestCase {
         await agent.connect()
         XCTAssertTrue(agent.connected, agent.error ?? "No conectado")
         XCTAssertFalse(agent.account.isEmpty, "Requiere sesión de ChatGPT")
-        agent.send("Prueba de integración. Leé estado.txt en ambos subproyectos y reemplazá exactamente estado=inicial por estado=listo usando apply_patch. No crees otros archivos, no uses subagentes ni servicios externos. Al finalizar respondé brevemente.", scope: AgentScope(names: ["api", "client"], roots: roots))
+        agent.send("Prueba de integración. Leé estado.txt en ambos subproyectos y reemplazá"
+                  + " exactamente estado=inicial por estado=listo usando apply_patch."
+                  + " No crees otros archivos, no uses subagentes ni servicios externos."
+                  + " Al finalizar respondé brevemente.",
+                   scope: AgentScope(names: ["api", "client"], roots: roots))
         try await until(timeout: 180) { !agent.isRunning || !agent.requests.isEmpty }
         XCTAssertTrue(agent.requests.isEmpty, "La prueba no autoriza ninguna ampliación de permisos")
         XCTAssertNil(agent.error)
-        for root in roots { XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("estado.txt"), encoding: .utf8), "estado=listo\n") }
+        for root in roots { XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("estado.txt"), encoding: .utf8),
+                                           "estado=listo\n") }
         XCTAssertEqual(agent.changes.count, 2)
         XCTAssertFalse(agent.messages.last?.text.isEmpty ?? true)
     }
@@ -274,7 +297,8 @@ final class AgentTests: XCTestCase {
         let agent = AgentController()
         defer { agent.shutdown() }
         try agent.transport.start(executable: URL(fileURLWithPath: "/usr/bin/python3"), arguments: ["-u", script.path])
-        agent.connected = true; agent.account = "ChatGPT"
+        agent.connected = true
+        agent.account = "ChatGPT"
         let scope = AgentScope(names: ["Test"], roots: [base])
         agent.send("Primero", scope: scope)
         try await until { !agent.requests.isEmpty }
@@ -318,10 +342,15 @@ for line in sys.stdin:
  elif method=='turn/start':
   note('turn/started',{'turn':{'id':'turn-test'}})
   out({'id':i,'result':{'turn':{'id':'turn-test'}}})
-  out({'id':'approve-1','method':'item/commandExecution/requestApproval','params':{'threadId':'thread-test','turnId':'turn-test','itemId':'cmd','command':'test command'}})
+  out({'id':'approve-1','method':'item/commandExecution/requestApproval',
+       'params':{'threadId':'thread-test','turnId':'turn-test',
+                 'itemId':'cmd','command':'test command'}})
  elif i=='approve-1':
   if v.get('result',{}).get('decision')!='accept': continue
-  note('item/completed',{'item':{'id':'file','type':'fileChange','status':'completed','changes':[{'path':'hello.txt','kind':{'type':'update'},'diff':'-viejo\n+nuevo'},{'path':'api/\u202Eevil\u0007.swift','kind':{'type':'update'},'diff':'-a\u0000\n+b\n'}]}})
+  cambios=[{'path':'hello.txt','kind':{'type':'update'},'diff':'-viejo\n+nuevo'},
+           {'path':'api/\u202Eevil\u0007.swift','kind':{'type':'update'},'diff':'-a\u0000\n+b\n'}]
+  note('item/completed',{'item':{'id':'file','type':'fileChange','status':'completed',
+                                 'changes':cambios}})
   note('turn/diff/updated',{'diff':'-viejo\n+nuevo'})
   note('item/agentMessage/delta',{'itemId':'answer','delta':'Cambio '})
   note('item/agentMessage/delta',{'itemId':'answer','delta':'terminado 🦀'})

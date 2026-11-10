@@ -44,8 +44,11 @@ final class AgentController {
         transport.onMessage = { [weak self] in self?.receive($0) }
         transport.onDisconnect = { [weak self] reason in
             guard let self else { return }
-            self.connected = false; self.account = ""; self.isConnecting = false
-            self.loginPending = false; self.threadID = nil
+            self.connected = false
+            self.account = ""
+            self.isConnecting = false
+            self.loginPending = false
+            self.threadID = nil
             if self.isRunning { self.finishTurn(error: reason) }
             else { self.error = reason }
         }
@@ -60,7 +63,9 @@ final class AgentController {
     func connect() async {
         guard !isConnecting else { return }
         if connected && transport.running { return }
-        isConnecting = true; error = nil; missingExecutable = false
+        isConnecting = true
+        error = nil
+        missingExecutable = false
         let token = connectionGeneration
         defer { if token == connectionGeneration { isConnecting = false } }
         do {
@@ -84,7 +89,11 @@ final class AgentController {
             _ = try await transport.request("initialize", .object([
                 "clientInfo": .object(["name": .string("krabzik_ide"), "title": .string("Krabzik IDE"),
                                        "version": .string(Self.clientVersion)]),
-                "capabilities": .object(["optOutNotificationMethods": .array([.string("item/reasoning/textDelta"), .string("item/reasoning/summaryTextDelta"), .string("item/commandExecution/outputDelta")])])
+                "capabilities": .object(["optOutNotificationMethods": .array([
+                    .string("item/reasoning/textDelta"),
+                    .string("item/reasoning/summaryTextDelta"),
+                    .string("item/commandExecution/outputDelta")
+                ])])
             ]))
             guard token == connectionGeneration else { return }
             try transport.notify("initialized")
@@ -93,7 +102,9 @@ final class AgentController {
         } catch {
             guard token == connectionGeneration else { return }
             self.error = error.localizedDescription
-            connected = false; transport.stop(); threadID = nil
+            connected = false
+            transport.stop()
+            threadID = nil
         }
     }
 
@@ -111,7 +122,8 @@ final class AgentController {
         Task {
             if !connected { await connect() }
             guard connected else { return }
-            loginPending = true; error = nil
+            loginPending = true
+            error = nil
             do {
                 let result = try await transport.request("account/login/start", .object(["type": .string("chatgpt")]))
                 loginID = result["loginId"].string
@@ -121,7 +133,8 @@ final class AgentController {
                     throw AgentFailure("Codex no devolvió una dirección de inicio de sesión válida.")
                 }
                 guard NSWorkspace.shared.open(url) else { throw AgentFailure("No se pudo abrir el navegador.") }
-            } catch { self.error = error.localizedDescription; loginPending = false }
+            } catch { self.error = error.localizedDescription
+            loginPending = false }
         }
     }
 
@@ -129,7 +142,8 @@ final class AgentController {
         if let loginID {
             Task { _ = try? await transport.request("account/login/cancel", .object(["loginId": .string(loginID)])) }
         }
-        loginPending = false; loginID = nil
+        loginPending = false
+        loginID = nil
     }
 
     /// Diagnóstico del último arranque de Codex: su stderr, en memoria. Vacío si no dijo
@@ -159,30 +173,52 @@ final class AgentController {
 
     func chooseExecutable() {
         let panel = NSOpenPanel()
-        panel.canChooseDirectories = false; panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
         panel.prompt = "Seleccionar Codex"
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        guard FileManager.default.isExecutableFile(atPath: url.path) else { error = "Seleccioná el ejecutable de Codex."; return }
+        guard FileManager.default.isExecutableFile(atPath: url.path) else {
+            error = "Seleccioná el ejecutable de Codex."
+            return
+        }
         defaults.set(url.path, forKey: "codexExecutable")
         // Elegir un ejecutable no lo aprueba: se vuelve a pedir confirmación.
         defaults.removeObject(forKey: "approvedCodexBinary")
         pendingCandidate = nil
-        transport.stop(); connected = false; threadID = nil
+        transport.stop()
+        connected = false
+        threadID = nil
         Task { await connect() }
     }
 
     func send(_ prompt: String, scope newScope: AgentScope) {
         guard !isRunning, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        guard prompt.utf8.count <= 32_000 else { error = "El mensaje admite hasta 32 KB."; return }
-        guard connected, !account.isEmpty else { error = "Conectá tu cuenta de ChatGPT."; return }
-        if scope != newScope { clearConversation(); scope = newScope }
+        guard prompt.utf8.count <= 32_000 else {
+            error = "El mensaje admite hasta 32 KB."
+            return
+        }
+        guard connected, !account.isEmpty else {
+            error = "Conectá tu cuenta de ChatGPT."
+            return
+        }
+        if scope != newScope {
+            clearConversation()
+            scope = newScope
+        }
         let token = generation
         operationID = UUID()
         let operation = operationID
-        isRunning = true; isStopping = false; error = nil
-        changes = []; diff = ""; requests = []; proposedChanges = [:]; commentaryIDs = []
+        isRunning = true
+        isStopping = false
+        error = nil
+        changes = []
+        diff = ""
+        requests = []
+        proposedChanges = [:]
+        commentaryIDs = []
         activity = "Preparando…"
-        messages.append(AgentMessage(isUser: true, text: prompt)); trimHistory()
+        messages.append(AgentMessage(isUser: true, text: prompt))
+        trimHistory()
         draft = ""
         sendTask = Task {
             do {
@@ -202,7 +238,8 @@ final class AgentController {
                     ]), timeout: 90)
                     guard token == generation, operation == operationID, !Task.isCancelled else { return }
                     guard let id = result["thread"]["id"].string else { throw AgentFailure("Codex no creó la conversación.") }
-                    threadID = id; model = result["model"].string ?? ""
+                    threadID = id
+                    model = result["model"].string ?? ""
                 }
                 guard token == generation, operation == operationID, let threadID, !Task.isCancelled else { return }
                 let result = try await transport.request("turn/start", .object([
@@ -216,7 +253,9 @@ final class AgentController {
             } catch {
                 guard token == generation, operation == operationID else { return }
                 // A timed-out start may still reach the server. Close it so it cannot edit later.
-                transport.stop(); connected = false; threadID = nil
+                transport.stop()
+                connected = false
+                threadID = nil
                 finishTurn(error: error is CancellationError ? "Tarea cancelada." : error.localizedDescription)
             }
         }
@@ -224,7 +263,8 @@ final class AgentController {
 
     func stop() {
         guard isRunning, !isStopping else { return }
-        isStopping = true; activity = "Deteniendo…"
+        isStopping = true
+        activity = "Deteniendo…"
         Task { await interrupt() }
     }
 
@@ -233,7 +273,8 @@ final class AgentController {
         let operation = operationID
         if let threadID, let turnID {
             do {
-                _ = try await transport.request("turn/interrupt", .object(["threadId": .string(threadID), "turnId": .string(turnID)]), timeout: 5)
+                _ = try await transport.request("turn/interrupt", .object(["threadId": .string(threadID), "turnId": .string(turnID)]),
+                                                timeout: 5)
                 // A response acknowledges interruption; completion is a separate notification.
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
             } catch {
@@ -243,7 +284,10 @@ final class AgentController {
             }
         }
         if token == generation, operation == operationID, isRunning {
-            sendTask?.cancel(); transport.stop(); connected = false; threadID = nil
+            sendTask?.cancel()
+            transport.stop()
+            connected = false
+            threadID = nil
             finishTurn(error: "Tarea detenida. Los cambios realizados se conservaron.")
         }
     }
@@ -268,17 +312,37 @@ final class AgentController {
         if let threadID, transport.running {
             Task { _ = try? await transport.request("thread/unsubscribe", .object(["threadId": .string(threadID)])) }
         }
-        generation = UUID(); threadID = nil; turnID = nil
-        messages = []; changes = []; diff = ""; requests = []; error = nil; model = ""
-        proposedChanges = [:]; commentaryIDs = []
+        generation = UUID()
+        threadID = nil
+        turnID = nil
+        messages = []
+        changes = []
+        diff = ""
+        requests = []
+        error = nil
+        model = ""
+        proposedChanges = [:]
+        commentaryIDs = []
     }
 
     func shutdown() {
         connectionGeneration = UUID()
-        generation = UUID(); sendTask?.cancel(); sendTask = nil
-        transport.stop(); connected = false; account = ""; isConnecting = false; loginPending = false; loginID = nil
+        generation = UUID()
+        sendTask?.cancel()
+        sendTask = nil
+        transport.stop()
+        connected = false
+        account = ""
+        isConnecting = false
+        loginPending = false
+        loginID = nil
         if isRunning, let scope { onFilesChanged?(scope) }
-        isRunning = false; isStopping = false; turnID = nil; threadID = nil; requests = []; activity = ""
+        isRunning = false
+        isStopping = false
+        turnID = nil
+        threadID = nil
+        requests = []
+        activity = ""
     }
 
     /// Responder a una solicitud del modelo no puede fallar en silencio: si el canal de
@@ -303,7 +367,11 @@ final class AgentController {
 
     private func finishTurn(error: String?) {
         operationID = UUID()
-        isRunning = false; isStopping = false; turnID = nil; requests = []; activity = ""
+        isRunning = false
+        isStopping = false
+        turnID = nil
+        requests = []
+        activity = ""
         if let error { self.error = error }
         if let scope { onFilesChanged?(scope) }
         trimHistory()
@@ -320,7 +388,8 @@ final class AgentController {
         guard let method = message.method else { return }
         let p = message.params ?? .null
         if method == "account/login/completed" {
-            loginPending = false; loginID = nil
+            loginPending = false
+            loginID = nil
             if p["success"].bool { Task { do { try await readAccount() } catch { self.error = error.localizedDescription } } }
             else { error = p["error"].string ?? "No se completó el inicio de sesión." }
             return
@@ -336,7 +405,10 @@ final class AgentController {
             return
         }
         if let id = message.id {
-            guard isRunning, p["threadId"].string == threadID else { reject(id, method: method); return }
+            guard isRunning, p["threadId"].string == threadID else {
+                reject(id, method: method)
+                return
+            }
             switch method {
             case "item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/tool/requestUserInput":
                 let request = AgentRequest(id: id.pretty, rpcID: id, method: method, params: p)

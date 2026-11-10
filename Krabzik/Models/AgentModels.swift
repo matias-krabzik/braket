@@ -5,35 +5,63 @@ indirect enum JSONValue: Codable, Equatable, Sendable {
     case object([String: JSONValue]), array([JSONValue]), string(String), number(Double), bool(Bool), null
 
     init(from decoder: Decoder) throws {
-        let c = try decoder.singleValueContainer()
-        if c.decodeNil() { self = .null }
-        else if let v = try? c.decode(Bool.self) { self = .bool(v) }
-        else if let v = try? c.decode(Double.self) { self = .number(v) }
-        else if let v = try? c.decode(String.self) { self = .string(v) }
-        else if let v = try? c.decode([JSONValue].self) { self = .array(v) }
-        else { self = .object(try c.decode([String: JSONValue].self)) }
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() { self = .null }
+        else if let value = try? container.decode(Bool.self) { self = .bool(value) }
+        else if let value = try? container.decode(Double.self) { self = .number(value) }
+        else if let value = try? container.decode(String.self) { self = .string(value) }
+        else if let value = try? container.decode([JSONValue].self) { self = .array(value) }
+        else { self = .object(try container.decode([String: JSONValue].self)) }
     }
+
     func encode(to encoder: Encoder) throws {
-        var c = encoder.singleValueContainer()
+        var container = encoder.singleValueContainer()
         switch self {
-        case .object(let v): try c.encode(v)
-        case .array(let v): try c.encode(v)
-        case .string(let v): try c.encode(v)
-        case .number(let v): try c.encode(v)
-        case .bool(let v): try c.encode(v)
-        case .null: try c.encodeNil()
+        case .object(let value): try container.encode(value)
+        case .array(let value): try container.encode(value)
+        case .string(let value): try container.encode(value)
+        case .number(let value): try container.encode(value)
+        case .bool(let value): try container.encode(value)
+        case .null: try container.encodeNil()
         }
     }
-    subscript(_ key: String) -> JSONValue { if case .object(let o) = self { return o[key] ?? .null }; return .null }
-    var string: String? { if case .string(let s) = self { return s }; return nil }
-    var array: [JSONValue] { if case .array(let a) = self { return a }; return [] }
-    var int: Int? { if case .number(let n) = self, n.isFinite, n >= 0, n < Double(Int.max) { return Int(n) }; return nil }
+
+    /// Accesores que **no lanzan**: un campo ausente o de otro tipo se lee como vacío.
+    /// El protocolo del agente cambia entre versiones de Codex, así que un campo que no
+    /// está no es un error del que haya que recuperarse, es un campo que no está.
+    subscript(_ key: String) -> JSONValue {
+        if case .object(let fields) = self { return fields[key] ?? .null }
+        return .null
+    }
+
+    var string: String? {
+        if case .string(let value) = self { return value }
+        return nil
+    }
+
+    var array: [JSONValue] {
+        if case .array(let values) = self { return values }
+        return []
+    }
+
+    /// Entero no negativo. Descarta infinitos, NaN y lo que no entre en `Int`.
+    var int: Int? {
+        if case .number(let value) = self, value.isFinite, value >= 0, value < Double(Int.max) {
+            return Int(value)
+        }
+        return nil
+    }
+
     var bool: Bool { self == .bool(true) }
     var pretty: String { (try? JSONEncoder.pretty.encode(self)).flatMap { String(data: $0, encoding: .utf8) } ?? "" }
 }
 
 private extension JSONEncoder {
-    static var pretty: JSONEncoder { let e = JSONEncoder(); e.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]; return e }
+    static var pretty: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        return encoder
+    }
 }
 
 /// Todo lo que el panel de Codex muestra lo escribe el modelo. Antes de entrar al
@@ -172,7 +200,11 @@ final class AgentMessage: Identifiable {
     let id: String
     let isUser: Bool
     var text: String
-    init(id: String = UUID().uuidString, isUser: Bool, text: String) { self.id = id; self.isUser = isUser; self.text = text }
+    init(id: String = UUID().uuidString, isUser: Bool, text: String) {
+        self.id = id
+        self.isUser = isUser
+        self.text = text
+    }
 }
 
 struct AgentFileChange: Identifiable, Equatable {

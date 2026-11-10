@@ -43,30 +43,45 @@ struct SQLScript {
                     delimiter = Array(value.utf8)
                     position = end < bytes.count ? end + 1 : end
                     if end < bytes.count { line += 1 }
-                    start = position; startLine = line; atLineStart = true
+                    start = position
+                    startLine = line
+                    atLineStart = true
                     continue
                 }
             }
             if lineComment {
                 if c == 10 { lineComment = false }
             } else if blockComment {
-                if c == 42 && next == 47 { blockComment = false; position += 2; atLineStart = false; continue }
+                if c == 42 && next == 47 {
+                    blockComment = false
+                    position += 2
+                    atLineStart = false
+                    continue
+                }
             } else if let active = quote {
                 if c == 92 && active != 96 && !noBackslashEscapes && position + 1 < bytes.count {
                     if next == 10 { line += 1 }
-                    position += 2; atLineStart = false; continue
+                    position += 2
+                    atLineStart = false
+                    continue
                 }
                 if c == active {
-                    if next == active { position += 2; continue }
+                    if next == active {
+                        position += 2
+                        continue
+                    }
                     quote = nil
                 }
             } else if matches(delimiter, at: position) {
                 let end = position
                 position += delimiter.count
                 if hasSQL {
-                    return SQLStatement(text: String(decoding: bytes[start..<end], as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines), line: startLine)
+                    return SQLStatement(text: String(decoding: bytes[start..<end], as: UTF8.self)
+                        .trimmingCharacters(in: .whitespacesAndNewlines),
+                                        line: startLine)
                 }
-                start = position; startLine = line
+                start = position
+                startLine = line
                 continue
             } else if c == 35 || (c == 45 && next == 45 && (position + 2 == bytes.count || bytes[position + 2] <= 32)) {
                 lineComment = true
@@ -74,19 +89,26 @@ struct SQLScript {
                 blockComment = true
                 // Versioned executable comments (/*! ... */) are SQL, not decoration.
                 if position + 2 < bytes.count && bytes[position + 2] == 33 { hasSQL = true }
-                position += 2; atLineStart = false; continue
+                position += 2
+                atLineStart = false
+                continue
             } else if c == 39 || c == 34 || c == 96 {
                 if !hasSQL { startLine = line }
-                quote = c; hasSQL = true
+                quote = c
+                hasSQL = true
             } else if c > 32 {
                 if !hasSQL { startLine = line }
                 hasSQL = true
             }
-            if c == 10 { line += 1; atLineStart = true } else if c != 13 { atLineStart = false }
+            if c == 10 {
+                line += 1
+                atLineStart = true } else if c != 13 { atLineStart = false
+            }
             position += 1
         }
         guard quote == nil, !blockComment else { throw DatabaseFailure("Texto o comentario sin cerrar desde la línea \(startLine).") }
         guard hasSQL else { return nil }
-        return SQLStatement(text: String(decoding: bytes[start...], as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines), line: startLine)
+        return SQLStatement(text: String(decoding: bytes[start...], as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines),
+                            line: startLine)
     }
 }

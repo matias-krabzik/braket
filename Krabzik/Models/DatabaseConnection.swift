@@ -53,9 +53,7 @@ struct DatabaseConnection: Identifiable, Codable, Equatable, Sendable {
             throw DatabaseFailure("La conexión contiene caracteres no válidos.")
         }
         if level == .strict, value.tls == .disabled, !value.isLoopbackHost {
-            throw DatabaseFailure(
-                "Sin TLS solo se permite para conexiones locales (127.0.0.1, ::1 o localhost)."
-            )
+            throw DatabaseFailure("Sin TLS solo se permite para conexiones locales (127.0.0.1, ::1 o localhost).")
         }
         return value
     }

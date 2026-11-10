@@ -76,7 +76,8 @@ final class MySQLTextCommand: MySQLCommand, @unchecked Sendable {
             guard let count = packet.payload.readSQLLength(), count > 0, count <= 4096 else {
                 throw DatabaseFailure("Respuesta MySQL no válida.")
             }
-            columnNames = []; binaryColumns = []
+            columnNames = []
+            binaryColumns = []
             phase = .columns(Int(count))
         case .columns(let count):
             // Read the two-byte collation ID directly (modern IDs may exceed 255).
@@ -104,12 +105,21 @@ final class MySQLTextCommand: MySQLCommand, @unchecked Sendable {
             }
             let row = try MySQLProtocol.TextResultSetRow.decode(from: &packet, columnCount: columnNames.count)
             current.rowCount += 1
-            guard current.rows.count < 1000, storedBytes < byteLimit else { current.truncated = true; return .init() }
+            guard current.rows.count < 1000, storedBytes < byteLimit else {
+                current.truncated = true
+                return .init()
+            }
             var values: [String?] = []
             for (index, buffer) in row.values.enumerated() {
                 storedBytes += 16 // Include storage for NULL and empty cells.
-                guard storedBytes <= byteLimit else { current.truncated = true; return .init() }
-                guard let buffer else { values.append(nil); continue }
+                guard storedBytes <= byteLimit else {
+                    current.truncated = true
+                    return .init()
+                }
+                guard let buffer else {
+                    values.append(nil)
+                    continue
+                }
                 let bytes = buffer.readableBytesView.prefix(16_384)
                 let truncated = buffer.readableBytes > bytes.count
                 let value: String

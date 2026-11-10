@@ -256,7 +256,8 @@ final class WorkspaceController {
             for item in updated.projects { _ = runner.state(for: item.id) }
             treeRevision += 1
             return true
-        } catch { show(error); return false }
+        } catch { show(error)
+        return false }
     }
 
     var selectedDatabase: DatabaseConnection? {
@@ -275,8 +276,13 @@ final class WorkspaceController {
         else { updated.connections.append(connection) }
         try CredentialStore.save(password, for: connection)
         do { try updated.write(to: workspaceURL) }
-        catch { try? CredentialStore.save(oldPassword, for: connection); throw error }
-        if let previous, previous.host.lowercased() != connection.host.lowercased() || previous.port != connection.port || previous.username != connection.username || previous.tls != connection.tls {
+        catch {
+            try? CredentialStore.save(oldPassword, for: connection)
+            throw error
+        }
+        if let previous,
+           previous.host.lowercased() != connection.host.lowercased() || previous.port != connection.port || previous.username != connection
+           .username || previous.tls != connection.tls {
             do {
                 try CredentialStore.remove(for: previous)
             } catch {
@@ -326,7 +332,10 @@ final class WorkspaceController {
         panel.allowsMultipleSelection = true
         panel.prompt = "Abrir"
         guard panel.runModal() == .OK else { return }
-        for url in panel.urls { rememberScript(url); openFile(url) }
+        for url in panel.urls {
+            rememberScript(url)
+            openFile(url)
+        }
     }
 
     private func rememberScript(_ url: URL) {
@@ -341,13 +350,19 @@ final class WorkspaceController {
 
     func openFile(_ url: URL) {
         let url = url.standardizedFileURL
-        if documents.contains(where: { $0.id == url }) { selectedDocumentID = url; return }
+        if documents.contains(where: {
+            $0.id == url }) { selectedDocumentID = url
+            return
+        }
         guard !pendingOpen.contains(url) else { return }
         pendingOpen.insert(url)
         openingFiles.insert(url)
         let currentWorkspace = workspaceURL
         Task {
-            defer { pendingOpen.remove(url); openingFiles.remove(url) }
+            defer {
+                pendingOpen.remove(url)
+                openingFiles.remove(url)
+            }
             do {
                 let data = try await Task.detached(priority: .userInitiated) { try DocumentIO.read(url) }.value
                 guard workspaceURL == currentWorkspace else { return }
@@ -385,7 +400,8 @@ final class WorkspaceController {
             document.originalData = data
             document.isDirty = Data(document.text.utf8) != data
             return true
-        } catch { show(error); return false }
+        } catch { show(error)
+        return false }
     }
 
     func saveCopy() {
@@ -394,7 +410,10 @@ final class WorkspaceController {
         panel.nameFieldStringValue = document.url.deletingPathExtension().lastPathComponent + "-copia." + document.url.pathExtension
         panel.directoryURL = document.url.deletingLastPathComponent()
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        do { try Data(document.text.utf8).write(to: url, options: .atomic); treeRevision += 1 }
+        do {
+            try Data(document.text.utf8).write(to: url, options: .atomic)
+            treeRevision += 1
+        }
         catch { show(error) }
     }
 
@@ -476,7 +495,8 @@ final class WorkspaceController {
                     let alert = NSAlert()
                     alert.messageText = "¿Guardar antes de enviar a Codex?"
                     alert.informativeText = dirty.map { $0.url.lastPathComponent }.joined(separator: ", ")
-                    alert.addButton(withTitle: "Guardar y enviar"); alert.addButton(withTitle: "Cancelar")
+                    alert.addButton(withTitle: "Guardar y enviar")
+                    alert.addButton(withTitle: "Cancelar")
                     guard alert.runModal() == .alertFirstButtonReturn else { return }
                     for document in dirty { guard await save(document) else { return } }
                 }
@@ -506,7 +526,8 @@ final class WorkspaceController {
             let alert = NSAlert()
             alert.messageText = "¿Recargar \(document.url.lastPathComponent)?"
             alert.informativeText = "Se descartarán tus cambios sin guardar."
-            alert.addButton(withTitle: "Recargar"); alert.addButton(withTitle: "Cancelar")
+            alert.addButton(withTitle: "Recargar")
+            alert.addButton(withTitle: "Cancelar")
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
         do { document.acceptExternalData(try DocumentIO.read(document.url), discardEdits: true) }
@@ -519,7 +540,10 @@ final class WorkspaceController {
                                                projectID: agent.selectedProjectID,
                                                allowExternal: workspaceTrust == .trusted) else { return }
         let url = path.hasPrefix("/") ? URL(fileURLWithPath: path) : scope.cwd.appendingPathComponent(path)
-        guard scope.contains(url) else { agent.error = "El archivo no pertenece a los subproyectos seleccionados."; return }
+        guard scope.contains(url) else {
+            agent.error = "El archivo no pertenece a los subproyectos seleccionados."
+            return
+        }
         openFile(url)
     }
 

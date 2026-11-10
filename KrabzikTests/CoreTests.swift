@@ -300,7 +300,8 @@ final class CoreTests: XCTestCase {
         let url = try temporaryDirectory().appendingPathComponent("example.php")
         let document = try EditorDocument(url: url, data: Data("<?php\n\nreturn 42;\n".utf8))
         let surface = EditorSurface(document: document)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 600), styleMask: [.titled], backing: .buffered,
+                              defer: false)
         window.contentView = surface
         window.makeKeyAndOrderFront(nil)
         defer { window.orderOut(nil) }
@@ -363,7 +364,8 @@ final class CoreTests: XCTestCase {
 
     @MainActor func testStopTerminatesDescendantsAndAllowsRestart() async throws {
         let directory = try temporaryDirectory()
-        var project = CodeProject(name: "test", path: directory.path, kind: .files, command: "sleep 30 & child=$!; printf 'CHILD:%s\\n' $child; wait")
+        var project = CodeProject(name: "test", path: directory.path, kind: .files,
+                                  command: "sleep 30 & child=$!; printf 'CHILD:%s\\n' $child; wait")
         let runner = ProcessRunner()
         defer { runner.terminateImmediately() }
         runner.start(project, workspaceURL: directory.appendingPathComponent("test.krabzik"))
