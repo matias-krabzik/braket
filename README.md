@@ -131,10 +131,11 @@ Datos de la última comprobación, no promesas permanentes.
 
 | Qué | Cuándo | Resultado |
 |---|---|---|
-| Xcode 27.1 / Swift 6.4, Swift 6 language mode | 2026-11-09 | compila sin avisos propios |
-| Suite completa con MySQL 8.4 en contenedor desechable | 2026-11-09 | 38 pruebas, 1 saltada (Codex con suscripción), 0 fallos |
-| Release instalada en `/Applications` | 2026-11-09 | firma ad hoc válida, arranca |
-| swiftlint 0.65.1 / swiftformat 0.64.6 | 2026-11-09 | sin errores; 66 avisos con tope en `scripts/verify.sh` |
+| Xcode 27.1 / Swift 6.4, Swift 6 language mode | 2026-11-10 | compila sin avisos propios |
+| `scripts/verify.sh` completo, sin MySQL local | 2026-11-10 | 97 pruebas, 8 saltadas (6 de MySQL real, 2 de Codex con suscripción), 0 fallos |
+| Suite completa con MySQL 8.4 en contenedor desechable | 2026-11-09 | 44 pruebas, 1 saltada (Codex con suscripción), 0 fallos |
+| Release instalada en `/Applications` | 2026-11-10 | binario universal (`x86_64 arm64`), firma ad hoc válida con hardened runtime, arranca con una sola instancia |
+| swiftlint 0.65.1 / swiftformat 0.64.6 | 2026-11-10 | `--strict` sin errores y **cero avisos** |
 
 No se garantiza compatibilidad con servidores derivados de MySQL ni con versiones de Xcode anteriores.
 

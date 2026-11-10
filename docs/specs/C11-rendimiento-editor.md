@@ -217,7 +217,7 @@ forma incremental»): era incremental en el resultado, no en el costo.
 | 2 · `document.text` es exactamente el del editor | `testDocumentTextReflectsEditorAfterEditing`, que además comprueba que soltar la vista no pierde lo escrito |
 | 3 · guardar, ejecutar SQL, copia y recarga siguen bien | las pruebas que ya existían: `testSaveDoesNotOverwriteExternalChangesOrDeletedFile`, `testSQLSelectionUsesUTF16AndOriginalLine`, `testEditorReloadPreservesUnsavedChangesAndUpdatesNativeSurface` |
 | 4 · `testSQLSelectionUsesUTF16AndOriginalLine` pasa sin cambios | sí, no se tocó |
-| 5 · `lipo -archs` lista `x86_64 arm64` | **pendiente**: se comprueba al compilar la Release para instalar |
+| 5 · `lipo -archs` lista `x86_64 arm64` | **comprobado** el 2026-11-10 sobre el binario instalado en `/Applications`: `x86_64 arm64`, y `codesign --verify --deep --strict` pasa |
 | 6 · Debug sigue en `ONLY_ACTIVE_ARCH = YES` | sí, y `scripts/generate_project.py --check` lo mantiene sincronizado |
 
 ### Errores cometidos
