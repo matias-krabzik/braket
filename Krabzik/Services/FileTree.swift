@@ -193,7 +193,12 @@ struct FileTree: NSViewRepresentable {
         private func watch(_ node: FileNode) {
             guard node.watcher == nil else { return }
             let fd = open(node.url.path, O_EVTONLY)
-            guard fd >= 0 else { return }
+            guard fd >= 0 else {
+                // Sin observador la carpeta deja de actualizarse sola. La app sigue
+                // funcionando, pero el usuario va a ver un árbol viejo sin saber por qué.
+                Log.workspace.notice("sin observador (errno \(errno, privacy: .public)) en \(node.url.path, privacy: .private)")
+                return
+            }
             let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: [.write, .rename, .delete], queue: .main)
             source.setEventHandler { [weak self, weak node] in
                 guard let self, let node else { return }

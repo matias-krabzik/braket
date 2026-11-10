@@ -3,6 +3,17 @@ import SwiftUI
 struct AgentPanel: View {
     @Bindable var controller: WorkspaceController
     @State private var showingDiff = false
+    @State private var showingDiagnostics = false
+
+    /// El stderr de Codex explica casi todos los arranques fallidos. Se muestra solo si
+    /// dijo algo, y solo cuando el usuario lo pide: puede contener rutas privadas.
+    @ViewBuilder private func diagnosticsButton(_ agent: AgentController) -> some View {
+        if !agent.diagnostics.isEmpty {
+            Button("Ver diagnóstico") { showingDiagnostics = true }
+                .buttonStyle(.link).font(.system(size: 11))
+        }
+    }
+
     var body: some View {
         @Bindable var agent = controller.agent
         VStack(spacing: 0) {
@@ -30,6 +41,7 @@ struct AgentPanel: View {
                             .font(.system(size: 11)).foregroundStyle(.secondary)
                             .multilineTextAlignment(.center).padding(.horizontal, 20)
                         Button("Seleccionar Codex…", action: agent.chooseExecutable)
+                        diagnosticsButton(agent)
                     }
                     else if !agent.connected { Button("Conectar Codex") { Task { await agent.connect() } } }
                     else { Button("Iniciar sesión con ChatGPT", action: agent.login) }
@@ -96,11 +108,32 @@ struct AgentPanel: View {
                 }.padding(12)
             }
             if let error = agent.error {
-                Text(error).font(.system(size: 11)).foregroundStyle(.red.opacity(0.9)).textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(error).font(.system(size: 11)).foregroundStyle(.red.opacity(0.9)).textSelection(.enabled)
+                    diagnosticsButton(agent)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading).padding(12)
             }
         }.background(Theme.background).task(id: controller.workspaceURL) { await agent.connect() }
         .onChange(of: agent.selectedProjectID) { _, _ in agent.clearConversation() }
+        .sheet(isPresented: $showingDiagnostics) {
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Diagnóstico de Codex").font(.headline)
+                    Spacer()
+                    Button("Cerrar") { showingDiagnostics = false }.keyboardShortcut(.cancelAction)
+                }.padding(18)
+                Text("Salida de error del proceso. Está solo en memoria: no se guarda ni se envía.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 18)
+                Divider().padding(.top, 12)
+                ScrollView([.horizontal, .vertical]) {
+                    Text(controller.agent.diagnostics)
+                        .font(.system(size: 11, design: .monospaced)).textSelection(.enabled).padding(18)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }.frame(width: 640, height: 420).background(Theme.background)
+        }
         .sheet(isPresented: $showingDiff) {
             VStack(spacing: 0) {
                 HStack { Text("Cambios de Codex").font(.headline); Spacer(); Button("Cerrar") { showingDiff = false }.keyboardShortcut(.cancelAction) }.padding(18)
@@ -159,10 +192,6 @@ private struct AgentRequestView: View {
     @State private var answers: [String: String] = [:]
     @State private var acceptsSecretRisk = false
 
-    private var hasSecret: Bool {
-        request.params["questions"].array.contains { $0["isSecret"].bool }
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
@@ -201,7 +230,7 @@ private struct AgentRequestView: View {
                 Spacer()
                 Button("Rechazar") { agent.answer(request, accept: false) }
                 Button("Responder") { agent.answerQuestions(request, answers: answers) }
-                    .disabled(answersIncomplete || (hasSecret && !acceptsSecretRisk))
+                    .disabled(answersIncomplete || (request.isSecret && !acceptsSecretRisk))
             }
         }
     }

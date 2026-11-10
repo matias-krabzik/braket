@@ -182,6 +182,11 @@ final class WorkspaceController {
         // Para que un repositorio no pueda aportar su propio ejecutable de Codex.
         agent.excludedRoots = project.projects.map { $0.directory(relativeTo: url) }
         agent.visible = agent.visible && decided == .trusted
+        Log.workspace.info("""
+            proyecto abierto · subproyectos \(project.projects.count, privacy: .public) \
+            · conexiones \(project.connections.count, privacy: .public) \
+            · \(decided == .trusted ? "confiable" : "solo lectura", privacy: .public)
+            """)
         agent.draft = ""
         for item in project.projects { _ = runner.state(for: item.id) }
         selectedProjectID = runnableProjects.first?.id
@@ -272,7 +277,14 @@ final class WorkspaceController {
         do { try updated.write(to: workspaceURL) }
         catch { try? CredentialStore.save(oldPassword, for: connection); throw error }
         if let previous, previous.host.lowercased() != connection.host.lowercased() || previous.port != connection.port || previous.username != connection.username || previous.tls != connection.tls {
-            try? CredentialStore.remove(for: previous)
+            do {
+                try CredentialStore.remove(for: previous)
+            } catch {
+                // El endpoint cambió y la credencial vieja quedó en el llavero. No es
+                // motivo para abortar el guardado, pero tiene que quedar registrado:
+                // es una contraseña que el usuario cree que ya no está.
+                Log.security.error("quedó una credencial huérfana en el llavero: \(error.localizedDescription, privacy: .private)")
+            }
         }
         await database.client.disconnect(connection.id)
         workspace = updated

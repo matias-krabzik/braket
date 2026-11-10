@@ -33,6 +33,7 @@ import Foundation
         var paths = trustedPaths
         paths.insert(key(for: workspaceURL))
         defaults.set(Array(paths), forKey: Keys.workspaces)
+        Log.security.notice("proyecto marcado como confiable: \(workspaceURL.path, privacy: .private)")
     }
 
     func forget(_ workspaceURL: URL) {
@@ -60,6 +61,7 @@ import Foundation
         var approved = approvedCommands
         approved.insert(commandKey(command, project, workspaceURL))
         defaults.set(Array(approved), forKey: Keys.commands)
+        Log.security.notice("comando aprobado: \(command, privacy: .private)")
     }
 
     // MARK: - Interno

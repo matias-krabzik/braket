@@ -12,7 +12,7 @@ cd "${0:A:h:h}"
 # No son objetivos, son topes para no empeorar mientras C4 y C6 no estén hechos.
 BASE_LONG_LINES=57      # líneas de más de 140 columnas        -> C4 las baja a 0
 BASE_SEMICOLONS=159     # líneas con varias sentencias y ';'   -> C4 las baja a 0
-BASE_EMPTY_CATCH=8     # bloques catch vacíos                 -> C6 los baja a 0
+BASE_EMPTY_CATCH=0      # bloques catch vacíos en Krabzik/      -> C6 los bajó a 0
 BASE_LINT=60            # avisos de SwiftLint                   -> C4 los baja a 0
 
 failures=0
@@ -74,7 +74,9 @@ else
   ok "líneas con ';': $semicolons (tope $BASE_SEMICOLONS)"
 fi
 
-empty_catch=$(grep -rn 'catch *{ *}' --include='*.swift' Krabzik KrabzikTests | wc -l | tr -d ' ')
+# Solo el código de producción: en una prueba, `do { ... XCTFail() } catch {}` es la
+# forma idiomática de decir «esto tiene que lanzar», y ahí el catch vacío es correcto.
+empty_catch=$(grep -rn 'catch *{ *}' --include='*.swift' Krabzik | wc -l | tr -d ' ')
 if (( empty_catch > BASE_EMPTY_CATCH )); then
   fail "bloques catch vacíos: $empty_catch (tope $BASE_EMPTY_CATCH)"
 else

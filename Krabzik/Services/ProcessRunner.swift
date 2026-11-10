@@ -149,13 +149,17 @@ final class ProcessRunner {
         Darwin.close(writeFD)
         guard result == 0 else {
             Darwin.close(readFD)
-            run.status = .failed(String(cString: strerror(result)))
-            run.append("\(String(cString: strerror(result)))\n")
+            let reason = String(cString: strerror(result))
+            Log.process.error("no se pudo lanzar el proceso: \(reason, privacy: .public)")
+            run.status = .failed(reason)
+            run.append("\(reason)\n")
             return
         }
         let spawnedPID = pid
         run.processID = spawnedPID
         run.status = .running
+        // El comando va como privado: lo escribió el usuario y puede traer rutas o tokens.
+        Log.process.info("proceso iniciado · pid \(spawnedPID, privacy: .public) · \(project.command, privacy: .private)")
         let batch = OutputBatch { [weak run] text in
             guard let run, run.generation == generation else { return }
             run.append(text)

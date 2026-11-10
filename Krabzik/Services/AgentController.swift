@@ -132,6 +132,10 @@ final class AgentController {
         loginPending = false; loginID = nil
     }
 
+    /// Diagnóstico del último arranque de Codex: su stderr, en memoria. Vacío si no dijo
+    /// nada. Se muestra bajo demanda y no se guarda en ninguna parte.
+    var diagnostics: String { transport.diagnostics }
+
     /// Identidad del binario que el usuario aprobó, si hay alguna.
     var approvedIdentity: BinaryIdentity? {
         guard let data = defaults.data(forKey: "approvedCodexBinary") else { return nil }
@@ -232,7 +236,11 @@ final class AgentController {
                 _ = try await transport.request("turn/interrupt", .object(["threadId": .string(threadID), "turnId": .string(turnID)]), timeout: 5)
                 // A response acknowledges interruption; completion is a separate notification.
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
-            } catch {}
+            } catch {
+                // El interrupt no llegó. El turno se corta igual más abajo, pero sin esto
+                // no habría forma de saber que el modelo nunca se enteró.
+                Log.agent.error("turn/interrupt falló: \(error.localizedDescription, privacy: .private)")
+            }
         }
         if token == generation, operation == operationID, isRunning {
             sendTask?.cancel(); transport.stop(); connected = false; threadID = nil
@@ -273,6 +281,26 @@ final class AgentController {
         isRunning = false; isStopping = false; turnID = nil; threadID = nil; requests = []; activity = ""
     }
 
+    /// Responder a una solicitud del modelo no puede fallar en silencio: si el canal de
+    /// escritura está roto, el turno queda esperando algo que no va a llegar.
+    private func respond(_ id: JSONValue, method: String, result: JSONValue) {
+        do {
+            try transport.respond(id: id, result: result)
+        } catch {
+            Log.agent.error("sin poder responder a \(method, privacy: .public): \(error.localizedDescription, privacy: .private)")
+            finishTurn(error: "Se perdió la conexión con Codex al responder una solicitud.")
+        }
+    }
+
+    private func reject(_ id: JSONValue, method: String) {
+        do {
+            try transport.reject(id: id)
+        } catch {
+            Log.agent.error("sin poder rechazar \(method, privacy: .public): \(error.localizedDescription, privacy: .private)")
+            finishTurn(error: "Se perdió la conexión con Codex al responder una solicitud.")
+        }
+    }
+
     private func finishTurn(error: String?) {
         operationID = UUID()
         isRunning = false; isStopping = false; turnID = nil; requests = []; activity = ""
@@ -297,19 +325,33 @@ final class AgentController {
             else { error = p["error"].string ?? "No se completó el inicio de sesión." }
             return
         }
-        if method == "account/updated" { Task { try? await readAccount() }; return }
+        if method == "account/updated" {
+            Task {
+                do {
+                    try await readAccount()
+                } catch {
+                    Log.agent.error("account/updated sin poder releer la cuenta: \(error.localizedDescription, privacy: .private)")
+                }
+            }
+            return
+        }
         if let id = message.id {
-            guard isRunning, p["threadId"].string == threadID else { try? transport.reject(id: id); return }
+            guard isRunning, p["threadId"].string == threadID else { reject(id, method: method); return }
             switch method {
             case "item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/tool/requestUserInput":
-                requests.append(AgentRequest(id: id.pretty, rpcID: id, method: method, params: p))
-                // TODO(C6): registrar con OSLog cuando llega una pregunta con isSecret.
-                // Si alguna vez pasa de verdad, hay que poder reconstruir qué se pidió.
+                let request = AgentRequest(id: id.pretty, rpcID: id, method: method, params: p)
+                requests.append(request)
+                // Una pregunta con riesgo de secreto se registra sin su contenido: si pasa
+                // de verdad hay que poder reconstruir que se pidió, no qué decía.
+                if request.isSecret {
+                    Log.agent.notice("solicitud marcada como secreta en \(method, privacy: .public)")
+                }
             case "item/permissions/requestApproval":
-                try? transport.respond(id: id, result: .object(["permissions": .object([:]), "scope": .string("turn")]))
+                respond(id, method: method,
+                        result: .object(["permissions": .object([:]), "scope": .string("turn")]))
             case "mcpServer/elicitation/request":
-                try? transport.respond(id: id, result: .object(["action": .string("cancel")]))
-            default: try? transport.reject(id: id)
+                respond(id, method: method, result: .object(["action": .string("cancel")]))
+            default: reject(id, method: method)
             }
             return
         }

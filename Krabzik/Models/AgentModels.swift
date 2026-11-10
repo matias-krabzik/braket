@@ -188,4 +188,7 @@ struct AgentRequest: Identifiable {
     let method: String
     let params: JSONValue
     var isQuestion: Bool { method == "item/tool/requestUserInput" }
+    /// La solicitud pide algo que el modelo marcó como secreto. La interfaz lo avisa antes
+    /// de dejar escribir, y el log registra que pasó —nunca el contenido—.
+    var isSecret: Bool { params["questions"].array.contains { $0["isSecret"].bool } }
 }

@@ -68,8 +68,9 @@ actor MySQLClient {
             throw DatabaseFailure("\(config.host) no es una dirección local: activá TLS para conectar.")
         }
         let loop = eventLoop()
-        var logger = Logger(label: "com.krabzik.mysql")
-        logger.logLevel = .critical
+        let level = MySQLLogHandler.configuredLevel()
+        var logger = Logger(label: "com.krabzik.mysql") { _ in MySQLLogHandler(logLevel: level) }
+        logger.logLevel = level
         let connection = try await MySQLConnection.connect(
             to: address, username: config.username, database: config.database,
             password: password.isEmpty ? nil : password, tlsConfiguration: config.tls == .verified ? .makeClientConfiguration() : nil,
@@ -79,6 +80,11 @@ actor MySQLClient {
             do { _ = try await connection.channel.pipeline.handler(type: NIOSSLClientHandler.self).map { _ in true }.get() }
             catch { try? await connection.close().get(); throw DatabaseFailure("El servidor no ofrece TLS.") }
         }
+        // El host y el usuario van como privados; el modo de TLS es lo que importa poder
+        // leer sin autorización especial.
+        let mode = config.tls == .verified ? "verificado" : "sin TLS (loopback)"
+        let endpoint = "\(config.username)@\(config.host):\(config.port)"
+        Log.mysql.info("conexión establecida · TLS \(mode, privacy: .public) · \(endpoint, privacy: .private)")
         return connection
     }
 
@@ -189,10 +195,12 @@ actor MySQLClient {
             do {
                 _ = try await control.simpleQuery("KILL CONNECTION \(value.serverID)").get()
             } catch {
+                Log.mysql.error("KILL CONNECTION falló: \(Self.message(error), privacy: .private)")
                 outcome = .localOnly(reason: Self.message(error))
             }
             try? await control.close().get()
         } catch {
+            Log.mysql.error("sin conexión de control para cancelar: \(Self.message(error), privacy: .private)")
             outcome = .localOnly(reason: Self.message(error))
         }
         try? await value.connection.close().get()

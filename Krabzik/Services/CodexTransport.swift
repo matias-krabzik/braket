@@ -13,13 +13,22 @@ import Foundation
     private var pending: [Int: CheckedContinuation<JSONValue, Error>] = [:]
     private var deadlines: [Int: Task<Void, Never>] = [:]
     var running: Bool { processID > 0 }
+    /// Últimos 64 KiB del stderr del hijo. **Nunca se persiste**: puede traer rutas
+    /// privadas, que es el motivo por el que antes iba a /dev/null. En memoria y a la
+    /// vista bajo demanda es la única pista de por qué Codex no arranca.
+    private(set) var diagnostics = ""
+    private static let diagnosticsLimit = 64 * 1024
 
     func start(executable: URL, arguments: [String] = ["app-server", "--listen", "stdio://"], environment: [String: String]? = nil) throws {
         guard !running else { return }
-        var stdinFD: [Int32] = [0, 0], stdoutFD: [Int32] = [0, 0]
+        var stdinFD: [Int32] = [0, 0], stdoutFD: [Int32] = [0, 0], stderrFD: [Int32] = [0, 0]
         guard pipe(&stdinFD) == 0 else { throw AgentFailure("No se pudo iniciar Codex.") }
         guard pipe(&stdoutFD) == 0 else { stdinFD.forEach { Darwin.close($0) }; throw AgentFailure("No se pudo abrir la salida de Codex.") }
-        let allFD = stdinFD + stdoutFD
+        guard pipe(&stderrFD) == 0 else {
+            (stdinFD + stdoutFD).forEach { Darwin.close($0) }
+            throw AgentFailure("No se pudo abrir el diagnóstico de Codex.")
+        }
+        let allFD = stdinFD + stdoutFD + stderrFD
         allFD.forEach { _ = fcntl($0, F_SETFD, FD_CLOEXEC) }
         _ = fcntl(stdinFD[1], F_SETNOSIGPIPE, 1)
         var actions: posix_spawn_file_actions_t?, attributes: posix_spawnattr_t?
@@ -27,8 +36,8 @@ import Foundation
         defer { posix_spawn_file_actions_destroy(&actions); posix_spawnattr_destroy(&attributes) }
         posix_spawn_file_actions_adddup2(&actions, stdinFD[0], STDIN_FILENO)
         posix_spawn_file_actions_adddup2(&actions, stdoutFD[1], STDOUT_FILENO)
-        // Diagnostics can contain private paths. Protocol errors reach the UI; raw stderr is not stored.
-        posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0)
+        // El stderr va a un anillo en memoria, nunca a disco: puede traer rutas privadas.
+        posix_spawn_file_actions_adddup2(&actions, stderrFD[1], STDERR_FILENO)
         allFD.forEach { posix_spawn_file_actions_addclose(&actions, $0) }
         posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT))
         posix_spawnattr_setpgroup(&attributes, 0)
@@ -42,11 +51,12 @@ import Foundation
         defer { argv.forEach { free($0) }; envp.forEach { free($0) } }
         var pid: pid_t = 0
         let status = posix_spawn(&pid, executable.path, &actions, &attributes, argv, envp)
-        Darwin.close(stdinFD[0]); Darwin.close(stdoutFD[1])
+        Darwin.close(stdinFD[0]); Darwin.close(stdoutFD[1]); Darwin.close(stderrFD[1])
         guard status == 0 else {
-            Darwin.close(stdinFD[1]); Darwin.close(stdoutFD[0])
+            Darwin.close(stdinFD[1]); Darwin.close(stdoutFD[0]); Darwin.close(stderrFD[0])
             throw AgentFailure("No se pudo iniciar Codex: \(String(cString: strerror(status))).")
         }
+        diagnostics = ""
         let spawnedPID = pid
         processID = spawnedPID; generation = UUID()
         let token = generation, readFD = stdoutFD[0]
@@ -73,6 +83,21 @@ import Foundation
                 self.stop(reason: reason)
                 self.onDisconnect?(reason)
             }
+        }
+        let errorFD = stderrFD[0]
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            var buffer = [UInt8](repeating: 0, count: 4_096)
+            while true {
+                let count = Darwin.read(errorFD, &buffer, buffer.count)
+                if count < 0 && errno == EINTR { continue }
+                guard count > 0 else { break }
+                let text = String(decoding: buffer.prefix(count), as: UTF8.self)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.generation == token else { return }
+                    self.append(diagnostic: text)
+                }
+            }
+            Darwin.close(errorFD)
         }
         DispatchQueue.global(qos: .utility).async {
             var status: Int32 = 0
@@ -102,6 +127,14 @@ import Foundation
     func respond(id: JSONValue, result: JSONValue) throws { try write(RPCMessage(id: id, result: result)) }
     func reject(id: JSONValue) throws {
         try write(RPCMessage(id: id, error: .object(["code": .number(-32601), "message": .string("Este cliente no admite esta solicitud.")])))
+    }
+
+    private func append(diagnostic text: String) {
+        diagnostics += text
+        if diagnostics.utf8.count > Self.diagnosticsLimit {
+            diagnostics = String(diagnostics.suffix(Self.diagnosticsLimit / 2))
+        }
+        Log.agent.debug("stderr de Codex: \(text, privacy: .private)")
     }
 
     private func write(_ message: RPCMessage) throws {

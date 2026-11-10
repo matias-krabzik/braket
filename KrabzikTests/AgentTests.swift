@@ -52,6 +52,29 @@ final class AgentTests: XCTestCase {
         XCTAssertEqual(hostile.diff, "-a\n+b\n")
     }
 
+    /// Si el canal de escritura está roto, responder una solicitud falla. Antes se perdía
+    /// con `try?` y el turno quedaba esperando algo que nunca iba a llegar (C6).
+    @MainActor func testBrokenTransportFinishesTurnWithError() async throws {
+        let agent = AgentController()
+        defer { agent.shutdown() }
+        XCTAssertFalse(agent.transport.running, "la prueba necesita el canal cerrado")
+        agent.connected = true
+        agent.isRunning = true
+
+        agent.receive(RPCMessage(id: .number(7), method: "item/permissions/requestApproval",
+                                 params: .object([:])))
+
+        XCTAssertFalse(agent.isRunning, "el turno no puede seguir corriendo")
+        XCTAssertEqual(agent.error, "Se perdió la conexión con Codex al responder una solicitud.")
+
+        // Lo mismo por el camino del rechazo, con un método que el cliente no admite.
+        agent.error = nil
+        agent.isRunning = true
+        agent.receive(RPCMessage(id: .number(8), method: "metodo/inexistente", params: .object([:])))
+        XCTAssertFalse(agent.isRunning)
+        XCTAssertNotNil(agent.error)
+    }
+
     func testSearchRejectsWorldWritableAndInWorkspaceCandidates() throws {
         let base = try fixture()
         defer { try? FileManager.default.removeItem(at: base) }
