@@ -1,0 +1,16 @@
+{
+  "version" : 1,
+  "name" : "Facturación",
+  "projects" : [
+    {
+      "id" : "6B2C4A1E-0000-4000-8000-000000000001",
+      "name" : "api‮gnp.sh",
+      "path" : "api",
+      "kind" : "Archivos",
+      "command" : "npm run dev"
+    }
+  ],
+  "scripts" : [
+    "../../../../etc/passwd"
+  ]
+}

@@ -50,6 +50,42 @@ func pathScope(_ path: String, relativeTo workspaceURL: URL) -> PathScope {
     return target.path.hasPrefix(base.path + "/") ? .internalToProject : .external
 }
 
+/// Topes del formato `.krabzik`. Son holgados respecto del uso real —el proyecto de
+/// ejemplo tiene tres subproyectos— y están para que un archivo ajeno no pueda degradar
+/// la interfaz. Si aparece un caso legítimo que los supera se sube el número; no se quita
+/// la comprobación. Ver docs/specs/C7-validacion-formato-krabzik.md.
+enum WorkspaceLimits {
+    static let projects = 64
+    static let connections = 32
+    static let scripts = 512
+    static let nameLength = 200
+    static let pathLength = 1_024
+    static let commandLength = 4_000
+}
+
+extension String {
+    /// Texto admisible en un `.krabzik`. Acá se **rechaza** en vez de sanear: un archivo
+    /// con un override bidi en el nombre de un subproyecto miente sobre lo que dice, y el
+    /// diálogo de confianza de S1 muestra justamente esos campos. Para lo que viene del
+    /// modelo, que no se puede rechazar, está `ModelText`.
+    func isValidProjectText(newlines: Bool = false) -> Bool {
+        for scalar in unicodeScalars {
+            if scalar == "\t" { continue }
+            if newlines, scalar == "\n" || scalar == "\r" { continue }
+            switch scalar.value {
+            case 0x00 ... 0x1F, 0x7F,       // controles
+                 0x200B ... 0x200F,         // zero-width y marcas de dirección
+                 0x202A ... 0x202E,         // overrides bidi
+                 0x2066 ... 0x2069,         // aislantes bidi
+                 0xFEFF:                    // BOM en medio del texto
+                return false
+            default: continue
+            }
+        }
+        return true
+    }
+}
+
 struct CodeProject: Identifiable, Codable, Equatable {
     var id: UUID = UUID()
     var name: String
@@ -60,6 +96,10 @@ struct CodeProject: Identifiable, Codable, Equatable {
     func scope(relativeTo workspaceURL: URL) -> PathScope {
         pathScope(path, relativeTo: workspaceURL)
     }
+
+    /// Nombre acotado para los mensajes de error: el del archivo puede ser larguísimo
+    /// y el mensaje tiene que seguir siendo legible.
+    var shortName: String { name.count > 40 ? String(name.prefix(40)) + "…" : name }
 
     func directory(relativeTo workspaceURL: URL) -> URL {
         if path.hasPrefix("/") { return URL(fileURLWithPath: path).standardizedFileURL }
@@ -90,9 +130,14 @@ struct Workspace: Codable, Equatable {
         scripts = Array(NSOrderedSet(array: scripts)) as? [String] ?? []
     }
 
+    /// Orden de comprobaciones: versión, cantidades, longitudes, texto, rutas, IDs
+    /// duplicados y conexiones. Las cantidades van primero para no recorrer un arreglo
+    /// de cien mil elementos validando texto.
     static func read(from url: URL) throws -> Workspace {
-        let value = try JSONDecoder().decode(Workspace.self, from: Data(contentsOf: url))
+        var value = try JSONDecoder().decode(Workspace.self, from: Data(contentsOf: url))
         guard value.version == 1 else { throw WorkspaceError.unsupportedVersion }
+        try value.checkFormat()
+        value.scripts = Self.deduplicated(value.scripts)
         guard Set(value.projects.map(\.id)).count == value.projects.count else {
             throw WorkspaceError.duplicateProject
         }
@@ -103,7 +148,115 @@ struct Workspace: Codable, Equatable {
         return value
     }
 
+    private func checkFormat() throws {
+        try checkCounts()
+        try checkLengths()
+        try checkText()
+        try checkPaths()
+    }
+
+    private func checkCounts() throws {
+        try Self.checkCount(projects.count, WorkspaceLimits.projects, "subproyectos")
+        try Self.checkCount(connections.count, WorkspaceLimits.connections, "conexiones")
+        try Self.checkCount(scripts.count, WorkspaceLimits.scripts, "scripts SQL")
+    }
+
+    private static func checkCount(_ count: Int, _ limit: Int, _ what: String) throws {
+        guard count > limit else { return }
+        throw WorkspaceError.tooManyEntries("\(what) (\(limit) como máximo, el archivo trae \(count))")
+    }
+
+    private func checkLengths() throws {
+        try Self.checkLength(name, WorkspaceLimits.nameLength, "el nombre del proyecto")
+        for project in projects {
+            try Self.checkLength(project.name, WorkspaceLimits.nameLength, "el nombre de «\(project.shortName)»")
+            try Self.checkLength(project.path, WorkspaceLimits.pathLength, "la ruta de «\(project.shortName)»")
+            try Self.checkLength(project.command, WorkspaceLimits.commandLength, "el comando de «\(project.shortName)»")
+        }
+        for script in scripts {
+            try Self.checkLength(script, WorkspaceLimits.pathLength, "la ruta de un script SQL")
+        }
+    }
+
+    private static func checkLength(_ value: String, _ limit: Int, _ what: String) throws {
+        guard value.count > limit else { return }
+        throw WorkspaceError.textTooLong("\(what) (\(limit) caracteres como máximo, el archivo trae \(value.count))")
+    }
+
+    private func checkText() throws {
+        guard name.isValidProjectText() else { throw WorkspaceError.invalidText("el nombre del proyecto") }
+        for project in projects {
+            guard project.name.isValidProjectText() else {
+                throw WorkspaceError.invalidText("el nombre de «\(project.shortName)»")
+            }
+            guard project.path.isValidProjectText() else {
+                throw WorkspaceError.invalidText("la ruta de «\(project.shortName)»")
+            }
+            // Un comando multilínea es legítimo; el resto de los controles, no.
+            guard project.command.isValidProjectText(newlines: true) else {
+                throw WorkspaceError.invalidText("el comando de «\(project.shortName)»")
+            }
+        }
+        for script in scripts where !script.isValidProjectText() {
+            throw WorkspaceError.invalidText("la ruta de un script SQL")
+        }
+    }
+
+    /// Una ruta relativa que sale del directorio del proyecto no se normaliza: si quiere
+    /// salir, el archivo está mal formado o es hostil. Las absolutas sí se admiten —un
+    /// proyecto legítimo puede tener carpetas afuera— y S1 las clasifica como externas.
+    private func checkPaths() throws {
+        for project in projects where Self.escapes(project.path) {
+            throw WorkspaceError.escapingPath("«\(project.path)», de «\(project.shortName)»")
+        }
+        for script in scripts where Self.escapes(script) {
+            throw WorkspaceError.escapingPath("«\(script)»")
+        }
+    }
+
+    private static func escapes(_ path: String) -> Bool {
+        guard !path.hasPrefix("/") else { return false }
+        return normalized(path).hasPrefix("..")
+    }
+
+    /// Normaliza sin tocar el disco: quita los componentes `.` y colapsa los `..` que
+    /// puede. Así `"sql/a.sql"` y `"./sql/a.sql"` son la misma entrada.
+    static func normalized(_ path: String) -> String {
+        guard !path.hasPrefix("/") else { return URL(fileURLWithPath: path).standardizedFileURL.path }
+        var components: [String] = []
+        for part in path.split(separator: "/", omittingEmptySubsequences: true) {
+            switch part {
+            case ".":
+                continue
+            case "..":
+                if let last = components.last, last != ".." {
+                    components.removeLast()
+                } else {
+                    components.append("..")
+                }
+            default:
+                components.append(String(part))
+            }
+        }
+        return components.joined(separator: "/")
+    }
+
+    private static func deduplicated(_ scripts: [String]) -> [String] {
+        var seen: Set<String> = []
+        return scripts.map(normalized).filter { seen.insert($0).inserted }
+    }
+
     func write(to url: URL) throws {
+        // Lo que la app genera cumple el formato por construcción. Esto está para que un
+        // camino nuevo que lo rompa se note acá, y no al reabrir el proyecto.
+        #if DEBUG
+        do {
+            try checkFormat()
+        } catch {
+            assertionFailure("se está escribiendo un .krabzik que la propia lectura rechazaría: "
+                + (error.localizedDescription))
+        }
+        #endif
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         try encoder.encode(self).write(to: url, options: .atomic)
@@ -112,9 +265,19 @@ struct Workspace: Codable, Equatable {
 
 enum WorkspaceError: LocalizedError {
     case unsupportedVersion, duplicateProject, binaryFile, largeFile, externalChange, missingFolder
+    /// Los tres de C7 llevan el campo y el subproyecto en el mensaje: el `.krabzik` es
+    /// JSON legible y se puede corregir a mano si se sabe dónde mirar.
+    case tooManyEntries(String)
+    case textTooLong(String)
+    case invalidText(String)
+    case escapingPath(String)
 
     var errorDescription: String? {
         switch self {
+        case .tooManyEntries(let detail): return "El proyecto declara demasiados \(detail)."
+        case .textTooLong(let detail): return "Es demasiado largo \(detail)."
+        case .invalidText(let detail): return "El proyecto contiene texto no válido en \(detail)."
+        case .escapingPath(let detail): return "La ruta \(detail) sale del directorio del proyecto."
         case .unsupportedVersion: return "La versión de este proyecto no es compatible."
         case .duplicateProject: return "El proyecto contiene identificadores duplicados."
         case .binaryFile: return "Este archivo no es texto UTF-8."

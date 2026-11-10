@@ -42,27 +42,38 @@ struct DatabaseSidebar: View {
                     .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                     .help("Agregar script SQL")
             }.padding(.horizontal, 15).padding(.top, 12).padding(.bottom, 4)
-            ForEach(controller.workspace?.scripts ?? [], id: \.self) { path in
-                if let url = controller.scriptURL(path) {
-                    Button { controller.openFile(url) } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "doc").foregroundStyle(.secondary)
-                            Text(url.lastPathComponent).lineLimit(1)
-                            Spacer()
-                        }.font(.system(size: 12)).padding(.horizontal, 17).frame(height: 28)
-                            .contentShape(Rectangle())
-                    }.buttonStyle(.plain).help(url.path)
-                } else {
+            // Perezoso y con tope de alto: el formato admite hasta 512 scripts
+            // (WorkspaceLimits) y un ForEach dentro de un VStack los construiría todos.
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    scriptRows
+                }
+            }
+            .frame(maxHeight: 260)
+        }.padding(.bottom, 12)
+    }
+
+    @ViewBuilder private var scriptRows: some View {
+        ForEach(controller.workspace?.scripts ?? [], id: \.self) { path in
+            if let url = controller.scriptURL(path) {
+                Button { controller.openFile(url) } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: "doc").foregroundStyle(.tertiary)
-                        Text((path as NSString).lastPathComponent).lineLimit(1).foregroundStyle(.tertiary)
+                        Image(systemName: "doc").foregroundStyle(.secondary)
+                        Text(url.lastPathComponent).lineLimit(1)
                         Spacer()
+                    }.font(.system(size: 12)).padding(.horizontal, 17).frame(height: 28)
+                        .contentShape(Rectangle())
+                }.buttonStyle(.plain).help(url.path)
+            } else {
+                HStack(spacing: 8) {
+                    Image(systemName: "doc").foregroundStyle(.tertiary)
+                    Text((path as NSString).lastPathComponent).lineLimit(1).foregroundStyle(.tertiary)
+                    Spacer()
                     }
                     .font(.system(size: 12)).padding(.horizontal, 17).frame(height: 28)
                     .help("Fuera de la carpeta del proyecto: no disponible en solo lectura.")
                 }
-            }
-        }.padding(.bottom, 12)
+        }
     }
 }
 

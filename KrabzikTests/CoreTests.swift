@@ -14,10 +14,119 @@ final class CoreTests: XCTestCase {
         let directory = try temporaryDirectory()
         let url = directory.appendingPathComponent("Tienda.krabzik")
         let project = CodeProject(name: "API", path: "api", kind: .laravel, command: "php artisan serve")
-        let workspace = Workspace(name: "Tienda", projects: [project])
+        var workspace = Workspace(name: "Tienda", projects: [project], connections: [DatabaseConnection()])
+        workspace.scripts = ["sql/consultas.sql", "sql/migracion.sql"]
         try workspace.write(to: url)
         XCTAssertEqual(try Workspace.read(from: url), workspace)
         XCTAssertEqual(project.directory(relativeTo: url), directory.appendingPathComponent("api"))
+    }
+
+    // MARK: - Contrato del formato (C7)
+
+    /// Escribe el `.krabzik` tal cual, sin pasar por `Workspace.write`: estas pruebas
+    /// simulan un archivo ajeno, que no tiene por qué cumplir el formato.
+    private func writeRaw(_ json: String, to url: URL) throws {
+        try Data(json.utf8).write(to: url)
+    }
+
+    private static func archivoConRuta(_ path: String) -> String {
+        #"{"version":1,"name":"T","projects":[{"id":"\#(UUID().uuidString)","name":"api","#
+            + #""path":"\#(path)","kind":"Archivos","command":""}]}"#
+    }
+
+    private static func archivoConComando(_ command: String) -> String {
+        #"{"version":1,"name":"C","projects":[{"id":"\#(UUID().uuidString)","name":"api","#
+            + #""path":"a","kind":"Archivos","command":"\#(command)"}]}"#
+    }
+
+    private func message(of error: Error) -> String {
+        (error as? WorkspaceError)?.errorDescription ?? String(describing: error)
+    }
+
+    func testWorkspaceRejectsOversizedCollections() throws {
+        let directory = try temporaryDirectory()
+        let url = directory.appendingPathComponent("grande.krabzik")
+        let scripts = (0 ..< 1_000).map { "\"sql/\($0).sql\"" }.joined(separator: ",")
+        try writeRaw(#"{"version":1,"name":"Grande","scripts":[\#(scripts)]}"#, to: url)
+        XCTAssertThrowsError(try Workspace.read(from: url)) { error in
+            XCTAssertEqual(self.message(of: error),
+                           "El proyecto declara demasiados scripts SQL (512 como máximo, el archivo trae 1000).")
+        }
+
+        let projects = (0 ..< 70).map {
+            #"{"id":"\#(UUID().uuidString)","name":"p\#($0)","path":"p\#($0)","kind":"Archivos","command":""}"#
+        }.joined(separator: ",")
+        try writeRaw(#"{"version":1,"name":"Grande","projects":[\#(projects)]}"#, to: url)
+        XCTAssertThrowsError(try Workspace.read(from: url)) { error in
+            XCTAssertEqual(self.message(of: error),
+                           "El proyecto declara demasiados subproyectos (64 como máximo, el archivo trae 70).")
+        }
+    }
+
+    func testWorkspaceRejectsEscapingRelativePaths() throws {
+        let directory = try temporaryDirectory()
+        let url = directory.appendingPathComponent("fuga.krabzik")
+        let project = #"{"id":"\#(UUID().uuidString)","name":"api","path":"../../etc","kind":"Archivos","command":""}"#
+        try writeRaw(#"{"version":1,"name":"Fuga","projects":[\#(project)]}"#, to: url)
+        XCTAssertThrowsError(try Workspace.read(from: url)) { error in
+            XCTAssertEqual(self.message(of: error),
+                           "La ruta «../../etc», de «api» sale del directorio del proyecto.")
+        }
+
+        // Una ruta absoluta sí se admite: S1 la clasifica como externa y la trata aparte.
+        let externo = #"{"id":"\#(UUID().uuidString)","name":"api","path":"/tmp","kind":"Archivos","command":""}"#
+        try writeRaw(#"{"version":1,"name":"Fuga","projects":[\#(externo)]}"#, to: url)
+        XCTAssertEqual(try Workspace.read(from: url).projects.first?.path, "/tmp")
+    }
+
+    func testWorkspaceRejectsControlAndBidiText() throws {
+        let directory = try temporaryDirectory()
+        let url = directory.appendingPathComponent("bidi.krabzik")
+        for (campo, json) in [
+            ("el nombre del proyecto", #"{"version":1,"name":"Tienda\u202Ejs.exe"}"#),
+            ("la ruta de «api»", Self.archivoConRuta(#"a\u0000b"#))
+        ] {
+            try writeRaw(json, to: url)
+            XCTAssertThrowsError(try Workspace.read(from: url)) { error in
+                XCTAssertTrue(self.message(of: error).hasPrefix("El proyecto contiene texto no válido en"),
+                              "para \(campo) dijo: \(self.message(of: error))")
+            }
+        }
+    }
+
+    func testWorkspaceBoundsCommandLengthButAllowsNewlines() throws {
+        let directory = try temporaryDirectory()
+        let url = directory.appendingPathComponent("comando.krabzik")
+        try writeRaw(Self.archivoConComando(String(repeating: "x", count: 10_000)), to: url)
+        XCTAssertThrowsError(try Workspace.read(from: url)) { error in
+            XCTAssertEqual(self.message(of: error),
+                           "Es demasiado largo el comando de «api» (4000 caracteres como máximo, el archivo trae 10000).")
+        }
+
+        // Un comando multilínea es legítimo.
+        let multilinea = String(repeating: "echo hola\\n", count: 300)
+        try writeRaw(Self.archivoConComando(multilinea), to: url)
+        let leido = try Workspace.read(from: url)
+        XCTAssertEqual(leido.projects.first?.command.filter { $0 == "\n" }.count, 300)
+    }
+
+    func testWorkspaceNormalizesAndDeduplicatesScripts() throws {
+        let directory = try temporaryDirectory()
+        let url = directory.appendingPathComponent("scripts.krabzik")
+        try writeRaw(#"{"version":1,"name":"S","scripts":["sql/a.sql","./sql/a.sql","sql/./b.sql","sql/sub/../b.sql"]}"#,
+                     to: url)
+        XCTAssertEqual(try Workspace.read(from: url).scripts, ["sql/a.sql", "sql/b.sql"])
+    }
+
+    func testHostileFixtureIsRejected() throws {
+        let fixture = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/hostil.krabzik")
+        XCTAssertNoThrow(try Data(contentsOf: fixture), "el fixture tiene que existir en el árbol")
+        XCTAssertThrowsError(try Workspace.read(from: fixture)) { error in
+            XCTAssertTrue(self.message(of: error).hasPrefix("El proyecto contiene texto no válido en"),
+                          "dijo: \(self.message(of: error))")
+        }
     }
 
     func testWorkspaceRejectsFutureVersionAndDuplicateIDs() throws {

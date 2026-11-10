@@ -69,6 +69,33 @@ Esta versión usa TCP, autenticación `caching_sha2_password` o `mysql_native_pa
 
 Abrí `Examples/Primer proyecto/Primer proyecto.krabzik` para probar una API PHP y una web Node sin dependencias. El botón ▶ inicia la API en `http://127.0.0.1:18765` y la web en `http://127.0.0.1:18766`. Requiere PHP, Node y npm instalados; no instala paquetes al abrir el proyecto.
 
+### El archivo `.krabzik`
+
+Un `.krabzik` es JSON legible y puede venir de otra persona, así que tiene contrato. Al abrirlo se
+rechaza, con un mensaje que dice qué campo y de qué subproyecto, el archivo que supere estos topes o que
+traiga texto que no se puede mostrar con honestidad:
+
+| Tope | Valor |
+|---|---|
+| Subproyectos | 64 |
+| Conexiones | 32 |
+| Scripts SQL | 512 |
+| Nombres | 200 caracteres |
+| Rutas | 1.024 caracteres |
+| Comandos | 4.000 caracteres |
+
+Además: nada de caracteres de control, overrides bidi ni zero-width en nombres, rutas y comandos —un
+comando sí puede tener saltos de línea—, y ninguna ruta relativa que salga de la carpeta del proyecto
+(`../..`). Las rutas absolutas se admiten: el proyecto puede tener carpetas afuera, y en ese caso hay que
+confiar en él para que se monten. Las rutas de los scripts se normalizan, así que `sql/a.sql` y
+`./sql/a.sql` son la misma entrada. Los valores son holgados respecto del uso real; si tu proyecto
+legítimo supera uno, se sube el número en `WorkspaceLimits`.
+
+Un proyecto que no se abrió nunca en esta Mac arranca en **solo lectura**: no ejecuta procesos, no habilita
+Codex y no monta las carpetas de afuera hasta que confirmás que confiás en él, viendo antes las carpetas
+externas y los comandos que declara. Cada comando se aprueba por separado; editarlo vuelve a pedir
+confirmación. Ver [docs/security.md](docs/security.md).
+
 El editor admite UTF-8 hasta 5 MB y resalta el área visible. Las carpetas generadas (`node_modules`, `vendor`, `.git`, `.build`, `dist`, etc.) se omiten del explorador. Los comandos usan zsh de login. Autocompletado semántico, depurador y terminal interactiva quedan pendientes.
 
 ## Pruebas
