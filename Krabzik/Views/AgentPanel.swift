@@ -80,12 +80,12 @@ struct AgentPanel: View {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 5) {
                                 ForEach(agent.changes) { change in
-                                    Button { controller.openAgentFile(change.path) } label: {
+                                    Button { controller.bridge.openFile(change.path) } label: {
                                         HStack(spacing: 7) {
                                             Text(change.kind == "add" ? "+" : change.kind == "delete" ? "−" : "M")
                                                 .foregroundStyle(change.kind == "delete" ? Color.red : Theme.blue)
                                                 .font(.system(size: 10, design: .monospaced))
-                                            Text(controller.agentFileLabel(change.path)).lineLimit(1).truncationMode(.middle)
+                                            Text(controller.bridge.label(change.path)).lineLimit(1).truncationMode(.middle)
                                         }.font(.system(size: 11))
                                     }.buttonStyle(.plain).disabled(change.kind == "delete").help(change.path)
                                 }
@@ -99,7 +99,7 @@ struct AgentPanel: View {
                 }
                 Divider()
                 VStack(spacing: 8) {
-                    AgentComposer(text: $agent.draft, enabled: !agent.isRunning, send: controller.sendToAgent).frame(height: 82)
+                    AgentComposer(text: $agent.draft, enabled: !agent.isRunning, send: controller.bridge.send).frame(height: 82)
                         .overlay(alignment: .topLeading) {
                             if agent.draft
                                 .isEmpty {
@@ -112,7 +112,7 @@ struct AgentPanel: View {
                             Button(action: agent.stop) { Image(systemName: "stop.fill") }
                                 .disabled(agent.isStopping).help("Detener Codex").accessibilityLabel("Detener Codex")
                         } else {
-                            Button(action: controller.sendToAgent) { Image(systemName: "arrow.up") }
+                            Button(action: controller.bridge.send) { Image(systemName: "arrow.up") }
                                 .disabled(agent.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || controller.workspace?
                                     .projects.isEmpty != false)
                                 .help("Enviar a Codex (⌘↩)").accessibilityLabel("Enviar a Codex")

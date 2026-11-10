@@ -26,7 +26,7 @@ struct DatabaseSidebar: View {
                         Button("Editar…") { controller.database.editingConnection = connection }
                             .disabled(state.busy || state.status == .connecting)
                         Divider()
-                        Button("Quitar conexión") { controller.removeConnection(connection) }
+                        Button("Quitar conexión") { controller.connections.remove(connection) }
                             .disabled(state.busy || state.status == .connecting)
                     }
                 }
@@ -36,9 +36,9 @@ struct DatabaseSidebar: View {
                 Spacer()
                 Menu {
                     Button("Nuevo script…") {
-                        controller.createFile(in: controller.workspaceURL?.deletingLastPathComponent())
+                        controller.files.create(in: controller.workspaceURL?.deletingLastPathComponent())
                     }.disabled(controller.isReadOnly)
-                    Button("Abrir script…", action: controller.importScripts)
+                    Button("Abrir script…", action: controller.files.importScripts)
                 } label: { Image(systemName: "plus").font(.system(size: 11)) }
                     .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                     .help("Agregar script SQL")
@@ -56,8 +56,8 @@ struct DatabaseSidebar: View {
 
     @ViewBuilder private var scriptRows: some View {
         ForEach(controller.workspace?.scripts ?? [], id: \.self) { path in
-            if let url = controller.scriptURL(path) {
-                Button { controller.openFile(url) } label: {
+            if let url = controller.files.scriptURL(path) {
+                Button { controller.files.open(url) } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "doc").foregroundStyle(.secondary)
                         Text(url.lastPathComponent).lineLimit(1)
@@ -204,7 +204,7 @@ struct ConnectionSheet: View {
         Task {
             defer { busy = false }
             do {
-                try await controller.saveConnection(connection, password: password)
+                try await controller.connections.save(connection, password: password)
                 dismiss()
             }
             catch {
@@ -223,7 +223,7 @@ struct SQLToolbar: View {
     /// Estaba escrito como una condición de tres líneas dentro del `.disabled`, donde
     /// había que leerla al revés.
     private var canExecute: Bool {
-        guard let connection = controller.selectedDatabase else { return false }
+        guard let connection = controller.connections.selected else { return false }
         let state = controller.database.states[connection.id]
         return state?.busy != true && state?.status != .connecting
     }
@@ -239,7 +239,7 @@ struct SQLToolbar: View {
                 }
             }.labelsHidden().pickerStyle(.menu).fixedSize()
                 .disabled(document.sqlExecution.isRunning)
-            if let connection = controller.selectedDatabase {
+            if let connection = controller.connections.selected {
                 let state = controller.database.states[connection.id]
                 let database = state?.status == .connected ? state?.currentDatabase ?? "" : connection.database
                 Text("\(connection.host):\(connection.port)" + (database.isEmpty ? "" : " / \(database)"))

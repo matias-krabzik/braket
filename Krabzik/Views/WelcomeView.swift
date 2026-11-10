@@ -78,7 +78,7 @@ struct WelcomeView: View {
                                     Button("Abrir proyecto") { Task { await controller.openWorkspace(url) } }
                                     Button("Mostrar en Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
                                     Divider()
-                                    Button("Quitar de recientes") { controller.removeRecentProject(url) }
+                                    Button("Quitar de recientes") { controller.recents.forget(url) }
                                 }
                         }
                     }

@@ -44,7 +44,7 @@ final class WorkspaceNavigationTests: XCTestCase {
             asked += 1
             return .readOnly
         }
-        controller.confirmCommand = { _ in
+        controller.projects.confirmCommand = { _ in
             XCTFail("no debe llegar a preguntar por el comando")
             return .cancel
         }
@@ -80,7 +80,7 @@ final class WorkspaceNavigationTests: XCTestCase {
         let first = WorkspaceController(defaults: defaults)
         first.confirmTrust = { _ in .trust }
         var commandAsks = 0
-        first.confirmCommand = { _ in
+        first.projects.confirmCommand = { _ in
             commandAsks += 1
             return .always
         }
@@ -100,7 +100,7 @@ final class WorkspaceNavigationTests: XCTestCase {
             XCTFail("la confianza tiene que persistir")
             return .cancel
         }
-        second.confirmCommand = { _ in
+        second.projects.confirmCommand = { _ in
             XCTFail("la aprobación del comando tiene que persistir")
             return .cancel
         }
@@ -137,7 +137,7 @@ final class WorkspaceNavigationTests: XCTestCase {
         }
         await controller.openWorkspace(url)
         XCTAssertEqual(controller.mountedProjects.map(\.name), ["interno"])
-        controller.trustCurrentWorkspace()
+        controller.session.trustCurrent()
         XCTAssertEqual(controller.mountedProjects.map(\.name), ["interno", "externo"])
     }
 
@@ -240,7 +240,7 @@ final class WorkspaceNavigationTests: XCTestCase {
         controller.confirmTrust = { _ in .trust }
         await controller.openWorkspace(url)
 
-        controller.removeRecentProject(url)
+        controller.recents.forget(url)
 
         XCTAssertTrue(controller.recentProjects.isEmpty)
         XCTAssertTrue(WorkspaceController(defaults: defaults).recentProjects.isEmpty)

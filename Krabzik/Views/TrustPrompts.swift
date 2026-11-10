@@ -84,12 +84,13 @@ import AppKit
 
 extension WorkspaceController {
     /// El controlador de la app, con los diálogos reales enganchados. Es el único sitio que los
-    /// engancha: ver el comentario de `confirmTrust` en `WorkspaceController`.
+    /// engancha: ver el comentario de `confirmTrust` en `WorkspaceController` y el de
+    /// `WorkspaceSession`, que explica por qué los diálogos viven en la sesión.
     @MainActor static func forApp() -> WorkspaceController {
         let controller = WorkspaceController()
         controller.confirmTrust = TrustPrompts.ask
-        controller.confirmCommand = TrustPrompts.askCommand
-        controller.dialogs = .real
+        controller.projects.confirmCommand = TrustPrompts.askCommand
+        controller.session.dialogs = .real
         return controller
     }
 }

@@ -123,7 +123,7 @@ final class CoreTests: XCTestCase {
         func cambiando(_ ajuste: (inout DatabaseConnection) -> Void) -> Bool {
             var otra = base
             ajuste(&otra)
-            return WorkspaceController.endpointChanged(from: base, to: otra)
+            return ConnectionStore.endpointChanged(from: base, to: otra)
         }
 
         XCTAssertFalse(cambiando { _ in }, "el mismo perfil no cambia nada")

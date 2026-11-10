@@ -385,7 +385,7 @@ final class DatabaseTests: XCTestCase {
         try CredentialStore.save("secreto-de-prueba", for: vieja)
         XCTAssertEqual(try CredentialStore.read(for: vieja), "secreto-de-prueba")
 
-        try await controller.saveConnection(nueva, password: "secreto-de-prueba")
+        try await controller.connections.save(nueva, password: "secreto-de-prueba")
 
         XCTAssertEqual(try CredentialStore.read(for: vieja), "",
                        "la credencial del extremo anterior no puede quedar en el llavero")

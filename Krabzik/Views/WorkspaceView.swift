@@ -95,7 +95,7 @@ struct WorkspaceView: View {
             }
         }
         .sheet(item: $controller.commandProject) { project in
-            CommandSheet(project: project) { controller.updateProject($0) }
+            CommandSheet(project: project) { controller.projects.update($0) }
         }
         .sheet(item: Binding(get: { controller.database.editingConnection },
                              set: { controller.database.editingConnection = $0 })) { connection in
@@ -130,7 +130,7 @@ struct WorkspaceView: View {
             Text("No se ejecutan procesos ni se habilita Codex.")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
             Spacer()
-            Button("Confiar") { controller.trustCurrentWorkspace() }
+            Button("Confiar") { controller.session.trustCurrent() }
                 .controlSize(.small)
         }
         .padding(.horizontal, 16).frame(height: 32)
@@ -143,18 +143,18 @@ struct WorkspaceView: View {
             HStack {
                 Text("Código").font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
                 Spacer()
-                Button(action: controller.addFolders) { Image(systemName: "plus").font(.system(size: 11)) }
+                Button(action: controller.projects.addFolders) { Image(systemName: "plus").font(.system(size: 11)) }
                     .buttonStyle(.plain).help("Agregar subproyecto")
                     .accessibilityLabel("Agregar subproyecto")
             }
             .padding(.horizontal, 15).padding(.top, 15).padding(.bottom, 9)
             if workspace.projects.isEmpty {
-                Button("Agregar carpeta…", action: controller.addFolders)
+                Button("Agregar carpeta…", action: controller.projects.addFolders)
                     .buttonStyle(.plain).foregroundStyle(Theme.blue)
                     .padding(.top, 16)
                 Spacer()
             } else {
-                FileTree(workspace: workspace, workspaceURL: url, revision: controller.treeRevision, controller: controller)
+                FileTree(workspace: workspace, workspaceURL: url, revision: controller.session.revision, controller: controller)
             }
             Rectangle().fill(Theme.border).frame(height: 1)
             DatabaseSidebar(controller: controller)
@@ -189,7 +189,7 @@ struct WorkspaceView: View {
                     HStack {
                         Text("El archivo cambió en disco.").foregroundStyle(.orange)
                         Spacer()
-                        Button("Recargar") { controller.reloadDocument(document) }
+                        Button("Recargar") { controller.files.reload(document) }
                     }.font(.system(size: 11)).padding(.horizontal, 18).padding(.vertical, 6)
                 }
                 if document.language == "SQL" { SQLToolbar(document: document, controller: controller) }

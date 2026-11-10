@@ -175,7 +175,7 @@ struct FileTree: NSViewRepresentable {
 
         @objc func clicked() {
             guard let outline, outline.clickedRow >= 0, let node = outline.item(atRow: outline.clickedRow) as? FileNode else { return }
-            if !node.isDirectory { controller.openFile(node.url) }
+            if !node.isDirectory { controller.files.open(node.url) }
         }
 
         private func load(_ node: FileNode) {
@@ -211,7 +211,7 @@ struct FileTree: NSViewRepresentable {
                     case .failure(let error):
                         node.children = []
                         self.outline?.reloadItem(node)
-                        self.controller.show(error)
+                        self.controller.errors.report(error)
                     }
                 }
             }
@@ -258,9 +258,11 @@ struct FileTree: NSViewRepresentable {
             }
         }
 
-        @objc func newFile(_ item: NSMenuItem) { if let node = item.representedObject as? FileNode { controller.createFile(in: node.url) } }
+        @objc func newFile(_ item: NSMenuItem) {
+            if let node = item.representedObject as? FileNode { controller.files.create(in: node.url) }
+        }
         @objc func editCommand(_ item: NSMenuItem) { controller.commandProject = item.representedObject as? CodeProject }
         @objc func removeRoot(_ item: NSMenuItem) {
-            if let project = item.representedObject as? CodeProject { controller.removeProject(project.id) } }
+            if let project = item.representedObject as? CodeProject { controller.projects.remove(project.id) } }
     }
 }

@@ -22,14 +22,15 @@ struct KrabzikApp: App {
                     .keyboardShortcut("w", modifiers: [.command, .shift])
                     .disabled(controller.workspace == nil || controller.isSwitchingWorkspace)
                 Divider()
-                Button("Agregar subproyecto…", action: controller.addFolders).keyboardShortcut("o", modifiers: [.command, .shift])
+                Button("Agregar subproyecto…", action: controller.projects.addFolders)
+                    .keyboardShortcut("o", modifiers: [.command, .shift])
                     .disabled(controller.workspace == nil)
-                Button("Nuevo archivo…") { controller.createFile() }.keyboardShortcut("n").disabled(controller.workspace == nil)
+                Button("Nuevo archivo…") { controller.files.create() }.keyboardShortcut("n").disabled(controller.workspace == nil)
             }
             CommandGroup(replacing: .saveItem) {
-                Button("Guardar") { if let document = controller.selectedDocument { Task { await controller.save(document) } } }
+                Button("Guardar") { if let document = controller.selectedDocument { Task { await controller.files.save(document) } } }
                     .keyboardShortcut("s").disabled(controller.selectedDocument == nil)
-                Button("Guardar copia…", action: controller.saveCopy).keyboardShortcut("s", modifiers: [.command, .shift])
+                Button("Guardar copia…", action: controller.files.saveCopy).keyboardShortcut("s", modifiers: [.command, .shift])
                     .disabled(controller.selectedDocument == nil)
             }
             CommandGroup(replacing: .windowSize) {
@@ -43,10 +44,10 @@ struct KrabzikApp: App {
                 Button("Detener", action: controller.runner.stopAll).keyboardShortcut(".").disabled(!controller.runner.hasActiveProcesses)
             }
             CommandMenu("SQL") {
-                Button("Abrir script…", action: controller.importScripts).disabled(controller.workspace == nil)
+                Button("Abrir script…", action: controller.files.importScripts).disabled(controller.workspace == nil)
                 Button("Ejecutar selección o script", action: controller.executeSQL)
                     .keyboardShortcut(.return, modifiers: [.command])
-                    .disabled(controller.selectedDocument?.language != "SQL" || controller.selectedDatabase == nil || controller
+                    .disabled(controller.selectedDocument?.language != "SQL" || controller.connections.selected == nil || controller
                         .selectedDocument?.sqlExecution.isRunning == true)
                 Button("Nueva conexión…") { controller.database.editingConnection = DatabaseConnection() }
                     .disabled(controller.workspace == nil)
