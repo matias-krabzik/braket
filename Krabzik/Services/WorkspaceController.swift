@@ -32,6 +32,7 @@ final class WorkspaceController {
     var processesVisible = true
     var commandProject: CodeProject?
     var closingProjectURL: URL?
+    var showingProjectWizard = false
     let runner = ProcessRunner()
     let database = DatabaseController()
     let agent: AgentController
@@ -119,16 +120,26 @@ final class WorkspaceController {
     }
 
     func createWorkspace() {
-        guard !session.isSwitching, let url = session.dialogs.createWorkspace() else { return }
-        Task {
-            guard session.beginSwitch() else { return }
-            defer { session.endSwitch() }
-            guard await prepareToLeave() else { return }
-            do {
-                let name = url.deletingPathExtension().lastPathComponent
-                install(try session.create(named: name, at: url), at: url, trust: .trusted)
-            } catch { errors.report(error) }
+        guard !session.isSwitching else { return }
+        showingProjectWizard = true
+    }
+
+    /// Crea exclusivamente un archivo nuevo; nunca sobrescribe uno que apareció durante el asistente.
+    func createWorkspace(from draft: ProjectDraft) async throws -> Bool {
+        let project = try draft.workspace()
+        guard session.beginSwitch() else { return false }
+        defer { session.endSwitch() }
+        if draft.openWhenCreated { guard await prepareToLeave() else { return false } }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        try encoder.encode(project).write(to: draft.url, options: .withoutOverwriting)
+        trust.markTrusted(draft.url)
+        for item in project.projects where !item.command.isEmpty {
+            trust.approve(command: item.command, project: item.id, workspaceURL: draft.url)
         }
+        recents.remember(draft.url)
+        if draft.openWhenCreated { install(project, at: draft.url, trust: .trusted) }
+        return true
     }
 
     /// Se le pregunta por la confianza **antes** de molestar al usuario con lo que tiene

@@ -73,6 +73,9 @@ struct WorkspaceView: View {
                                     set: { if !$0 { controller.closingProjectURL = nil } })) {
             if let url = controller.closingProjectURL { ProjectCloseSheet(controller: controller, url: url) }
         }
+        .sheet(isPresented: $controller.showingProjectWizard) {
+            ProjectWizard(controller: controller)
+        }
         .sheet(item: $controller.commandProject) { project in
             CommandSheet(project: project) { controller.projects.update($0) }
         }

@@ -31,6 +31,7 @@ struct ProjectSettingsView: View {
                         TextField("Nombre", text: $name)
                     }
                     .padding(.vertical, 8)
+                    ProjectIconLettersField(letters: $icon.letters)
                     Toggle("Efecto glass", isOn: $icon.glass)
                     HStack(spacing: 12) {
                         Text("Tonos")

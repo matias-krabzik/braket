@@ -173,7 +173,7 @@ struct Workspace: Codable, Equatable {
     }
 
     func checkFormat() throws {
-        guard iconStyle.isValid else { throw WorkspaceError.invalidText("el color del icono") }
+        guard iconStyle.isValid else { throw WorkspaceError.invalidText("el color o las letras del icono") }
         try checkCounts()
         try checkLengths()
         try checkText()
