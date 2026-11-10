@@ -156,3 +156,38 @@ excepción nominal, no borrándolo.
   en el informe de un error que se comparta.
 - Subir el nivel del logger de MySQL puede volverlo ruidoso en consultas grandes; el default `.warning` lo
   evita.
+
+## Resuelto
+
+**2026-11-10**, commit `b252444`.
+
+| Criterio | Cómo se verificó |
+|---|---|
+| 1 · ningún `catch { }` en `Krabzik/` | el trinquete de `scripts/verify.sh` bajó a 0 y ahora cuenta solo el código de producción. En una prueba, `do { … XCTFail() } catch {}` es la forma idiomática de decir «esto tiene que lanzar»; ahí el catch vacío es correcto y queda fuera de la cuenta |
+| 2 · `Log.swift` con las seis categorías y la regla de privacidad | hecho, con la regla escrita arriba del archivo y el comando de `log show` para leer la app instalada |
+| 3 · ninguna interpolación incluye una contraseña | revisado uso por uso: son quince, y los únicos datos que viajan sin `.private` son métodos del protocolo, el pid, el modo de TLS, conteos y `errno` |
+| 4 · cancelar sin conexión de control avisa en la interfaz | ya lo resolvió S4 con `CancelOutcome` y `SQLExecution.cancelNote`; acá se le sumó el registro. Lo cubre `testCancellationReportsWhenCredentialIsUnavailable` |
+| 5 · `log show` muestra entradas al abrir un proyecto, arrancar un proceso y conectar una base | hay una línea en cada uno de los tres caminos felices (`Log.workspace.info` en `install`, `Log.process.info` tras el `posix_spawn`, `Log.mysql.info` tras conectar). **Pendiente de comprobar sobre la app instalada**, que es donde el criterio tiene sentido |
+| 6 · un fallo de arranque de Codex deja diagnóstico accesible | el stderr del hijo va a un anillo de 64 KiB en memoria y el panel ofrece «Ver diagnóstico» cuando hay algo |
+| 7 · el nivel del logger de MySQL se sube sin recompilar | `defaults write com.krabzik.ide mysqlLogLevel debug`, leído por `MySQLLogHandler.configuredLevel` |
+
+### Decisiones
+
+- **`isSecret` pasó al modelo.** Estaba como propiedad privada de la vista. El controlador necesita saberlo
+  para registrar que llegó una pregunta marcada como secreta —el evento, nunca el contenido—, y el dato es
+  del `AgentRequest`, no de la vista.
+- **Responder y rechazar comparten el tratamiento del error.** Los dos terminan el turno con un mensaje
+  visible: si el canal de escritura está roto, seguir esperando una respuesta es lo único que no puede
+  pasar.
+- **Dos líneas nuevas en seguridad**, que el spec no pedía: confiar en un proyecto y aprobar un comando.
+  Son las dos decisiones de S1 que amplían lo que la app puede hacer, y tener cuándo se tomaron es
+  justamente lo que sirve si algo sale mal.
+- **El trinquete de catch vacíos cuenta solo `Krabzik/`.** Antes contaba también las pruebas, donde el
+  patrón es correcto. Bajarlo a 0 sin esa distinción habría forzado a escribir peor las pruebas.
+
+### Errores cometidos
+
+- `MySQLLogHandler` implementaba la firma vieja de `LogHandler`; swift-log la dejó deprecada y, con
+  warnings como errores, no compila. Va con `log(event:)`.
+- La primera versión de la línea de log de la conexión partía una interpolación en dos líneas con `\` dentro
+  de una cadena multilínea. No compila: la interpolación tiene que quedar entera en su línea.

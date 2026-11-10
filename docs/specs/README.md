@@ -55,7 +55,7 @@ Dos hallazgos de la auditoría se resolvieron durante esa ventana y los specs ya
 | [C3](C3-ci-lint-warnings.md) | CI, linter y warnings como errores | Alta | **implementado** · falta C8, C4, S7 y un remoto |
 | [C4](C4-legibilidad.md) | Legibilidad: estilo, nombres y constantes con nombre | Media | pendiente |
 | [C5](C5-dividir-workspacecontroller.md) | Dividir `WorkspaceController` | Media | pendiente |
-| [C6](C6-logging-y-errores.md) | Logging real y errores no silenciados | Media | pendiente |
+| [C6](C6-logging-y-errores.md) | Logging real y errores no silenciados | Media | **resuelto** |
 | [C7](C7-validacion-formato-krabzik.md) | Validar y acotar el formato `.krabzik` | Media | **resuelto** |
 | [C8](C8-pbxproj-sincronizado.md) | Garantizar que el `.pbxproj` generado esté al día | Media | **resuelto** |
 | [C9](C9-cobertura-pruebas.md) | Cerrar los huecos de cobertura que quedan | Media | pendiente |
@@ -105,6 +105,10 @@ binario reemplazado en el lugar.
 
 **C7 resuelto** el 2026-11-10 (commit `ca5b283`): el formato tiene topes, rechaza texto que no se puede
 mostrar con honestidad y rutas relativas que salen de la carpeta, y normaliza las de los scripts.
+
+**C6 resuelto** el 2026-11-10 (commit `b252444`): existe `Log.swift` con su regla de privacidad, ningún
+error se descarta en silencio y el nivel del logger de MySQL se sube sin recompilar. Queda una verificación
+manual —el criterio 5, `log show` sobre la app instalada— para cuando se instale la Release.
 
 Al cerrar un spec, marcarlo en la tabla de este índice y dejar en el propio spec una sección `## Resuelto`
 con la fecha, los commits y los criterios verificados.
