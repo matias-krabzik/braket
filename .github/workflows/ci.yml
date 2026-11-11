@@ -1,8 +1,8 @@
-# Braket · verificación continua
+# Braket · verificación manual
 #
-# Todavía no hay remoto configurado (ver docs/specs/C1-repositorio-git.md): este
-# workflow queda listo para cuando exista. Antes de la primera corrida real hay
-# dos cosas que revisar, porque no se pueden verificar sin un runner:
+# Ejecución manual hasta alinear Xcode del runner con el entorno local:
+# Xcode 26.6 falla al compilar AppIcon.icon; localmente se verifica con 27.1.
+# Antes de volver a habilitar ejecuciones automáticas, revisar:
 #
 #   1. La imagen y la versión de Xcode. El proyecto se verificó con Xcode 27.1 /
 #      Swift 6.4 y necesita Swift 6 language mode. El paso "Entorno" imprime lo
@@ -13,8 +13,7 @@
 
 name: CI
 on:
-  push:
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   verify:
