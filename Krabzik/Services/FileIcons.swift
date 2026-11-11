@@ -116,7 +116,7 @@ enum FileIcons {
         return result
     }
 
-    /// La imagen elegida se guarda dentro del .krabzik; moverlo no rompe el icono.
+    /// La imagen elegida se guarda dentro del .kzk; moverlo no rompe el icono.
     static func importedImage(_ url: URL) throws -> Data {
         let values = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
         guard values.isRegularFile == true, (values.fileSize ?? 0) <= 1_048_576 else {

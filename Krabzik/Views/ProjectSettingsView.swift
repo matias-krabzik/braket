@@ -67,7 +67,16 @@ struct ProjectSettingsView: View {
                         Spacer()
                         Button("Cambiar ubicación…", action: relocate).disabled(hasChanges)
                     }
-                    Text("Se mueve solo el archivo .krabzik. Las carpetas de código permanecen donde están.")
+                    if !ProjectStorage.contains(url) {
+                        Button("Migrar a BraketProjects") {
+                            let folder = ProjectStorage.folder(name: name, year: Calendar.current.component(.year, from: Date()))
+                            Task { await controller.relocateWorkspace(to: folder.appendingPathComponent(url.lastPathComponent),
+                                                                      createDirectory: true) }
+                        }.disabled(hasChanges || controller.isReadOnly || controller.isSwitchingWorkspace)
+                        Text("Destino: ~/BraketProjects/<año actual>/<NombreDelProyecto>/")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Text("Se mueve solo el archivo del proyecto. Las carpetas de código permanecen donde están.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Section("Iconos del explorador") {

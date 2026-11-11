@@ -123,7 +123,7 @@ if command -v swiftformat >/dev/null; then
     ok "formato al día según .swiftformat"
   else
     fail "hay diferencias de formato: ejecutá swiftformat ."
-    swiftformat --lint . 2>&1 | grep -E "^/" | head -5 | sed 's|.*Krabzik IDE/||' | sed 's/^/      /'
+    swiftformat --lint . 2>&1 | grep -E "^/" | head -5 | sed 's|.*Braket/||' | sed 's/^/      /'
   fi
 else
   skip "swiftformat no está instalado (brew install swiftformat)" "swiftformat"
@@ -151,7 +151,7 @@ else
   log=$(mktemp -t krabzik-verify)
   # Tope por prueba: un diálogo modal que se cuele en una prueba cuelga la corrida
   # indefinidamente. Con el tope falla en 2 minutos y dice cuál fue.
-  if xcodebuild -project Krabzik.xcodeproj -scheme Krabzik -destination 'platform=macOS' \
+  if xcodebuild -project Braket.xcodeproj -scheme Braket -destination 'platform=macOS' \
        -derivedDataPath .build -parallel-testing-enabled NO \
        -test-timeouts-enabled YES -default-test-execution-time-allowance 120 \
        -maximum-test-execution-time-allowance 300 test > "$log" 2>&1; then

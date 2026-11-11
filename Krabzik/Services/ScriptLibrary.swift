@@ -12,7 +12,7 @@ enum ScriptLibrary {
     /// Dónde está el script, o `nil` si no se puede abrir.
     ///
     /// Devuelve `nil` cuando el proyecto está en solo lectura y el script vive afuera de
-    /// su carpeta: un `.krabzik` que no se confió no puede hacer que el IDE abra archivos
+    /// su carpeta: un `.kzk` que no se confió no puede hacer que el IDE abra archivos
     /// de cualquier parte del disco (S1).
     static func url(for path: String, workspaceURL: URL, trust: TrustStore.Trust) -> URL? {
         let base = workspaceURL.deletingLastPathComponent()
@@ -28,7 +28,7 @@ enum ScriptLibrary {
     ///
     /// No se agrega si no es `.sql`, si ya está, o si vive dentro de un subproyecto: ahí
     /// el explorador ya lo muestra y repetirlo en la lista de scripts sería ruido. La ruta
-    /// queda relativa al `.krabzik` cuando está debajo de él, y absoluta si no.
+    /// queda relativa al `.kzk` cuando está debajo de él, y absoluta si no.
     ///
     /// Devuelve `nil` cuando no hay nada que cambiar.
     static func remembering(_ url: URL, in workspace: Workspace, at workspaceURL: URL) -> Workspace? {

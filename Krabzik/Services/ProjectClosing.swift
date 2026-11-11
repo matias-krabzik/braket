@@ -7,7 +7,7 @@ final class ProjectClosing {
     let controller: WorkspaceController
     let url: URL
     let name: String
-    let processes: [CodeProject]
+    var processes: [CodeProject]
     var phase = Phase.confirmation
     var canForce = false
     var failure = ""
@@ -51,6 +51,12 @@ final class ProjectClosing {
         }
         guard !Task.isCancelled else { return }
         phase = .stopping
+        for run in controller.runner.runs.values where run.workspaceURL == url && run.status.active {
+            if !processes.contains(where: { $0.id == run.id }) {
+                processes.append(CodeProject(id: run.id, name: run.name, path: ".", kind: .files, command: ""))
+            }
+        }
+        if controller.automations.execution?.workspaceURL == url { controller.automations.cancel(automaticallyForce: false) }
         for process in processes where run(for: process.id)?.status.active == true {
             controller.runner.stop(process.id, automaticallyForce: false)
         }

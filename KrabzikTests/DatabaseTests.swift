@@ -88,13 +88,11 @@ final class DatabaseTests: XCTestCase {
         }
     }
 
-    func testDisabledTLSRejectedForNonLoopbackHostOnSave() throws {
+    func testNoTLSCanBeSavedForRemoteTCPWithVisibleMode() throws {
         var config = DatabaseConnection()
         config.host = "db.interno.example"
         config.tls = .disabled
-        XCTAssertThrowsError(try config.validated()) { error in
-            XCTAssertTrue(MySQLClient.message(error).contains("conexiones locales"))
-        }
+        XCTAssertNoThrow(try config.validated())
         // El mismo perfil con TLS verificado es válido, y en loopback también sin TLS.
         config.tls = .verified
         XCTAssertNoThrow(try config.validated())
@@ -121,19 +119,11 @@ final class DatabaseTests: XCTestCase {
         XCTAssertEqual(read.connections.first?.tls, .disabled)
     }
 
-    func testDisabledTLSRejectedWhenResolvedAddressIsNotLoopback() async throws {
-        // IP literal: no hace falta DNS ni red, y el rechazo ocurre antes de conectar.
+    func testNoTLSRemoteProfileValidatesWithoutChangingItsMode() throws {
         var config = DatabaseConnection()
         config.host = "93.184.216.34"
         config.tls = .disabled
-        let client = MySQLClient()
-        do {
-            try await client.test(config, password: "")
-            XCTFail("Debe rechazar un extremo no local sin TLS")
-        } catch {
-            XCTAssertTrue(MySQLClient.message(error).contains("no es una dirección local"))
-        }
-        await client.shutdown()
+        XCTAssertEqual(try config.validated().tls, .disabled)
     }
 
     func testCancellationReportsWhenCredentialIsUnavailable() async throws {

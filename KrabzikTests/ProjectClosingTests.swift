@@ -8,7 +8,7 @@ final class ProjectClosingTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let suite = UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        let url = root.appendingPathComponent("Close.krabzik")
+        let url = root.appendingPathComponent("Close.kzk")
         let project = CodeProject(name: "Worker", path: ".", kind: .files, command: command)
         try Workspace(name: "Close", projects: [project]).write(to: url)
         let controller = WorkspaceController(defaults: defaults)

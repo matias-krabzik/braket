@@ -22,7 +22,7 @@ GENERATOR = ROOT / 'scripts' / 'generate_project.py'
 DECLARED = {
     'ENABLE_APP_SANDBOX': 'NO',
     'ENABLE_HARDENED_RUNTIME': 'YES',
-    'CODE_SIGN_IDENTITY': '-',
+    'CODE_SIGN_IDENTITY': 'Apple Development',
 }
 
 # Excepciones que el ADR prohíbe. Se buscan en código y configuración, no en los .md:

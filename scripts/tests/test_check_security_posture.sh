@@ -28,7 +28,7 @@ sed -i '' "s/'ENABLE_HARDENED_RUNTIME': 'YES'/'ENABLE_HARDENED_RUNTIME': 'NO'/" 
 posture; expect $? 1 "falla si el hardened runtime no coincide con el ADR"
 restore; cp scripts/generate_project.py "$backup"
 
-sed -i '' "s/'CODE_SIGN_IDENTITY': '-'/'CODE_SIGN_IDENTITY': 'Developer ID Application'/" scripts/generate_project.py
+sed -i '' "s/'CODE_SIGN_IDENTITY': 'Apple Development'/'CODE_SIGN_IDENTITY': 'Developer ID Application'/" scripts/generate_project.py
 posture; expect $? 1 "falla si la firma no coincide con el ADR"
 restore; cp scripts/generate_project.py "$backup"
 

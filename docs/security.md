@@ -1,4 +1,4 @@
-# Postura de seguridad de Krabzik IDE
+# Postura de seguridad de Braket
 
 ADR. Escrito el **2026-11-09** (spec [S6](specs/S6-sandbox-y-firma.md)). Declara qué garantiza y qué no
 garantiza el binario que se instala, y la configuración del target tiene que coincidir con lo que dice acá.
@@ -12,9 +12,9 @@ un agente externo. Eso define la frontera.
 
 | Vector | Control | Spec |
 |---|---|---|
-| Un `.krabzik` ajeno con un comando dentro | El proyecto se abre en solo lectura hasta que el usuario lo confía, viendo las carpetas externas y los comandos. Cada comando se aprueba una vez, por hash | [S1](specs/S1-proyecto-no-confiable.md) |
+| Un `.kzk` ajeno con un comando dentro | El proyecto se abre en solo lectura hasta que el usuario lo confía, viendo las carpetas externas y los comandos. Cada comando se aprueba una vez, por hash | [S1](specs/S1-proyecto-no-confiable.md) |
 | Un binario `codex` plantado en el PATH o en el proyecto | Se rechaza lo que sea escribible por grupo u otros, lo que no sea del usuario o de root, y lo que esté dentro del workspace. La identidad y la firma se muestran antes del primer lanzamiento y se recuerdan | [S2](specs/S2-verificar-ejecutable-codex.md) |
-| Credenciales de base de datos viajando en claro | «Sin TLS» solo se acepta contra extremos de loopback. Contra cualquier otro host la conexión se rechaza | [S3](specs/S3-tls-solo-loopback.md) |
+| Credenciales de base de datos viajando en claro | «Require and Verify Identity» es el valor predeterminado. «If available» y «No» permiten texto plano por elección explícita y muestran una advertencia | [S3](specs/S3-tls-solo-loopback.md) |
 | La contraseña viva en memoria más de lo necesario | No se retiene durante la sesión; se relee del llavero cuando hace falta | [S4](specs/S4-no-retener-password.md) |
 | Texto del modelo que se hace pasar por interfaz de la app | Todo lo que viene del modelo se sanea (control, bidi, zero-width), se acota y se muestra marcado como contenido del modelo | [S5](specs/S5-contenido-del-modelo.md) |
 
@@ -49,8 +49,8 @@ trae. Es un rediseño, no un ajuste: si alguna vez se decide, es un spec aparte.
   spec S6 y esta línea, que los nombran para prohibirlos.
 - **Contraseñas en el llavero**, con `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` y ligadas al endpoint:
   cambiar host o puerto invalida la credencial guardada (`CredentialStore`).
-- **TLS verificado por defecto** en MySQL, con el handler de NIOSSL comprobado en la conexión; sin TLS solo
-  contra loopback.
+- **TLS verificado por defecto** en MySQL, con el handler de NIOSSL comprobado en la conexión. Los modos
+  compatibles con Workbench permiten cifrado sin verificación o texto plano si el usuario los elige.
 - **Sandbox propio de Codex**: `workspaceWrite` con `writableRoots` explícitas, `networkAccess: false`,
   `excludeSlashTmp` y `excludeTmpdirEnvVar`. Las raíces escribibles nunca incluyen una ruta que el usuario
   no aprobó viéndola.
@@ -60,16 +60,16 @@ trae. Es un rediseño, no un ajuste: si alguna vez se decide, es un spec aparte.
 
 ## Alcance de la distribución
 
-**Opción A: uso local.** Elegida el 2026-11-09.
+**Uso local firmado y preparación de distribución.** Actualizado el 2026-11-10.
 
 La app se compila e instala en la máquina del autor, con el flujo de `AGENTS.md`:
-`CODE_SIGN_IDENTITY = -` (firma ad-hoc), `CODE_SIGN_STYLE = Manual`, sin cuenta de desarrollador y sin
+`CODE_SIGN_IDENTITY = Apple Development` (certificado de desarrollo), `CODE_SIGN_STYLE = Manual`, todavía sin
 notarización.
 
 **Este binario no está preparado para distribuirse a terceros.** En otra máquina Gatekeeper lo va a
 bloquear, y con razón: no hay Developer ID que responda por él ni notarización que diga que Apple lo
 revisó. Si alguna vez se quiere distribuir, el camino está escrito en la opción B de S6 (identidad y equipo
-por variables de entorno, `scripts/release.sh` con `notarytool` y `stapler`, verificación con
+por variables de entorno, `scripts/release_updates.py` con `notarytool` y `stapler`, verificación con
 `spctl -a -vvv`) y las credenciales de notarización van en el llavero, nunca en el repositorio.
 
 ## Revisión
@@ -78,3 +78,15 @@ Este documento se revisa cuando se agregue cualquier capacidad nueva que **ejecu
 red**: otro agente, un gestor de plugins, un cliente de otra base de datos, sincronización remota. También
 cuando cambie `ENABLE_APP_SANDBOX`, `ENABLE_HARDENED_RUNTIME` o la firma en `scripts/generate_project.py`:
 `scripts/verify.sh` compara esos tres ajustes contra lo que declara esta sección y falla si se separan.
+
+## Actualizaciones con Sparkle
+
+Sparkle 2.10.1 se fija por versión exacta. El catálogo HTTPS vive en
+https://www.krabzik.com/apps/krabzik-ide/appcast.xml. Los paquetes se autentican
+con Ed25519; la clave pública está en Info.plist y la privada permanece en el
+llavero de publicación (cuenta com.krabzik.ide.updates), nunca en el sitio web.
+Las búsquedas automáticas son optativas; no se envía el perfil del sistema ni se
+instala sin intervención. El reinicio conserva applicationShouldTerminate y
+su confirmación de documentos/procesos. No hay excepciones de library validation.
+La compilación local necesita Apple Development para cargar el framework.
+La publicación exige Developer ID Application, notarización y stapling.

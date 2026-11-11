@@ -44,11 +44,13 @@ actor MySQLClient {
     /// Cómo se obtiene la contraseña cuando hace falta reconectar para cancelar.
     /// Inyectable para poder probar el camino de fallo sin tocar el llavero real.
     private let readPassword: @Sendable (DatabaseConnection) throws -> String
+    private let diagnostics: MySQLDiagnostics
 
-    init(readPassword: @escaping @Sendable (DatabaseConnection) throws -> String = {
+    init(diagnostics: MySQLDiagnostics = .shared, readPassword: @escaping @Sendable (DatabaseConnection) throws -> String = {
         try CredentialStore.read(for: $0)
     }) {
         self.readPassword = readPassword
+        self.diagnostics = diagnostics
     }
 
     /// Una conexión viva con lo que hay que recordar de ella. `serverID` es el id de
@@ -77,22 +79,51 @@ actor MySQLClient {
     }
 
     private func open(_ config: DatabaseConnection, password: String) async throws -> MySQLConnection {
-        let address = try await Task.detached { try SocketAddress.makeAddressResolvingHost(config.host, port: config.port) }.value
-        // La comparación textual del host no alcanza: un nombre arbitrario puede
-        // resolver a una IP pública. Sin TLS se exige que el extremo REAL sea local.
-        if config.tls == .disabled, !address.isLoopbackAddress {
-            throw DatabaseFailure("\(config.host) no es una dirección local: activá TLS para conectar.")
+        let attempt = UUID(), started = ContinuousClock.now
+        await diagnostics.record(.started, attempt: attempt, configuration: config)
+        do {
+            let connection = try await establish(config, password: password, attempt: attempt)
+            let tlsActive = (try? await connection.channel.pipeline.handler(type: NIOSSLClientHandler.self).get()) != nil
+            await diagnostics.record(.ready, attempt: attempt, configuration: config,
+                                     elapsedMilliseconds: Self.milliseconds(since: started), tlsActive: tlsActive)
+            return connection
+        } catch {
+            await diagnostics.record(.failed, attempt: attempt, configuration: config,
+                                     elapsedMilliseconds: Self.milliseconds(since: started), error: error)
+            throw error
         }
+    }
+
+    private nonisolated static func milliseconds(since start: ContinuousClock.Instant) -> Int {
+        let duration = start.duration(to: .now).components
+        return Int(duration.seconds * 1000 + duration.attoseconds / 1_000_000_000_000_000)
+    }
+
+    private func establish(_ config: DatabaseConnection, password: String, attempt: UUID) async throws -> MySQLConnection {
+        let address = try await Task.detached { try SocketAddress.makeAddressResolvingHost(config.host, port: config.port) }.value
+        await diagnostics.record(.resolved, attempt: attempt, configuration: config, address: address)
         let loop = eventLoop()
         let level = MySQLLogHandler.configuredLevel()
         var logger = Logger(label: "com.krabzik.mysql") { _ in MySQLLogHandler(logLevel: level) }
         logger.logLevel = level
+        await diagnostics.record(.connecting, attempt: attempt, configuration: config)
+        var tls: TLSConfiguration?
+        if config.tls != .disabled {
+            var configuration = TLSConfiguration.makeClientConfiguration()
+            switch config.tls {
+            case .preferred, .required: configuration.certificateVerification = .none
+            case .verifyCA: configuration.certificateVerification = .noHostnameVerification
+            case .verified: break
+            case .disabled: break
+            }
+            tls = configuration
+        }
         let connection = try await MySQLConnection.connect(to: address, username: config.username, database: config.database,
                                                            password: password.isEmpty ? nil : password,
-                                                           tlsConfiguration: config.tls == .verified ? .makeClientConfiguration() : nil,
+                                                           tlsConfiguration: tls, tlsRequired: config.tls.requiresTLS,
                                                            serverHostname: config.tls == .verified ? config.host : nil, logger: logger,
                                                            on: loop).get()
-        if config.tls == .verified {
+        if config.tls.requiresTLS {
             do { _ = try await connection.channel.pipeline.handler(type: NIOSSLClientHandler.self).map { _ in true }.get() }
             catch {
                 try? await connection.close().get()
@@ -101,7 +132,7 @@ actor MySQLClient {
         }
         // El host y el usuario van como privados; el modo de TLS es lo que importa poder
         // leer sin autorización especial.
-        let mode = config.tls == .verified ? "verificado" : "sin TLS (loopback)"
+        let mode = config.tls.rawValue
         let endpoint = "\(config.username)@\(config.host):\(config.port)"
         Log.mysql.info("conexión establecida · TLS \(mode, privacy: .public) · \(endpoint, privacy: .private)")
         return connection

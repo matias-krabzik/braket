@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Las dos cosas van juntas porque guardar una conexión es una operación de dos destinos
 /// que tiene que quedar consistente: la contraseña va al llavero y el perfil al
-/// `.krabzik`. Si la escritura del archivo falla, acá se restaura la contraseña anterior,
+/// `.kzk`. Si la escritura del archivo falla, acá se restaura la contraseña anterior,
 /// y si el endpoint cambió se borra la credencial que quedó huérfana. Repartido entre dos
 /// tipos, ese orden se pierde.
 ///

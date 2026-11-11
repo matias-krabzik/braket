@@ -7,14 +7,18 @@ struct KrabzikApp: App {
     @State private var controller = WorkspaceController.forApp()
 
     var body: some Scene {
-        Window("Krabzik IDE", id: "workspace") {
+        Window("Braket", id: "workspace") {
             WorkspaceView(controller: controller)
                 .background(WindowBridge(delegate: delegate, projectURL: controller.workspaceURL, theme: controller.settings.theme))
-                .onAppear { delegate.controller = controller }
+                .onAppear {
+                    delegate.controller = controller
+                    _ = AppUpdater.shared
+                }
         }
         .defaultSize(width: 760, height: 420)
         .windowToolbarStyle(.unifiedCompact)
         .commands {
+            CommandGroup(after: .appInfo) { CheckForUpdatesButton() }
             CommandGroup(replacing: .newItem) {
                 Button("Nuevo proyecto…", action: controller.createWorkspace).keyboardShortcut("n", modifiers: [.command, .shift])
                 Button("Abrir proyecto…", action: controller.chooseWorkspace).keyboardShortcut("o")
@@ -35,13 +39,16 @@ struct KrabzikApp: App {
             }
             CommandGroup(replacing: .windowSize) {
                 Button("Mostrar explorador") { controller.sidebarVisible.toggle() }.keyboardShortcut("1", modifiers: [.command, .option])
-                Button("Mostrar procesos") { controller.processesVisible.toggle() }.keyboardShortcut("j")
+                Button("Mostrar panel inferior") { controller.processesVisible.toggle() }.keyboardShortcut("j")
                 Button("Mostrar Codex") { controller.agent.visible.toggle() }.keyboardShortcut("a", modifiers: [.command, .option])
                     .disabled(controller.workspace == nil || controller.isReadOnly)
             }
             CommandMenu("Proyecto") {
                 Button("Iniciar", action: controller.startAll).keyboardShortcut("r").disabled(controller.runnableProjects.isEmpty)
-                Button("Detener", action: controller.runner.stopAll).keyboardShortcut(".").disabled(!controller.runner.hasActiveProcesses)
+                Button("Detener") {
+                    controller.automations.cancel()
+                    controller.runner.stopAll()
+                }.keyboardShortcut(".").disabled(!controller.runner.hasActiveProcesses && !controller.automations.isRunning)
             }
             CommandMenu("SQL") {
                 Button("Abrir script…", action: controller.files.importScripts).disabled(controller.workspace == nil)
@@ -157,7 +164,7 @@ private struct WindowBridge: NSViewRepresentable {
         weak var appDelegate: AppDelegate?
         var projectURL: URL?
         private weak var configuredWindow: NSWindow?
-        private var appliedProjectURL: URL?
+        private var appliedProjectIsOpen = false
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
@@ -180,10 +187,11 @@ private struct WindowBridge: NSViewRepresentable {
                 window.isRestorable = false
             }
 
-            // Resize only when navigating, so later manual resizing is preserved.
-            guard isNewWindow || appliedProjectURL != projectURL else { return }
+            // Only resize between welcome and workspace; preserve the frame when switching projects.
+            let projectIsOpen = projectURL != nil
+            guard isNewWindow || appliedProjectIsOpen != projectIsOpen else { return }
             configuredWindow = window
-            appliedProjectURL = projectURL
+            appliedProjectIsOpen = projectIsOpen
             guard !window.styleMask.contains(.fullScreen) else { return }
 
             window.layoutIfNeeded()

@@ -16,22 +16,16 @@ struct WelcomeView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(WelcomeBackground())
         .disabled(controller.isSwitchingWorkspace)
     }
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 16) {
-                Image(nsImage: NSApplication.shared.applicationIconImage)
-                    .resizable().interpolation(.high)
-                    .frame(width: 64, height: 64)
-                    .accessibilityHidden(true)
-                    .padding(.leading, -6)
-                Text("Krabzik IDE")
-                    .font(.system(size: 23, weight: .semibold, design: .rounded))
-            }
-            .padding(.horizontal, 8)
-            .padding(.bottom, 28)
+            Text("Braket")
+                .font(.system(size: 23, weight: .semibold, design: .rounded))
+                .padding(.horizontal, 8)
+                .padding(.bottom, 28)
             VStack(spacing: 10) {
                 WelcomeAction(title: "Abrir proyecto…", icon: "folder", shortcut: "⌘O", prominent: true,
                               action: controller.chooseWorkspace)
@@ -55,11 +49,11 @@ struct WelcomeView: View {
             .accessibilityLabel("Configuración")
         }
         .padding(.horizontal, 16)
-        .padding(.top, 24)
+        .padding(.top, 32)
         .padding(.bottom, 20)
         .frame(width: 240)
         .frame(maxHeight: .infinity)
-        .background(Theme.sidebar)
+        .background(Color.black.opacity(0.035))
     }
 
     private var recentProjects: some View {
@@ -106,6 +100,33 @@ struct WelcomeView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+}
+
+private struct WelcomeBackground: View {
+    private let graphite = Color(red: 35 / 255, green: 38 / 255, blue: 44 / 255)
+    private let light = Color(red: 81 / 255, green: 87 / 255, blue: 94 / 255)
+
+    var body: some View {
+        GeometryReader { geometry in
+            let span = max(geometry.size.width, geometry.size.height)
+            ZStack {
+                graphite
+                RadialGradient(stops: [
+                    .init(color: light.opacity(0.48), location: 0),
+                    .init(color: light.opacity(0.22), location: 0.45),
+                    .init(color: light.opacity(0), location: 1)
+                ], center: UnitPoint(x: 0.12, y: 0.06), startRadius: 0, endRadius: span * 0.7)
+                RadialGradient(stops: [
+                    .init(color: light.opacity(0.25), location: 0),
+                    .init(color: light.opacity(0.08), location: 0.5),
+                    .init(color: light.opacity(0), location: 1)
+                ], center: UnitPoint(x: 0.95, y: 1.08), startRadius: 0, endRadius: span * 0.55)
+            }
+        }
+        .clipped()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 

@@ -16,6 +16,14 @@ struct SettingsView: View {
                 }
             }
             .tabItem { Label("Proyecto", systemImage: "folder") }
+            Group {
+                if let url = controller.workspaceURL {
+                    AutomationSettingsView(controller: controller).id(url)
+                } else {
+                    Text("Abrí un proyecto para configurar automatizaciones.")
+                }
+            }.tabItem { Label("Automatizaciones", systemImage: "list.bullet.rectangle") }
+            UpdatesSettingsView().tabItem { Label("Actualizaciones", systemImage: "arrow.triangle.2.circlepath") }
         }
         .padding(12)
         .frame(width: 580, height: 620)
@@ -38,6 +46,16 @@ struct SettingsView: View {
             Section("Al iniciar") {
                 Toggle("Abrir último estado", isOn: $settings.restoreLastState)
                 Text("Recupera el proyecto y las pestañas que dejaste abiertos al salir.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            Section("Diagnóstico MySQL") {
+                Button("Exportar diagnóstico MySQL…") {
+                    Task {
+                        do { try await WorkspacePrompts.exportMySQLDiagnostics() }
+                        catch { controller.errors.report(error) }
+                    }
+                }
+                Text("Los intentos de conexión se registran en esta Mac. No se guardan contraseñas ni consultas SQL.")
                     .font(.callout).foregroundStyle(.secondary)
             }
         }

@@ -30,7 +30,7 @@ final class WorkspaceSessionTests: XCTestCase {
     func testTrustingRegistersTheDecisionSoItIsAskedOnlyOnce() throws {
         let (directory, defaults) = try environment()
         let session = session(defaults)
-        let url = directory.appendingPathComponent("p.krabzik")
+        let url = directory.appendingPathComponent("p.kzk")
         let project = Workspace(name: "p")
 
         var asked = 0
@@ -51,7 +51,7 @@ final class WorkspaceSessionTests: XCTestCase {
     func testReadOnlyIsNotRemembered() throws {
         let (directory, defaults) = try environment()
         let session = session(defaults)
-        let url = directory.appendingPathComponent("p.krabzik")
+        let url = directory.appendingPathComponent("p.kzk")
         let project = Workspace(name: "p")
 
         XCTAssertEqual(session.decideTrust(for: project, at: url) { _ in .readOnly }, .untrusted)
@@ -69,14 +69,14 @@ final class WorkspaceSessionTests: XCTestCase {
         let (directory, defaults) = try environment()
         let session = session(defaults)
         let decided = session.decideTrust(for: Workspace(name: "p"),
-                                          at: directory.appendingPathComponent("p.krabzik")) { _ in .cancel }
+                                          at: directory.appendingPathComponent("p.kzk")) { _ in .cancel }
         XCTAssertNil(decided)
     }
 
     func testThePromptListsExternalFoldersAndCommands() throws {
         let (directory, defaults) = try environment()
         let session = session(defaults)
-        let url = directory.appendingPathComponent("p.krabzik")
+        let url = directory.appendingPathComponent("p.kzk")
         var project = Workspace(name: "p")
         project.projects = [
             CodeProject(name: "interno", path: "sub", kind: .files, command: ""),
@@ -100,7 +100,7 @@ final class WorkspaceSessionTests: XCTestCase {
         let errors = ErrorCenter()
         let session = session(defaults, errors: errors)
         // Una carpeta que no existe: escribir ahí falla.
-        session.open(Workspace(name: "p"), at: directory.appendingPathComponent("falta/p.krabzik"), trust: .trusted)
+        session.open(Workspace(name: "p"), at: directory.appendingPathComponent("falta/p.kzk"), trust: .trusted)
         let revision = session.revision
 
         var updated = Workspace(name: "p")
@@ -114,7 +114,7 @@ final class WorkspaceSessionTests: XCTestCase {
     func testEveryWriteBumpsTheRevision() throws {
         let (directory, defaults) = try environment()
         let session = session(defaults)
-        let url = directory.appendingPathComponent("p.krabzik")
+        let url = directory.appendingPathComponent("p.kzk")
         try Workspace(name: "p").write(to: url)
         session.open(Workspace(name: "p"), at: url, trust: .trusted)
         let revision = session.revision
@@ -145,7 +145,7 @@ final class WorkspaceSessionTests: XCTestCase {
         let trust = TrustStore(defaults: defaults)
         let session = WorkspaceSession(trustStore: trust, errors: ErrorCenter())
         let library = ProjectLibrary(session: session, runner: ProcessRunner())
-        let url = directory.appendingPathComponent("p.krabzik")
+        let url = directory.appendingPathComponent("p.kzk")
         var project = CodeProject(name: "api", path: "api", kind: .files, command: "")
         var workspace = Workspace(name: "p")
         workspace.projects = [project]
@@ -167,7 +167,7 @@ final class WorkspaceSessionTests: XCTestCase {
         let session = session(defaults)
         let runner = ProcessRunner()
         let library = ProjectLibrary(session: session, runner: runner)
-        let url = directory.appendingPathComponent("p.krabzik")
+        let url = directory.appendingPathComponent("p.kzk")
         var workspace = Workspace(name: "p")
         workspace.projects = [CodeProject(name: "api", path: ".", kind: .files, command: "touch marcador")]
         try workspace.write(to: url)
@@ -223,7 +223,7 @@ final class WorkspaceSessionTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         var workspace = Workspace(name: "p")
         workspace.projects = [CodeProject(name: "api", path: "servidor", kind: .files, command: "")]
-        session.open(workspace, at: directory.appendingPathComponent("p.krabzik"), trust: .trusted)
+        session.open(workspace, at: directory.appendingPathComponent("p.kzk"), trust: .trusted)
 
         // Codex informa rutas con los symlinks ya resueltos, y la carpeta temporal de
         // macOS es una: por eso el prefijo se compara resuelto.

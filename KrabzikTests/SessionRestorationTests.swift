@@ -16,7 +16,7 @@ final class SessionRestorationTests: XCTestCase {
     }
 
     private func project(_ name: String, in directory: URL) throws -> URL {
-        let url = directory.appendingPathComponent("\(name).krabzik")
+        let url = directory.appendingPathComponent("\(name).kzk")
         try Workspace(name: name).write(to: url)
         return url
     }
@@ -46,7 +46,7 @@ final class SessionRestorationTests: XCTestCase {
 
     func testRestoresProjectTabOrderAndSelectionWithoutRunningApprovedCommands() async throws {
         let (directory, defaults) = try environment()
-        let url = directory.appendingPathComponent("Estado.krabzik")
+        let url = directory.appendingPathComponent("Estado.kzk")
         let marker = directory.appendingPathComponent("must-not-run")
         var workspace = Workspace(name: "Estado")
         let active = CodeProject(name: "API", path: ".", kind: .files, command: "touch '\(marker.path)'")
@@ -189,7 +189,7 @@ final class SessionRestorationTests: XCTestCase {
         let store = SessionRestoration(defaults: defaults)
         defaults.set(Data("not JSON".utf8), forKey: SessionRestoration.key)
         XCTAssertNil(store.load())
-        var future = snapshot(URL(fileURLWithPath: "/tmp/future.krabzik"))
+        var future = snapshot(URL(fileURLWithPath: "/tmp/future.kzk"))
         future.version = 2
         store.save(future)
         XCTAssertNil(store.load())

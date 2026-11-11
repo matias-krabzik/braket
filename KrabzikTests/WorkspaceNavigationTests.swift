@@ -16,7 +16,7 @@ final class WorkspaceNavigationTests: XCTestCase {
     }
 
     private func project(_ name: String, in directory: URL) throws -> URL {
-        let url = directory.appendingPathComponent("\(name).krabzik")
+        let url = directory.appendingPathComponent("\(name).kzk")
         try Workspace(name: name).write(to: url)
         return url
     }
@@ -25,7 +25,7 @@ final class WorkspaceNavigationTests: XCTestCase {
 
     /// Proyecto con un comando que deja rastro en disco, para comprobar que NO se ejecuta.
     private func hostileProject(in directory: URL, marker: URL) throws -> URL {
-        let url = directory.appendingPathComponent("ajeno.krabzik")
+        let url = directory.appendingPathComponent("ajeno.kzk")
         let project = CodeProject(name: "api", path: directory.path, kind: .files,
                                   command: "touch \(marker.path)")
         var workspace = Workspace(name: "ajeno")
@@ -58,7 +58,7 @@ final class WorkspaceNavigationTests: XCTestCase {
         controller.startAll()
         try await Task.sleep(nanoseconds: 300_000_000)
         XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path),
-                       "el comando del .krabzik no debe ejecutarse sin confianza")
+                       "el comando del .kzk no debe ejecutarse sin confianza")
         XCTAssertFalse(controller.runner.hasActiveProcesses)
     }
 
@@ -122,7 +122,7 @@ final class WorkspaceNavigationTests: XCTestCase {
         try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: inside, withIntermediateDirectories: true)
         let home = directory.appendingPathComponent("adentro")
-        let url = home.appendingPathComponent("p.krabzik")
+        let url = home.appendingPathComponent("p.kzk")
         var workspace = Workspace(name: "p")
         workspace.projects = [
             CodeProject(name: "interno", path: "sub", kind: .files, command: ""),
@@ -147,7 +147,7 @@ final class WorkspaceNavigationTests: XCTestCase {
         let outside = directory.appendingPathComponent("afuera")
         try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
-        let url = directory.appendingPathComponent("home/p.krabzik")
+        let url = directory.appendingPathComponent("home/p.kzk")
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
                                                 withIntermediateDirectories: true)
         var workspace = Workspace(name: "p")
@@ -280,7 +280,7 @@ final class WorkspaceNavigationTests: XCTestCase {
     func testMissingRecentReportsErrorAndPreservesCurrentProject() async throws {
         let (directory, defaults) = try environment()
         let url = try project("Disponible", in: directory)
-        let missing = directory.appendingPathComponent("Movido.krabzik")
+        let missing = directory.appendingPathComponent("Movido.kzk")
         defaults.set([missing.path], forKey: "recentProjects")
         let controller = WorkspaceController(defaults: defaults)
         controller.confirmTrust = { _ in .trust }

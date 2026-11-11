@@ -76,13 +76,16 @@ extension WorkspaceController {
         return false }
     }
 
-    func relocateWorkspace(to destination: URL) async -> Bool {
+    func relocateWorkspace(to destination: URL, createDirectory: Bool = false) async -> Bool {
         guard !isReadOnly, let source = workspaceURL, let workspace, session.beginSwitch() else { return false }
         defer { session.endSwitch() }
         let destination = destination.standardizedFileURL
         guard destination != source else { return true }
         guard !openWorkspaceURLs.contains(destination), await prepareToLeave() else { return false }
         do {
+            if createDirectory {
+                try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            }
             let moved = try WorkspaceRelocation.move(workspace, from: source, to: destination)
             trust.markTrusted(destination)
             for project in workspace.projects where trust.isApproved(command: project.command, project: project.id, workspaceURL: source) {

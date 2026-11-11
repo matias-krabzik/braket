@@ -1,5 +1,6 @@
 import Foundation
 import MySQLNIO
+import NIOSSL
 import Observation
 
 /// Un error ya traducido a lo que se le muestra al usuario.
@@ -27,7 +28,42 @@ extension AppError {
             return description
         }
         if let mysql = error as? MySQLError { return mysql.description }
+        if let tls = error as? NIOSSLError { return describeTLS(tls) }
+        if let tls = error as? NIOSSLExtraError {
+            switch tls {
+            case .failedToValidateHostname:
+                return "El certificado TLS no corresponde al servidor indicado. Usá el nombre incluido en el certificado."
+            case .cannotUseIPAddressInSNI:
+                return "No se pudo iniciar TLS con esa dirección IP. Usá el nombre de servidor incluido en el certificado."
+            case .invalidSNIHostname, .serverHostnameImpossibleToMatch:
+                return "El nombre de servidor no es válido para TLS. Revisá el campo Servidor."
+            default:
+                return "No se pudo completar la conexión TLS. Detalle: \(tls)"
+            }
+        }
         return error.localizedDescription
+    }
+
+    private nonisolated static func describeTLS(_ error: NIOSSLError) -> String {
+        switch error {
+        case .handshakeFailed(let cause):
+            let detail = String(describing: cause)
+            if detail.contains("CERTIFICATE_VERIFY_FAILED") {
+                return "No se pudo verificar el certificado TLS de MySQL. "
+                    + "Revisá el nombre del servidor, la vigencia y la confianza en su CA. "
+                    + "La VPN no reemplaza la validación del certificado."
+            }
+            if detail.contains("EOF during handshake") || cause == .zeroReturn || cause == .syscallError {
+                return "La conexión se cerró durante la negociación TLS. Revisá el TLS del servidor y la conexión por VPN."
+            }
+            return "No se pudo negociar TLS con MySQL. Revisá la configuración TLS del servidor. Detalle: \(cause)"
+        case .unableToValidateCertificate, .noCertificateToValidate:
+            return "No se pudo validar el certificado TLS de MySQL. Revisá el certificado del servidor y su CA."
+        case .uncleanShutdown, .shutdownFailed:
+            return "La conexión TLS se cerró de forma inesperada. Revisá la conexión por VPN y el estado del servidor."
+        default:
+            return "No se pudo completar la conexión TLS. Detalle: \(error)"
+        }
     }
 }
 

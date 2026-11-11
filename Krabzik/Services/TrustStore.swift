@@ -1,7 +1,7 @@
 import CryptoKit
 import Foundation
 
-/// Un `.krabzik` es JSON editable que trae rutas y **comandos de shell arbitrarios**.
+/// Un `.kzk` es JSON editable que trae rutas y **comandos de shell arbitrarios**.
 /// Abrir uno recibido de un tercero no puede ejecutar nada, ni dar acceso de escritura
 /// al agente, hasta que el usuario lo apruebe viendo qué aprueba.
 /// Ver docs/specs/S1-proyecto-no-confiable.md.

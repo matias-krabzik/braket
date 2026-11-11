@@ -39,9 +39,9 @@ expect $? 2 "rechaza un argumento desconocido"
 
 print "\nDeterminismo"
 first=$(mktemp)
-python3 scripts/generate_project.py > /dev/null && cp Krabzik.xcodeproj/project.pbxproj "$first"
+python3 scripts/generate_project.py > /dev/null && cp Braket.xcodeproj/project.pbxproj "$first"
 python3 scripts/generate_project.py > /dev/null
-if cmp -s "$first" Krabzik.xcodeproj/project.pbxproj; then
+if cmp -s "$first" Braket.xcodeproj/project.pbxproj; then
   print "  ✓ dos corridas producen bytes idénticos"
 else
   print "  ✗ la generación no es determinista: --check no sirve"; failures=$((failures+1))

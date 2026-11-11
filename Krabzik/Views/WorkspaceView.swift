@@ -22,9 +22,9 @@ struct WorkspaceView: View {
                                .isEmpty {
                                 SQLResultsPanel(execution: document.sqlExecution) { controller.database.resultsVisible = false }
                                     .frame(minHeight: 140, idealHeight: 220, maxHeight: 350)
-                            } else if controller.processesVisible && !controller.runnableProjects.isEmpty {
-                                ProcessPanel(controller: controller)
-                                    .frame(minHeight: 110, idealHeight: 190, maxHeight: 240)
+                            } else if controller.processesVisible {
+                                AutomationBottomPanel(controller: controller)
+                                    .frame(minHeight: 150, idealHeight: 240, maxHeight: 440)
                             }
                         }
                         if controller.agent.visible {
@@ -65,8 +65,7 @@ struct WorkspaceView: View {
                         if controller.selectedDocument?.language == "SQL" { controller.database.resultsVisible.toggle() }
                         else { controller.processesVisible.toggle() }
                     } label: { Image(systemName: "rectangle.bottomthird.inset.filled") }
-                        .help("Mostrar procesos")
-                        .disabled(controller.runnableProjects.isEmpty && controller.selectedDocument?.language != "SQL")
+                        .help("Mostrar procesos y automatizaciones")
                 }
             }
         }

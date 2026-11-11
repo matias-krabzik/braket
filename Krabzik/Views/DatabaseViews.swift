@@ -37,6 +37,12 @@ struct DatabaseSidebar: View {
                             }.disabled(state.busy || state.status == .connecting)
                             Button("Editar…") { controller.database.editingConnection = connection }
                                 .disabled(state.busy || state.status == .connecting)
+                            Button("Exportar diagnóstico MySQL…") {
+                                Task {
+                                    do { try await WorkspacePrompts.exportMySQLDiagnostics() }
+                                    catch { controller.errors.report(error) }
+                                }
+                            }
                             Divider()
                             Button("Quitar conexión") { controller.connections.remove(connection) }
                                 .disabled(state.busy || state.status == .connecting)
@@ -140,7 +146,7 @@ struct ConnectionSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("MySQL").font(.headline)
+            Text("MySQL · Standard (TCP/IP)").font(.headline)
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
                 row("Nombre") { TextField("Mi base", text: $connection.name) }
                 row("Servidor") {
@@ -161,10 +167,18 @@ struct ConnectionSheet: View {
                     GridRow {
                         Text("")
                         Text(insecureRemote
-                             ? "Sin TLS solo se permite para conexiones locales."
+                             ? "Sin cifrado: usuario, contraseña y consultas viajan en texto plano fuera de esta Mac."
                              : "Sin cifrado. Aceptable solo porque el servidor es local.")
                             .font(.system(size: 10))
                             .foregroundStyle(insecureRemote ? Color.orange : .secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                if connection.tls == .preferred || connection.tls == .required || connection.tls == .verifyCA {
+                    GridRow {
+                        Text("")
+                        Text(tlsExplanation)
+                            .font(.system(size: 10)).foregroundStyle(.orange)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -181,13 +195,21 @@ struct ConnectionSheet: View {
             if let message {
                 Text(message).font(.system(size: 11)).foregroundStyle(succeeded ? Color.green : .red)
                     .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                if !succeeded {
+                    Button("Exportar diagnóstico MySQL…") {
+                        Task {
+                            do { try await WorkspacePrompts.exportMySQLDiagnostics() }
+                            catch { self.message = AppError.describe(error) }
+                        }
+                    }.disabled(busy)
+                }
             }
             HStack {
-                Button("Probar") { test() }.disabled(busy || insecureRemote)
+                Button("Probar") { test() }.disabled(busy)
                 if busy { ProgressView().controlSize(.small) }
                 Spacer()
                 Button("Cancelar") { dismiss() }.keyboardShortcut(.cancelAction).disabled(busy)
-                Button("Guardar") { save() }.keyboardShortcut(.defaultAction).disabled(busy || insecureRemote)
+                Button("Guardar") { save() }.keyboardShortcut(.defaultAction).disabled(busy)
             }
         }
         .padding(24).frame(width: 470)
@@ -200,9 +222,17 @@ struct ConnectionSheet: View {
         .interactiveDismissDisabled(busy)
     }
 
-    /// Sin TLS contra un extremo que no es local: se avisa y se bloquea antes de
-    /// intentar nada. Se deriva del estado para que cambie en vivo al escribir el host.
+    /// Advierte cuando el usuario elige enviar credenciales en claro a un destino remoto.
     private var insecureRemote: Bool { connection.tls == .disabled && !connection.isLoopbackHost }
+
+    private var tlsExplanation: String {
+        switch connection.tls {
+        case .preferred: "Usa TLS si está disponible; si no, conecta sin cifrado. No verifica el certificado."
+        case .required: "Exige TLS, pero no verifica el certificado ni el nombre del servidor."
+        case .verifyCA: "Exige TLS y verifica la CA, pero no el nombre del servidor."
+        case .verified, .disabled: ""
+        }
+    }
 
     private func row<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
         GridRow {

@@ -2,120 +2,110 @@ import AppKit
 @testable import Krabzik
 import XCTest
 
-/// `SyntaxStyler` no tenía pruebas: seis expresiones regulares aplicadas sobre el texto
-/// visible, una de ellas (`/* … */`) con riesgo de comportarse mal ante entradas
-/// patológicas. Ver docs/specs/C9-cobertura-pruebas.md.
-@MainActor
-final class SyntaxStylerTests: XCTestCase {
-    private func storage(_ text: String) -> NSTextStorage {
-        let storage = NSTextStorage(string: text)
-        storage.addAttribute(.foregroundColor, value: EditorPalette.text,
-                             range: NSRange(location: 0, length: (text as NSString).length))
-        return storage
+@MainActor final class SyntaxStylerTests: XCTestCase {
+    private func spans(_ text: String, extension suffix: String) async -> [SyntaxSpan] {
+        let syntax = SyntaxHighlighter(text: text, url: URL(fileURLWithPath: "/tmp/example.\(suffix)"))
+        return await syntax.highlights(in: NSRange(location: 0, length: text.utf16.count))
     }
 
-    /// Color aplicado al primer carácter de `fragment` dentro del texto.
-    private func color(of fragment: String, in text: String, language: String = "SQL") throws -> NSColor {
-        let store = storage(text)
-        let whole = NSRange(location: 0, length: (text as NSString).length)
-        SyntaxStyler.apply(to: store, range: whole, language: language)
-        let location = (text as NSString).range(of: fragment).location
-        XCTAssertNotEqual(location, NSNotFound, "«\(fragment)» tiene que estar en el texto")
-        let value = store.attribute(.foregroundColor, at: location, effectiveRange: nil)
-        return try XCTUnwrap(value as? NSColor)
+    private func color(_ fragment: String, in text: String, spans: [SyntaxSpan]) -> NSColor? {
+        let offset = (text as NSString).range(of: fragment).location
+        return spans.last { NSLocationInRange(offset, $0.range) }?.color
     }
 
-    /// `tokens` descarta en silencio una expresión que no compile, así que hace falta
-    /// comprobar que cada una pinta algo. Se usa una palabra clave en minúsculas porque
-    /// las de mayúsculas las vuelve a pintar otra regla (ver la prueba de abajo).
-    func testPatternsCompile() throws {
-        let code = "let total = suma(1) // nota\n$x = 'a'\nFactura\n"
-        XCTAssertEqual(try color(of: "let", in: code, language: "PHP"), EditorPalette.purple)
-        XCTAssertEqual(try color(of: "1", in: code, language: "PHP"), EditorPalette.orange)
-        XCTAssertEqual(try color(of: "Factura", in: code, language: "PHP"), EditorPalette.blue)
-        XCTAssertEqual(try color(of: "$x", in: code, language: "PHP"), EditorPalette.purple)
-        XCTAssertEqual(try color(of: "suma", in: code, language: "PHP"), EditorPalette.blue)
-        XCTAssertEqual(try color(of: "// nota", in: code, language: "PHP"), EditorPalette.muted)
-    }
-
-    /// Comportamiento actual, no necesariamente el deseado: las reglas se aplican en
-    /// orden y cada una repinta, así que `\b[A-Z][A-Za-z0-9_]*\b` —pensada para nombres
-    /// de tipo— gana sobre la de palabras clave en todo lo que esté en mayúsculas. En SQL,
-    /// que se escribe así por convención, eso significa que `SELECT` sale con el color de
-    /// un tipo. Cambiarlo es cambiar el tema del editor, y no es lo que cubre C9: queda
-    /// anotado en el spec.
-    func testUppercaseKeywordsEndUpWithTheTypeColor() throws {
-        let sql = "SELECT 1 FROM t WHERE id = 2\n"
-        XCTAssertEqual(try color(of: "SELECT", in: sql), EditorPalette.blue)
-        // Y en minúsculas no queda coloreada en absoluto: las palabras de SQL están en la
-        // lista solo en mayúsculas, y la expresión distingue mayúsculas de minúsculas.
-        XCTAssertEqual(try color(of: "select", in: "select 1\n"), EditorPalette.text)
-    }
-
-    func testSQLKeywordsLiteralsAndComments() throws {
-        let sql = "SELECT nombre FROM clientes WHERE id = 42 AND activo = 'si'\n-- un comentario\n"
-        XCTAssertEqual(try color(of: "SELECT", in: sql), EditorPalette.blue)
-        XCTAssertEqual(try color(of: "42", in: sql), EditorPalette.orange)
-        XCTAssertEqual(try color(of: "'si'", in: sql), EditorPalette.green)
-        XCTAssertEqual(try color(of: "-- un comentario", in: sql), EditorPalette.muted)
-        XCTAssertEqual(try color(of: "nombre", in: sql), EditorPalette.text, "un identificador no se pinta")
-    }
-
-    func testPHPVariablesCallsAndBlockComments() throws {
-        let php = "<?php\n$total = suma(1, 2)\n/* bloque */ class Factura {}\n"
-        XCTAssertEqual(try color(of: "$total", in: php, language: "PHP"), EditorPalette.purple)
-        XCTAssertEqual(try color(of: "suma", in: php, language: "PHP"), EditorPalette.blue)
-        XCTAssertEqual(try color(of: "/* bloque */", in: php, language: "PHP"), EditorPalette.muted)
-        XCTAssertEqual(try color(of: "Factura", in: php, language: "PHP"), EditorPalette.blue)
-    }
-
-    func testCommentsWinOverKeywordsInsideThem() throws {
-        let code = "// SELECT 1\n"
-        XCTAssertEqual(try color(of: "SELECT", in: code, language: "TypeScript"), EditorPalette.muted,
-                       "una palabra clave dentro de un comentario queda apagada")
-    }
-
-    func testPlainTextAndMarkdownAreNotTouched() {
-        for language in ["Texto", "Markdown"] {
-            let text = "SELECT 'algo' // no es código\n"
-            let store = storage(text)
-            store.addAttribute(.foregroundColor, value: NSColor.red,
-                               range: NSRange(location: 0, length: (text as NSString).length))
-            SyntaxStyler.apply(to: store, range: NSRange(location: 0, length: (text as NSString).length),
-                               language: language)
-            XCTAssertEqual(store.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor,
-                           NSColor.red, "\(language) no se colorea")
+    func testLanguageSpecificKeywordsAndLiterals() async {
+        let examples = [
+            ("swift", "let total = 42 // nota", "let"),
+            ("ts", "const total = 42 // nota", "const"),
+            ("js", "const total = 42 // nota", "const"),
+            ("py", "return 42 # nota", "return"),
+            ("dart", "int answer() { return 42; } // nota", "return"),
+            ("go", "package main\nfunc main() { return }", "package"),
+            ("rs", "fn main() { let total = 42; }", "fn")
+        ]
+        for (suffix, code, keyword) in examples {
+            let result = await spans(code, extension: suffix)
+            XCTAssertFalse(result.isEmpty, suffix)
+            XCTAssertEqual(color(keyword, in: code, spans: result), EditorPalette.purple, suffix)
         }
     }
 
-    func testEmptyRangeDoesNothing() {
-        let store = storage("SELECT 1")
-        store.addAttribute(.foregroundColor, value: NSColor.red, range: NSRange(location: 0, length: 8))
-        SyntaxStyler.apply(to: store, range: NSRange(location: 0, length: 0), language: "SQL")
-        XCTAssertEqual(store.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor, NSColor.red)
+    func testSQLKeywordsAreCaseInsensitive() async {
+        for keyword in ["SELECT", "select"] {
+            let code = "\(keyword) 42 FROM clientes -- nota\n"
+            let result = await spans(code, extension: "sql")
+            XCTAssertEqual(color(keyword, in: code, spans: result), EditorPalette.purple)
+            XCTAssertEqual(color("42", in: code, spans: result), EditorPalette.orange)
+            XCTAssertEqual(color("nota", in: code, spans: result), EditorPalette.muted)
+        }
     }
 
-    /// El comentario de bloque usa `[\s\S]*?`, que con muchos `/*` sin cerrar puede
-    /// degradarse. El editor acota el rango a 60.000 caracteres; esto comprueba que ni
-    /// siquiera el peor caso dentro de ese tope se va de tiempo.
-    func testPathologicalInputFinishesQuickly() throws {
-        let text = String(repeating: "/*", count: 20_000)   // 40.000 caracteres sin cerrar
-        let store = storage(text)
-        let whole = NSRange(location: 0, length: (text as NSString).length)
-        let start = DispatchTime.now()
-        SyntaxStyler.apply(to: store, range: whole, language: "PHP")
-        let ms = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
-        XCTAssertLessThan(ms, 2_000, "\(Int(ms)) ms para 40.000 caracteres de «/*» sin cerrar")
+    func testVisibleRangeRetainsMultilineContext() async {
+        let code = "/* comienza\nconst falso = 42\ntermina */\nconst real = 1;"
+        let syntax = SyntaxHighlighter(text: code, url: URL(fileURLWithPath: "/tmp/test.js"))
+        let range = (code as NSString).range(of: "const falso = 42")
+        let result = await syntax.highlights(in: range)
+        XCTAssertEqual(color("const falso", in: code, spans: result), EditorPalette.muted)
+        XCTAssertTrue(result.allSatisfy { NSIntersectionRange($0.range, range) == $0.range })
     }
 
-    func testColoringIsRelativeToTheRequestedRange() throws {
-        let text = "linea uno\nSELECT 1\n"
-        let store = storage(text)
-        let second = (text as NSString).range(of: "SELECT 1\n")
-        SyntaxStyler.apply(to: store, range: second, language: "SQL")
-        XCTAssertEqual(store.attribute(.foregroundColor, at: second.location, effectiveRange: nil) as? NSColor,
-                       EditorPalette.blue, "el desplazamiento del rango se tiene en cuenta")
-        XCTAssertEqual(store.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor,
-                       EditorPalette.text, "fuera del rango no se toca nada")
+    func testIncrementalUnicodeEditsAndUndo() async {
+        let original = "// 🦀 café\nconst total = 42;\n"
+        let syntax = SyntaxHighlighter(text: original, url: URL(fileURLWithPath: "/tmp/test.js"))
+        _ = await syntax.highlights(in: NSRange(location: 0, length: original.utf16.count))
+        let range = (original as NSString).range(of: "42")
+        syntax.replace(range, with: "'🐙'")
+        let edited = (original as NSString).replacingCharacters(in: range, with: "'🐙'")
+        let result = await syntax.highlights(in: NSRange(location: 0, length: edited.utf16.count))
+        XCTAssertEqual(color("🐙", in: edited, spans: result), EditorPalette.green)
+        syntax.replace(NSRange(location: range.location, length: "'🐙'".utf16.count), with: "42")
+        let restored = await syntax.highlights(in: NSRange(location: 0, length: original.utf16.count))
+        XCTAssertEqual(color("42", in: original, spans: restored), EditorPalette.orange)
+    }
+
+    func testRemovingCommentOpenerUpdatesLaterLines() async {
+        let original = "/*\nconst total = 42;\n*/"
+        let syntax = SyntaxHighlighter(text: original, url: URL(fileURLWithPath: "/tmp/test.js"))
+        _ = await syntax.highlights(in: NSRange(location: 0, length: original.utf16.count))
+        syntax.replace(NSRange(location: 0, length: 2), with: "")
+        let edited = String(original.dropFirst(2))
+        let result = await syntax.highlights(in: NSRange(location: 0, length: edited.utf16.count))
+        XCTAssertEqual(color("const", in: edited, spans: result), EditorPalette.purple)
+    }
+
+    func testStructuredLanguagesAndPlainText() async {
+        for (suffix, code) in [("json", "{\"title\": true}"), ("html", "<div>Hello</div>"),
+                               ("css", "body { color: red; }"), ("php", "<?php echo 'hola';"),
+                               ("tsx", "const view = <div>Hello</div>;"), ("md", "# Title\n"),
+                               ("yaml", "title: hello"), ("sh", "echo 'hello'")] {
+            let result = await spans(code, extension: suffix)
+            XCTAssertFalse(result.isEmpty, suffix)
+        }
+        let plain = await spans("const total = 42", extension: "txt")
+        XCTAssertTrue(plain.isEmpty)
+    }
+
+    func testApplyingColorsPreservesTextSelectionAndUndo() async throws {
+        let document = try EditorDocument(url: URL(fileURLWithPath: "/tmp/test.js"), data: Data("const x = 1;".utf8))
+        let surface = EditorSurface(document: document)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 500),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = surface
+        let view = surface.textView
+        window.makeFirstResponder(view)
+        let undo = try XCTUnwrap(view.undoManager)
+        undo.beginUndoGrouping()
+        view.setSelectedRange(NSRange(location: 10, length: 1))
+        view.insertText("42", replacementRange: view.selectedRange())
+        undo.endUndoGrouping()
+        let selection = view.selectedRange()
+        let code = view.string
+        let result = await spans(code, extension: "js")
+        SyntaxHighlighter.apply(result, to: try XCTUnwrap(view.textStorage), range: NSRange(location: 0, length: code.utf16.count))
+        XCTAssertEqual(view.string, "const x = 42;")
+        XCTAssertEqual(view.selectedRange(), selection)
+        undo.undo()
+        XCTAssertEqual(view.string, "const x = 1;")
+        surface.teardown()
     }
 }

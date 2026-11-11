@@ -25,6 +25,7 @@ final class MySQLConnectionHandler: ChannelDuplexHandler {
         let database: String
         let password: String?
         let tlsConfiguration: TLSConfiguration?
+        let tlsRequired: Bool
         let serverHostname: String?
         let done: EventLoopPromise<Void>
     }
@@ -115,7 +116,7 @@ final class MySQLConnectionHandler: ChannelDuplexHandler {
         }
         self.serverCapabilities = handshakeRequest.capabilities
         // Krabzik: a requested TLS connection must never silently downgrade.
-        if state.tlsConfiguration != nil && !handshakeRequest.capabilities.contains(.CLIENT_SSL) {
+        if state.tlsRequired && state.tlsConfiguration != nil && !handshakeRequest.capabilities.contains(.CLIENT_SSL) {
             throw MySQLError.unsupportedServer(message: "El servidor no ofrece TLS.")
         }
         if let tlsConfiguration = state.tlsConfiguration, handshakeRequest.capabilities.contains(.CLIENT_SSL) {

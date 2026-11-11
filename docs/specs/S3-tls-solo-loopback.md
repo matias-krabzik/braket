@@ -1,5 +1,10 @@
 # S3 · «Sin TLS» solo para conexiones locales
 
+> Nota histórica: esta restricción se reemplazó por modos de SSL explícitos compatibles con
+> Workbench. «Require and Verify Identity» sigue siendo el valor predeterminado. «If available»
+> puede usar texto plano si el servidor no anuncia TLS y «No» permite TCP sin cifrar, con aviso
+> visible en la interfaz. El resto del documento describe la decisión anterior.
+
 | | |
 |---|---|
 | **Severidad** | Media |

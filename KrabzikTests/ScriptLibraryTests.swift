@@ -5,7 +5,7 @@ import XCTest
 /// controlador que necesitaban un proyecto abierto para ejercitarse.
 /// Ver docs/specs/C5-dividir-workspacecontroller.md.
 final class ScriptLibraryTests: XCTestCase {
-    private let workspaceURL = URL(fileURLWithPath: "/proyectos/tienda/Tienda.krabzik")
+    private let workspaceURL = URL(fileURLWithPath: "/proyectos/tienda/Tienda.kzk")
 
     private func workspace(scripts: [String] = [], projects: [CodeProject] = []) -> Workspace {
         var value = Workspace(name: "Tienda", projects: projects)
@@ -23,7 +23,7 @@ final class ScriptLibraryTests: XCTestCase {
         XCTAssertEqual(url?.path, "/otra/parte/x.sql")
     }
 
-    /// Un `.krabzik` que no se confió no puede hacer que el IDE abra archivos de
+    /// Un `.kzk` que no se confió no puede hacer que el IDE abra archivos de
     /// cualquier parte del disco.
     func testExternalScriptIsRefusedWhenUntrusted() {
         XCTAssertNil(ScriptLibrary.url(for: "/etc/passwd", workspaceURL: workspaceURL, trust: .untrusted))

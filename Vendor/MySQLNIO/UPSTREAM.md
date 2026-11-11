@@ -34,6 +34,7 @@ el resultado a `Sources/`.
 | `0003-connection-deadlines-and-channel-cleanup` | `DatabaseTests.testHandshakeTimeoutAndEarlyServerDisconnect` |
 | `0004-negotiate-client-multi-results` | `DatabaseTests.testMySQLPasswordAuthenticationAndStoredProcedure` (el `CALL` al procedimiento) |
 | `0005-package-omit-upstream-test-target` | ninguna: si no estuviera, el paquete no resolvería y no compilaría nada |
+| `0006-optional-tls-for-preferred-mode` | `MySQLDiagnosticsTests.testPreferredFallsBackOnlyWhenServerOmitsTLS` |
 
 Las cinco primeras son pruebas contra un servidor MySQL real y se saltan sin
 `.build/mysql-test-port` (ver el README). En CI el marcador se crea siempre, así que corren en cada cambio.

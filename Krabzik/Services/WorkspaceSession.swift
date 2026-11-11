@@ -18,7 +18,7 @@ import Observation
 /// `confirmTrust` vive en el controlador y `confirmCommand` en `ProjectLibrary`.
 ///
 /// Lo que no se puede perder al partir el controlador: **abrir un proyecto no ejecuta
-/// nada**. Un `.krabzik` que no se abrió antes entra en `.untrusted`, y de ahí dependen
+/// nada**. Un `.kzk` que no se abrió antes entra en `.untrusted`, y de ahí dependen
 /// `runnableProjects`, `mountedProjects` y los gates de scripts, comandos y agente (S1).
 ///
 /// Confinado al main actor. Ver docs/specs/C5-dividir-workspacecontroller.md.
@@ -91,7 +91,7 @@ final class WorkspaceSession {
         }
     }
 
-    /// Crea el `.krabzik` vacío y lo deja confiable: un proyecto que el usuario acaba de
+    /// Crea el `.kzk` vacío y lo deja confiable: un proyecto que el usuario acaba de
     /// crear lo escribió él, no vino de afuera.
     func create(named name: String, at url: URL) throws -> Workspace {
         let project = Workspace(name: name)
@@ -126,7 +126,7 @@ final class WorkspaceSession {
 
     /// El único camino de escritura. Guarda en disco y recién entonces adopta el cambio:
     /// si falla, el proyecto en memoria queda como estaba, así la interfaz nunca muestra
-    /// una lista de subproyectos que el `.krabzik` no tiene.
+    /// una lista de subproyectos que el `.kzk` no tiene.
     ///
     /// Toda escritura sube la revisión. Es una regla más simple que llevar la cuenta de
     /// cuáles cambian el árbol y cuáles no, y el costo de una relectura de más es nada.
@@ -151,7 +151,7 @@ final class WorkspaceSession {
         }
     }
 
-    /// El disco cambió sin que cambiara el `.krabzik`: un archivo nuevo, una carpeta que
+    /// El disco cambió sin que cambiara el `.kzk`: un archivo nuevo, una carpeta que
     /// el agente tocó.
     func touch() { revision += 1 }
 }

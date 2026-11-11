@@ -1,4 +1,4 @@
-# Krabzik IDE · seguimiento de upstream
+# Braket · seguimiento de upstream
 #
 # El fork local de MySQLNIO está fijado a un tag (Vendor/MySQLNIO/UPSTREAM.md) y se
 # mantiene como upstream + patches/. Una release nueva de mysql-nio puede traer las

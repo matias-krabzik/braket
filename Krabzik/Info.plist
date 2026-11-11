@@ -5,23 +5,34 @@
 <key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
 <key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-<key>CFBundleName</key><string>Krabzik IDE</string>
+<key>CFBundleName</key><string>Braket</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
 <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
 <key>LSMinimumSystemVersion</key><string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 <key>NSHighResolutionCapable</key><true/>
 <key>NSPrincipalClass</key><string>NSApplication</string>
-<key>NSHumanReadableCopyright</key><string>Krabzik IDE</string>
+<key>NSHumanReadableCopyright</key><string>Braket</string>
+<key>SUFeedURL</key><string>https://www.krabzik.com/apps/krabzik-ide/appcast.xml</string>
+<key>SUPublicEDKey</key><string>ix7Ag2pGSMhWuI2CTQBLjZzdGLFFZ+makbWl7BJcirY=</string>
+<key>SUEnableAutomaticChecks</key><false/>
+<key>SUAutomaticallyUpdate</key><false/>
+<key>SUAllowsAutomaticUpdates</key><false/>
+<key>SUEnableSystemProfiling</key><false/>
 <key>CFBundleDocumentTypes</key><array><dict>
-<key>CFBundleTypeName</key><string>Proyecto Krabzik</string>
+<key>CFBundleTypeName</key><string>Proyecto Braket</string>
 <key>CFBundleTypeRole</key><string>Editor</string>
 <key>LSHandlerRank</key><string>Owner</string>
-<key>LSItemContentTypes</key><array><string>com.krabzik.project</string></array>
+<key>LSItemContentTypes</key><array><string>com.krabzik.kzk-project</string><string>com.krabzik.project</string></array>
 </dict></array>
 <key>UTExportedTypeDeclarations</key><array><dict>
+<key>UTTypeIdentifier</key><string>com.krabzik.kzk-project</string>
+<key>UTTypeDescription</key><string>Proyecto Braket</string>
+<key>UTTypeConformsTo</key><array><string>public.json</string></array>
+<key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>kzk</string></array></dict>
+</dict><dict>
 <key>UTTypeIdentifier</key><string>com.krabzik.project</string>
-<key>UTTypeDescription</key><string>Proyecto Krabzik</string>
+<key>UTTypeDescription</key><string>Proyecto Braket</string>
 <key>UTTypeConformsTo</key><array><string>public.json</string></array>
 <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>krabzik</string></array></dict>
 </dict></array>

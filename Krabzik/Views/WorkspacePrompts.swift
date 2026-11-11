@@ -16,9 +16,19 @@ enum SaveDecision: Sendable {
 enum WorkspacePrompts {
     // MARK: - Paneles
 
+    static func exportMySQLDiagnostics() async throws {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.plainText]
+        panel.nameFieldStringValue = "Braket-MySQL-diagnostico.txt"
+        panel.message = "Exportá los últimos intentos de conexión para consultar un error. No incluye contraseñas ni consultas SQL."
+        panel.prompt = "Exportar"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        try await MySQLDiagnostics.shared.export(to: url)
+    }
+
     static func chooseWorkspace() -> URL? {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.krabzikProject, .json]
+        panel.allowedContentTypes = [.kzkProject, .legacyKrabzikProject, .json]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.message = ""
@@ -28,8 +38,8 @@ enum WorkspacePrompts {
 
     static func createWorkspace() -> URL? {
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [.krabzikProject]
-        panel.nameFieldStringValue = "Mi proyecto.krabzik"
+        panel.allowedContentTypes = [.kzkProject]
+        panel.nameFieldStringValue = "Mi proyecto." + Workspace.fileExtension
         panel.canCreateDirectories = true
         panel.prompt = "Crear"
         return panel.runModal() == .OK ? panel.url : nil

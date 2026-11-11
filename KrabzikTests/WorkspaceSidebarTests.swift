@@ -41,7 +41,7 @@ final class WorkspaceSidebarTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         addTeardownBlock { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
         let controller = WorkspaceController(defaults: defaults)
-        let a = root.appendingPathComponent("A.krabzik"), b = root.appendingPathComponent("B.krabzik")
+        let a = root.appendingPathComponent("A.kzk"), b = root.appendingPathComponent("B.kzk")
         try Workspace(name: "A").write(to: a)
         try Workspace(name: "B").write(to: b)
         controller.trust.markTrusted(a)

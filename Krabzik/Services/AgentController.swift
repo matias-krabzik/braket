@@ -99,7 +99,7 @@ final class AgentController {
             pendingCandidate = nil
             try transport.start(executable: candidate.url)
             _ = try await transport.request("initialize", .object([
-                "clientInfo": .object(["name": .string("krabzik_ide"), "title": .string("Krabzik IDE"),
+                "clientInfo": .object(["name": .string("braket"), "title": .string("Braket"),
                                        "version": .string(Self.clientVersion)]),
                 "capabilities": .object(["optOutNotificationMethods": .array([
                     .string("item/reasoning/textDelta"),

@@ -1,8 +1,10 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ProjectWizardIdentity: View {
     @Binding var draft: ProjectDraft
+    @State private var choosingLocation = false
     private let presets = ["687080", "4589E8", "8863D7", "D662AD", "DB8746", "4B9F83"]
 
     var body: some View {
@@ -17,11 +19,19 @@ struct ProjectWizardIdentity: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Ubicación").font(.callout)
                 HStack {
-                    Text((draft.folder.path as NSString).abbreviatingWithTildeInPath)
+                    Text((draft.location.path as NSString).abbreviatingWithTildeInPath)
                         .lineLimit(1).truncationMode(.middle).frame(maxWidth: .infinity, alignment: .leading)
-                    Button("Elegir…", action: chooseLocation)
+                    Button("Elegir…") { choosingLocation = true }
                 }
-                Text(draft.trimmedName.isEmpty ? "Se guardará un archivo .krabzik en esta carpeta." : draft.url.lastPathComponent)
+                if !draft.usesDefaultLocation {
+                    Button("Usar BraketProjects") { draft.useDefaultLocation() }
+                } else {
+                    Text("La carpeta se creará automáticamente, organizada por año.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Text("Nombre de la carpeta").font(.callout)
+                TextField("Nombre de la carpeta", text: $draft.folderName).textFieldStyle(.roundedBorder)
+                Text((draft.url.path as NSString).abbreviatingWithTildeInPath)
                     .font(.caption).foregroundStyle(.secondary)
                 if !draft.name.isEmpty, let message = draft.validationMessage {
                     Text(message).font(.caption).foregroundStyle(.orange)
@@ -47,16 +57,9 @@ struct ProjectWizardIdentity: View {
             Text("Podés crear ahora o continuar para agregar subproyectos y revisar el resumen.")
                 .font(.caption).foregroundStyle(.secondary)
         }
+        .fileImporter(isPresented: $choosingLocation, allowedContentTypes: [.folder]) { result in
+            if case .success(let url) = result { draft.location = url }
+        }
     }
 
-    private func chooseLocation() {
-        let panel = NSOpenPanel()
-        panel.title = "Ubicación del proyecto"
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.canCreateDirectories = true
-        panel.directoryURL = draft.folder
-        panel.prompt = "Elegir"
-        if panel.runModal() == .OK, let url = panel.url { draft.folder = url }
-    }
 }

@@ -50,20 +50,7 @@ final class EditorDocument: Identifiable {
         return (source.substring(with: selectedRange), prefix.filter { $0 == "\n" }.count + 1)
     }
 
-    var language: String {
-        switch url.pathExtension.lowercased() {
-        case "php": return "PHP"
-        case "ts", "tsx": return "TypeScript"
-        case "js", "jsx", "mjs", "cjs": return "JavaScript"
-        case "sql": return "SQL"
-        case "swift": return "Swift"
-        case "html", "astro": return "HTML"
-        case "css", "scss": return "CSS"
-        case "json": return "JSON"
-        case "md": return "Markdown"
-        default: return "Texto"
-        }
-    }
+    var language: String { SyntaxLanguage.name(url) }
 
     init(url: URL, data: Data) throws {
         guard data.count <= 5 * 1024 * 1024 else { throw WorkspaceError.largeFile }

@@ -24,7 +24,7 @@ def wait(i):
    if msg.get('id')==i and 'method' not in msg: return msg
  raise TimeoutError(i)
 try:
- send(1,'initialize',{'clientInfo':{'name':'krabzik_ide','title':'Krabzik IDE','version':'0.3.0'},'capabilities':{}})
+ send(1,'initialize',{'clientInfo':{'name':'braket','title':'Braket','version':'0.3.0'},'capabilities':{}})
  print('initialize:', 'result' in wait(1))
  p.stdin.write(b'{"method":"initialized","params":{}}\n'); p.stdin.flush()
  send(2,'account/read',{'refreshToken':False}); r=wait(2); a=r.get('result',{}).get('account') or {}

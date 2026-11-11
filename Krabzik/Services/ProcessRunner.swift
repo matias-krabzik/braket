@@ -121,7 +121,7 @@ final class ProcessRunner {
         return run
     }
 
-    func start(_ project: CodeProject, workspaceURL: URL) {
+    func start(_ project: CodeProject, workspaceURL: URL, environment overrides: [String: String] = [:]) {
         let run = state(for: project.id)
         guard !run.status.active, !project.command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let directory = project.directory(relativeTo: workspaceURL)
@@ -167,6 +167,7 @@ final class ProcessRunner {
         environment["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + (environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin")
         environment["NO_COLOR"] = "1"
         environment["TERM"] = "dumb"
+        environment.merge(overrides) { _, new in new }
         let arguments = ["/bin/zsh", "-l", "-c", "cd -- \(Shell.quote(directory.path)) && \(project.command)"]
         let argv = arguments.map { strdup($0) } + [nil]
         let envp = environment.map { strdup("\($0.key)=\($0.value)") } + [nil]

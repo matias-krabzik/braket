@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-/// Un perfil de conexión a MySQL, tal como se guarda en el `.krabzik`.
+/// Un perfil de conexión a MySQL, tal como se guarda en el `.kzk`.
 ///
 /// **La contraseña no está acá y no se serializa nunca**: vive en el llavero, con una
 /// cuenta que incluye id, host, puerto, usuario y modo de TLS (ver `CredentialStore`), así
@@ -21,15 +21,26 @@ struct DatabaseConnection: Identifiable, Codable, Equatable, Sendable {
     /// loopback, y eso se comprueba sobre la dirección resuelta, no sobre el nombre
     /// (ver docs/specs/S3-tls-solo-loopback.md).
     enum TLSMode: String, Codable, CaseIterable, Sendable {
-        case verified, disabled
-        var label: String { self == .verified ? "Verificar certificado" : "Sin TLS" }
+        case preferred, required, verifyCA, verified, disabled
+
+        var label: String {
+            switch self {
+            case .preferred: "If available"
+            case .required: "Require"
+            case .verifyCA: "Require and Verify CA"
+            case .verified: "Require and Verify Identity"
+            case .disabled: "No"
+            }
+        }
+
+        var requiresTLS: Bool { self != .preferred && self != .disabled }
     }
 
     var destination: String { "\(host):\(port)" + (database.isEmpty ? "" : " / \(database)") }
 
     /// Nivel de exigencia. `validated()` se usa en dos contextos distintos y no
     /// pueden compartir reglas: al GUARDAR desde la hoja hay que rechazar lo
-    /// inválido, pero al LEER un `.krabzik` existente rechazar significaría que
+    /// inválido, pero al LEER un `.kzk` existente rechazar significaría que
     /// el proyecto deja de abrirse. Ver docs/specs/S3-tls-solo-loopback.md.
     enum ValidationLevel {
         /// Guardar y conectar: aplica todas las reglas.
@@ -65,9 +76,6 @@ struct DatabaseConnection: Identifiable, Codable, Equatable, Sendable {
         guard tintHex.map({ ProjectIconStyle(hex: $0).isValid }) ?? true,
               (tintStrength ?? 0.12).isFinite, (0.04...0.20).contains(tintStrength ?? 0.12) else {
             throw DatabaseFailure("El tinte de la conexión no es válido.")
-        }
-        if level == .strict, value.tls == .disabled, !value.isLoopbackHost {
-            throw DatabaseFailure("Sin TLS solo se permite para conexiones locales (127.0.0.1, ::1 o localhost).")
         }
         return value
     }

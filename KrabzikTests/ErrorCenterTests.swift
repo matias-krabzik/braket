@@ -1,5 +1,6 @@
 @testable import Krabzik
 import MySQLNIO
+import NIOSSL
 import XCTest
 
 /// La cola de errores y la única función que los traduce a texto.
@@ -75,5 +76,23 @@ final class ErrorCenterTests: XCTestCase {
         let center = ErrorCenter()
         center.report(DatabaseFailure("algo"), context: "alTocarElBoton")
         XCTAssertEqual(center.current?.context, "alTocarElBoton")
+    }
+
+    func testTLSHandshakeFailurePreservesTheCauseInsteadOfNSErrorCodeZero() {
+        let error = NIOSSLError.handshakeFailed(.sslError([.eofDuringHandshake]))
+        XCTAssertEqual((error as NSError).code, 0, "Es el error opaco reportado por la interfaz")
+        let description = AppError.describe(error)
+        XCTAssertTrue(description.contains("negociación TLS"))
+        XCTAssertTrue(description.contains("VPN"))
+        XCTAssertFalse(description.contains("NIOSSL.NIOSSLError"))
+        XCTAssertEqual(MySQLClient.message(error), description)
+    }
+
+    func testTLSHostnameAndCertificateErrorsHaveDifferentGuidance() {
+        XCTAssertTrue(AppError.describe(NIOSSLExtraError.failedToValidateHostname).contains("no corresponde"))
+        XCTAssertTrue(AppError.describe(NIOSSLError.unableToValidateCertificate).contains("su CA"))
+        XCTAssertTrue(AppError.describe(NIOSSLError.uncleanShutdown).contains("cerró"))
+        let unknown = AppError.describe(NIOSSLError.handshakeFailed(.wantRead))
+        XCTAssertTrue(unknown.contains("wantRead"), "Los fallos desconocidos deben conservar el detalle técnico")
     }
 }

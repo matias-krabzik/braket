@@ -1,6 +1,23 @@
 {
-  "originHash" : "04396cf84aaa2d0df43d33925b0ff3ad7bfc36e6db49f3b8e1a2ede47cbf75dd",
+  "originHash" : "85e880122bb41b65f0a15c1aa9b943df85579d01f97358cd2ba7e4dc128cd67b",
   "pins" : [
+    {
+      "identity" : "codeeditlanguages",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/CodeEditApp/CodeEditLanguages",
+      "state" : {
+        "revision" : "32a1ddcb44d0bcf9bdb41ae426fa1bb7198e62fe"
+      }
+    },
+    {
+      "identity" : "sparkle",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/sparkle-project/Sparkle",
+      "state" : {
+        "revision" : "ab7d71291238df6e0492143b120c9b696a35f603",
+        "version" : "2.10.1"
+      }
+    },
     {
       "identity" : "swift-algorithms",
       "kind" : "remoteSourceControl",
@@ -89,6 +106,24 @@
       "state" : {
         "revision" : "869129b7bf4ecc57b97d0193ad29690ca2134750",
         "version" : "1.8.1"
+      }
+    },
+    {
+      "identity" : "swifttreesitter",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/ChimeHQ/SwiftTreeSitter.git",
+      "state" : {
+        "revision" : "36aa61d1b531f744f35229f010efba9c6d6cbbdd",
+        "version" : "0.9.0"
+      }
+    },
+    {
+      "identity" : "tree-sitter",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/tree-sitter/tree-sitter",
+      "state" : {
+        "revision" : "d97db6d63507eb62c536bcb2c4ac7d70c8ec665e",
+        "version" : "0.23.2"
       }
     }
   ],

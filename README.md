@@ -1,10 +1,10 @@
-# Krabzik IDE
+# Braket
 
-IDE nativo para macOS 14 o posterior, escrito en Swift con SwiftUI, AppKit y TextKit 2. Permite reunir carpetas de código, procesos y scripts SQL en un proyecto `.krabzik`.
+IDE nativo para macOS 14 o posterior, escrito en Swift con SwiftUI, AppKit y TextKit 2. Permite reunir carpetas de código, procesos y scripts SQL en un proyecto `.kzk`.
 
 ## Abrir y compilar
 
-Abrí `Krabzik.xcodeproj`, seleccioná **Krabzik** y ejecutá con ⌘R. Xcode resuelve las dependencias Swift Package Manager en la primera compilación; requiere acceso a Internet. Compilación local con firma ad hoc, sin cuenta de desarrollador: la app **no está preparada para distribuirse a terceros** y Gatekeeper la bloquea en otra máquina. La postura completa —modelo de amenaza, por qué no hay App Sandbox, qué sí está activo— está en [docs/security.md](docs/security.md).
+Abrí `Braket.xcodeproj`, seleccioná **Braket** y ejecutá con ⌘R. Xcode resuelve las dependencias Swift Package Manager en la primera compilación; requiere acceso a Internet. La compilación local usa un certificado Apple Development. Para distribuir a terceros se necesita Developer ID Application y notarización, como se explica en [docs/updates.md](docs/updates.md). La postura de seguridad completa está en [docs/security.md](docs/security.md).
 
 La versión del producto se define en un solo lugar, `scripts/generate_project.py`; este documento no la
 repite para que no pueda quedar desincronizada. La sección **Entorno verificado**, más abajo, dice contra
@@ -12,8 +12,11 @@ qué se comprobó y cuándo.
 
 ```sh
 ./scripts/build.sh
-open '.build/Build/Products/Release/Krabzik IDE.app'
 ```
+
+El bundle se genera en `.build/Build/Products/Release/Braket.app`. La entrega local
+se instala en `/Applications/Braket.app`, con respaldo de la versión anterior,
+según `AGENTS.md`.
 
 La app compilada se conecta directamente a MySQL: no requiere instalar `mysql`, MySQL Workbench ni Docker. El servidor MySQL debe existir y estar accesible.
 
@@ -35,7 +38,7 @@ Abrí **Configuración** desde la parte inferior del lateral de inicio, el engra
   subproyecto seleccionados, y la visibilidad del explorador y los procesos. Está desactivado
   por defecto. El estado se guarda al confirmar la salida de la app; cerrar el proyecto
   vuelve al inicio y borra esa sesión. Los procesos, consultas SQL y tareas de Codex no se
-  vuelven a ejecutar. Abrir un archivo `.krabzik` explícitamente tiene prioridad sobre la
+  vuelven a ejecutar. Abrir un archivo `.kzk` explícitamente tiene prioridad sobre la
   sesión guardada. Los archivos que ya no estén disponibles se omiten con un aviso.
 
 La barra izquierda del editor muestra únicamente proyectos abiertos. Cada uno se puede cerrar
@@ -48,7 +51,7 @@ con los diálogos habituales para guardar cambios y detener procesos si hace fal
 
 En **Configuración → Proyecto** podés editar el nombre, elegir un tono predefinido o
 personalizado y activar el efecto glass del icono. También permite agregar, editar y quitar
-subproyectos, y cambiar la ubicación del `.krabzik`. Este traslado conserva las carpetas y
+subproyectos, y cambiar la ubicación del `.kzk`. Este traslado conserva las carpetas y
 scripts en su ubicación original y rechaza sobrescribir otro proyecto.
 
 ## Codex con tu suscripción
@@ -67,14 +70,20 @@ La integración se verificó con Codex CLI `0.167.0-alpha.3.2`, una cuenta ChatG
 
 ## MySQL y scripts SQL
 
+Si falla una conexión, Braket registra los intentos en `~/Library/Logs/Braket/mysql.jsonl` (hasta 512 KiB más
+una copia anterior). En **Configuración → General → Exportar diagnóstico MySQL…** se genera un archivo de texto
+que podés llevar a otra computadora para consultar la causa. También está disponible desde el menú contextual
+de una conexión y, cuando falla **Probar**, en la misma hoja. Registra hora, duración, etapa y códigos de error
+de red/TLS, sin contraseña, usuario, servidor, IP, base de datos ni texto SQL.
+
 1. Abrí o creá un proyecto. Puede contener únicamente conexiones y scripts.
 2. En **Bases de datos**, pulsá **+**, completá servidor, puerto, usuario y contraseña. La base es opcional. **Probar** verifica el acceso; **Guardar** conserva la configuración.
-3. TLS verifica el certificado por defecto. **Sin TLS** se admite **solo contra un extremo local**: `127.0.0.0/8`, `::1`, `localhost` o un subdominio `.localhost`. No alcanza con que el host lo parezca: al conectar se comprueba la dirección resuelta, así que un nombre que resuelva a una IP pública se rechaza. No se aceptan certificados inválidos ni se cambia a texto plano automáticamente. Un proyecto guardado con una conexión remota sin TLS se abre igual, pero no conecta hasta corregirla.
+3. En **TLS**, elegí el modo para Standard (TCP/IP): **If available** intenta cifrar sin verificar el certificado y usa texto plano si el servidor no ofrece TLS; **Require** exige cifrado sin verificar el certificado; **Require and Verify CA** valida el certificado sin comprobar el nombre; **Require and Verify Identity** valida certificado y nombre (predeterminado); **No** desactiva TLS. Los modos sin verificación o con posible texto plano muestran una advertencia antes de guardar.
 4. Abrí o creá un `.sql` desde **SQL +**. Los scripts independientes quedan asociados al proyecto.
 5. Elegí la conexión y pulsá **▶** o **⌘↩**. Si hay texto seleccionado se ejecuta esa selección; de lo contrario, el archivo completo. Los cambios sin guardar también se pueden ejecutar.
 6. Los resultados aparecen abajo, con un selector cuando hay varias respuestas. El botón **■** cancela la consulta y cierra su sesión MySQL. El menú contextual de la conexión permite editarla o desconectarla.
 
-Las contraseñas se guardan en el **Llavero de macOS**, vinculadas al identificador, servidor, puerto, usuario y modo TLS. No se incluyen en `.krabzik`. Abrir un proyecto no inicia conexiones ni ejecuta SQL.
+Las contraseñas se guardan en el **Llavero de macOS**, vinculadas al identificador, servidor, puerto, usuario y modo TLS. No se incluyen en `.kzk`. Abrir un proyecto no inicia conexiones ni ejecuta SQL.
 
 Los scripts se ejecutan secuencialmente en una sesión persistente por conexión. Se conservan tablas temporales, variables y transacciones entre ejecuciones. Se admiten comentarios, cadenas con separadores y `DELIMITER` para procedimientos. Los errores muestran la línea, conservan los resultados previos y detienen las sentencias siguientes. Las sentencias ya confirmadas por MySQL permanecen aplicadas; el IDE no envuelve el script en una transacción. Usá `BEGIN`, `COMMIT` y `ROLLBACK` cuando corresponda. Cerrar una sesión revierte su transacción pendiente, con aviso en la interfaz.
 
@@ -84,7 +93,7 @@ Esta versión usa TCP, autenticación `caching_sha2_password` o `mysql_native_pa
 
 ## Código y procesos
 
-- Pantalla de inicio con los últimos diez proyectos, ordenados por apertura, y accesos para crear o abrir uno. El inicio normal muestra esta pantalla; abrir un archivo `.krabzik` o usar `--workspace` abre ese proyecto directamente.
+- Pantalla de inicio con los últimos diez proyectos, ordenados por apertura, y accesos para crear o abrir uno. El inicio normal muestra esta pantalla; abrir un archivo `.kzk` o usar `--workspace` abre ese proyecto directamente.
 - Desde el editor, el botón de inicio o **Archivo → Cerrar proyecto y volver al inicio** (⇧⌘W) vuelve a los recientes, con avisos por cambios sin guardar y actividad en curso. El menú contextual de cada reciente permite mostrarlo en Finder o quitarlo del historial sin borrar archivos.
 - Varios subproyectos independientes y proyectos recientes.
 - Detección de Laravel, PHP, Angular, Astro y Node; comando editable desde el menú contextual.
@@ -93,11 +102,13 @@ Esta versión usa TCP, autenticación `caching_sha2_password` o `mysql_native_pa
 - Inicio conjunto o individual de procesos, registros y detención de sus procesos hijos.
 - Protección frente a cambios externos y avisos al cerrar archivos sin guardar.
 
-Abrí `Examples/Primer proyecto/Primer proyecto.krabzik` para probar una API PHP y una web Node sin dependencias. El botón ▶ inicia la API en `http://127.0.0.1:18765` y la web en `http://127.0.0.1:18766`. Requiere PHP, Node y npm instalados; no instala paquetes al abrir el proyecto.
+Abrí `Examples/Primer proyecto/Primer proyecto.kzk` para probar una API PHP y una web Node sin dependencias. El botón ▶ inicia la API en `http://127.0.0.1:18765` y la web en `http://127.0.0.1:18766`. Requiere PHP, Node y npm instalados; no instala paquetes al abrir el proyecto.
 
-### El archivo `.krabzik`
+Los proyectos nuevos se guardan como `.kzk`. Los archivos `.krabzik` anteriores siguen abriendo y conservan su ubicación.
 
-Un `.krabzik` es JSON legible y puede venir de otra persona, así que tiene contrato. Al abrirlo se
+### El archivo `.kzk`
+
+Un `.kzk` es JSON legible y puede venir de otra persona, así que tiene contrato. Al abrirlo se
 rechaza, con un mensaje que dice qué campo y de qué subproyecto, el archivo que supere estos topes o que
 traiga texto que no se puede mostrar con honestidad:
 
@@ -122,12 +133,12 @@ Codex y no monta las carpetas de afuera hasta que confirmás que confiás en él
 externas y los comandos que declara. Cada comando se aprueba por separado; editarlo vuelve a pedir
 confirmación. Ver [docs/security.md](docs/security.md).
 
-El editor admite UTF-8 hasta 5 MB y resalta el área visible. Las carpetas generadas (`node_modules`, `vendor`, `.git`, `.build`, `dist`, etc.) se omiten del explorador. Los comandos usan zsh de login. Autocompletado semántico, depurador y terminal interactiva quedan pendientes.
+El editor admite UTF-8 hasta 5 MB. Usa Tree-sitter con las gramáticas de CodeEditLanguages para resaltar según la extensión del archivo, incluidos Swift, Dart, JavaScript/JSX, TypeScript/TSX, PHP, SQL, Python, HTML, CSS, JSON y Markdown. Mantiene un árbol incremental por documento fuera del hilo de interfaz y aplica colores únicamente al área visible. Los formatos sin gramática quedan como texto plano; los lenguajes incrustados (por ejemplo JavaScript dentro de HTML) todavía no se analizan por separado. Un análisis que excede 250 ms se interrumpe para mantener acotado el trabajo y deja esa actualización sin colores. Las carpetas generadas (`node_modules`, `vendor`, `.git`, `.build`, `dist`, etc.) se omiten del explorador. Los comandos usan zsh de login. Autocompletado semántico, depurador y terminal interactiva quedan pendientes.
 
 ## Pruebas
 
 ```sh
-xcodebuild -project Krabzik.xcodeproj -scheme Krabzik \
+xcodebuild -project Braket.xcodeproj -scheme Braket \
   -destination 'platform=macOS' -derivedDataPath .build \
   -parallel-testing-enabled NO test
 ```

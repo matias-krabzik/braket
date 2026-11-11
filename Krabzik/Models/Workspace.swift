@@ -4,7 +4,8 @@ import UniformTypeIdentifiers
 extension UTType {
     /// El tipo de documento del proyecto, declarado en Info.plist. Lo usan los paneles de
     /// abrir y guardar.
-    static let krabzikProject = UTType(exportedAs: "com.krabzik.project", conformingTo: .json)
+    static let kzkProject = UTType(exportedAs: "com.krabzik.kzk-project", conformingTo: .json)
+    static let legacyKrabzikProject = UTType(exportedAs: "com.krabzik.project", conformingTo: .json)
 }
 
 /// Qué clase de subproyecto es, y con eso el comando que se propone al agregarlo.
@@ -40,7 +41,7 @@ enum ProjectKind: String, Codable, CaseIterable {
     }
 }
 
-/// Dónde queda una ruta del `.krabzik` respecto del propio archivo. Las externas no
+/// Dónde queda una ruta del `.kzk` respecto del propio archivo. Las externas no
 /// se rechazan —los proyectos legítimos del usuario suelen tener carpetas afuera—
 /// pero no se confía en ellas hasta que el usuario las vea.
 enum PathScope: Equatable {
@@ -48,7 +49,7 @@ enum PathScope: Equatable {
     case external
 }
 
-/// Clasifica una ruta relativa o absoluta respecto del directorio del `.krabzik`.
+/// Clasifica una ruta relativa o absoluta respecto del directorio del `.kzk`.
 /// Resuelve symlinks: uno que apunta afuera cuenta como externo.
 func pathScope(_ path: String, relativeTo workspaceURL: URL) -> PathScope {
     let base = workspaceURL.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL
@@ -59,7 +60,7 @@ func pathScope(_ path: String, relativeTo workspaceURL: URL) -> PathScope {
     return target.path.hasPrefix(base.path + "/") ? .internalToProject : .external
 }
 
-/// Topes del formato `.krabzik`. Son holgados respecto del uso real —el proyecto de
+/// Topes del formato `.kzk`. Son holgados respecto del uso real —el proyecto de
 /// ejemplo tiene tres subproyectos— y están para que un archivo ajeno no pueda degradar
 /// la interfaz. Si aparece un caso legítimo que los supera se sube el número; no se quita
 /// la comprobación. Ver docs/specs/C7-validacion-formato-krabzik.md.
@@ -73,7 +74,7 @@ enum WorkspaceLimits {
 }
 
 extension String {
-    /// Texto admisible en un `.krabzik`. Acá se **rechaza** en vez de sanear: un archivo
+    /// Texto admisible en un `.kzk`. Acá se **rechaza** en vez de sanear: un archivo
     /// con un override bidi en el nombre de un subproyecto miente sobre lo que dice, y el
     /// diálogo de confianza de S1 muestra justamente esos campos. Para lo que viene del
     /// modelo, que no se puede rechazar, está `ModelText`.
@@ -95,9 +96,9 @@ extension String {
     }
 }
 
-/// Un subproyecto dentro del `.krabzik`: una carpeta y, opcionalmente, un comando.
+/// Un subproyecto dentro del `.kzk`: una carpeta y, opcionalmente, un comando.
 ///
-/// `path` puede ser relativo al `.krabzik` o absoluto. Un relativo que salga de la
+/// `path` puede ser relativo al `.kzk` o absoluto. Un relativo que salga de la
 /// carpeta se rechaza al leer (C7); un absoluto se admite y queda clasificado como
 /// externo, que es lo que el modelo de confianza mira antes de montarlo (S1).
 struct CodeProject: Identifiable, Codable, Equatable {
@@ -122,12 +123,13 @@ struct CodeProject: Identifiable, Codable, Equatable {
     }
 }
 
-/// El contenido de un archivo `.krabzik`: nombre, subproyectos, conexiones y scripts.
+/// El contenido de un archivo `.kzk`: nombre, subproyectos, conexiones y scripts.
 ///
 /// Es un formato de entrada de terceros —se puede recibir por mail o clonar— así que
 /// `read(from:)` tiene contrato: topes, texto admisible y rutas que no salgan de la
 /// carpeta. Las contraseñas nunca se serializan acá.
 struct Workspace: Codable, Equatable {
+    static let fileExtension = "kzk"
     var version = 1
     var name: String
     var projects: [CodeProject] = []
@@ -282,7 +284,7 @@ struct Workspace: Codable, Equatable {
         do {
             try checkFormat()
         } catch {
-            assertionFailure("se está escribiendo un .krabzik que la propia lectura rechazaría: "
+            assertionFailure("se está escribiendo un .kzk que la propia lectura rechazaría: "
                 + (error.localizedDescription))
         }
         #endif
@@ -294,10 +296,10 @@ struct Workspace: Codable, Equatable {
 
 /// Todo lo que puede salir mal abriendo un proyecto o un archivo, con el mensaje que
 /// ve el usuario. Los cuatro casos de C7 llevan el campo en el mensaje porque el
-/// `.krabzik` es JSON legible y se puede corregir a mano.
+/// `.kzk` es JSON legible y se puede corregir a mano.
 enum WorkspaceError: LocalizedError, Equatable {
     case unsupportedVersion, duplicateProject, binaryFile, largeFile, externalChange, missingFolder
-    /// Los tres de C7 llevan el campo y el subproyecto en el mensaje: el `.krabzik` es
+    /// Los tres de C7 llevan el campo y el subproyecto en el mensaje: el `.kzk` es
     /// JSON legible y se puede corregir a mano si se sabe dónde mirar.
     case tooManyEntries(String)
     case textTooLong(String)

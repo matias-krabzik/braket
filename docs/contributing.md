@@ -1,4 +1,4 @@
-# Trabajar en Krabzik IDE
+# Trabajar en Braket
 
 ## Control de versiones
 
@@ -7,7 +7,7 @@
 
 ## El proyecto Xcode es generado
 
-`Krabzik.xcodeproj/project.pbxproj` lo produce `scripts/generate_project.py` recorriendo
+`Braket.xcodeproj/project.pbxproj` lo produce `scripts/generate_project.py` recorriendo
 `Krabzik/**/*.swift` y `KrabzikTests/**/*.swift`.
 
 - **No se edita a mano**, ni desde la interfaz de Xcode.

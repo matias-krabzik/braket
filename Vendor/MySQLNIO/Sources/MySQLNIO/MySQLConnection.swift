@@ -10,6 +10,7 @@ public final class MySQLConnection: MySQLDatabase, Sendable {
         database: String,
         password: String? = nil,
         tlsConfiguration: TLSConfiguration? = .makeClientConfiguration(),
+        tlsRequired: Bool = true,
         serverHostname: String? = nil,
         logger: Logger = .init(label: "codes.vapor.mysql"),
         connectTimeout: TimeAmount = .seconds(10),
@@ -52,6 +53,7 @@ public final class MySQLConnection: MySQLDatabase, Sendable {
                         database: database,
                         password: password,
                         tlsConfiguration: tlsConfiguration,
+                        tlsRequired: tlsRequired,
                         serverHostname: serverHostname,
                         done: done
                     )), sequence: sequence),

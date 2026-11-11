@@ -21,7 +21,7 @@ final class FileCommands {
     }
 
     /// `nil` cuando la ruta no se puede ofrecer: en solo lectura no se resuelven rutas
-    /// externas, que es por donde un `.krabzik` ajeno abriría archivos de cualquier parte.
+    /// externas, que es por donde un `.kzk` ajeno abriría archivos de cualquier parte.
     func scriptURL(_ path: String) -> URL? {
         guard let workspaceURL = session.url else { return nil }
         return ScriptLibrary.url(for: path, workspaceURL: workspaceURL, trust: session.trust)

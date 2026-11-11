@@ -18,34 +18,34 @@ final class RecentProjectsTests: XCTestCase {
     func testOrderIsByLastOpening() throws {
         let (defaults, _) = try defaults()
         let store = RecentProjectsStore(defaults: defaults)
-        store.remember(url("/tmp/a.krabzik"))
-        store.remember(url("/tmp/b.krabzik"))
-        store.remember(url("/tmp/c.krabzik"))
-        XCTAssertEqual(store.urls.map(\.lastPathComponent), ["c.krabzik", "b.krabzik", "a.krabzik"])
+        store.remember(url("/tmp/a.kzk"))
+        store.remember(url("/tmp/b.kzk"))
+        store.remember(url("/tmp/c.kzk"))
+        XCTAssertEqual(store.urls.map(\.lastPathComponent), ["c.kzk", "b.kzk", "a.kzk"])
 
         // Reabrir uno lo mueve al frente, no lo duplica.
-        store.remember(url("/tmp/a.krabzik"))
-        XCTAssertEqual(store.urls.map(\.lastPathComponent), ["a.krabzik", "c.krabzik", "b.krabzik"])
+        store.remember(url("/tmp/a.kzk"))
+        XCTAssertEqual(store.urls.map(\.lastPathComponent), ["a.kzk", "c.kzk", "b.kzk"])
         XCTAssertEqual(store.urls.count, 3)
     }
 
     func testStaysBoundedToTen() throws {
         let (defaults, _) = try defaults()
         let store = RecentProjectsStore(defaults: defaults)
-        for index in 0 ..< 15 { store.remember(url("/tmp/p\(index).krabzik")) }
+        for index in 0 ..< 15 { store.remember(url("/tmp/p\(index).kzk")) }
         XCTAssertEqual(store.urls.count, RecentProjectsStore.limit)
-        XCTAssertEqual(store.urls.first?.lastPathComponent, "p14.krabzik")
-        XCTAssertEqual(store.urls.last?.lastPathComponent, "p5.krabzik")
+        XCTAssertEqual(store.urls.first?.lastPathComponent, "p14.kzk")
+        XCTAssertEqual(store.urls.last?.lastPathComponent, "p5.kzk")
     }
 
     func testPathsAreNormalized() throws {
         let (defaults, _) = try defaults()
         let store = RecentProjectsStore(defaults: defaults)
-        store.remember(url("/tmp/sub/../proyecto.krabzik"))
-        XCTAssertEqual(store.urls, [url("/tmp/proyecto.krabzik")])
+        store.remember(url("/tmp/sub/../proyecto.kzk"))
+        XCTAssertEqual(store.urls, [url("/tmp/proyecto.kzk")])
 
         // La misma ruta escrita de otra forma no agrega una entrada.
-        store.remember(url("/tmp/./proyecto.krabzik"))
+        store.remember(url("/tmp/./proyecto.kzk"))
         XCTAssertEqual(store.urls.count, 1)
     }
 
@@ -54,7 +54,7 @@ final class RecentProjectsTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("krabzik-recents-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
-        let project = directory.appendingPathComponent("Proyecto.krabzik")
+        let project = directory.appendingPathComponent("Proyecto.kzk")
         try Workspace(name: "Proyecto").write(to: project)
 
         let store = RecentProjectsStore(defaults: defaults)
@@ -69,22 +69,22 @@ final class RecentProjectsTests: XCTestCase {
     func testSurvivesRelaunch() throws {
         let (defaults, _) = try defaults()
         let store = RecentProjectsStore(defaults: defaults)
-        store.remember(url("/tmp/uno.krabzik"))
-        store.remember(url("/tmp/dos.krabzik"))
+        store.remember(url("/tmp/uno.kzk"))
+        store.remember(url("/tmp/dos.kzk"))
 
         let reabierto = RecentProjectsStore(defaults: defaults)
-        XCTAssertEqual(reabierto.urls.map(\.lastPathComponent), ["dos.krabzik", "uno.krabzik"])
+        XCTAssertEqual(reabierto.urls.map(\.lastPathComponent), ["dos.kzk", "uno.kzk"])
     }
 
     func testStoredDuplicatesAreCollapsedOnLoad() throws {
         let (defaults, _) = try defaults()
         // Un historial guardado por una versión anterior, con repetidos y de más.
-        let guardados = ["/tmp/a.krabzik", "/tmp/./a.krabzik", "/tmp/b.krabzik"]
-            + (0 ..< 12).map { "/tmp/x\($0).krabzik" }
+        let guardados = ["/tmp/a.kzk", "/tmp/./a.kzk", "/tmp/b.kzk"]
+            + (0 ..< 12).map { "/tmp/x\($0).kzk" }
         defaults.set(guardados, forKey: "recentProjects")
 
         let store = RecentProjectsStore(defaults: defaults)
         XCTAssertEqual(store.urls.count, RecentProjectsStore.limit)
-        XCTAssertEqual(store.urls.prefix(2).map(\.lastPathComponent), ["a.krabzik", "b.krabzik"])
+        XCTAssertEqual(store.urls.prefix(2).map(\.lastPathComponent), ["a.kzk", "b.kzk"])
     }
 }

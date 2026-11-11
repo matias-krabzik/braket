@@ -14,7 +14,7 @@ import Observation
 /// proyecto, y `prepareToLeave()`, que es el orden en que se le pregunta al usuario antes
 /// de dejar lo que está abierto.
 ///
-/// Lo que no se puede perder: **abrir un proyecto no ejecuta nada**. Un `.krabzik` que no
+/// Lo que no se puede perder: **abrir un proyecto no ejecuta nada**. Un `.kzk` que no
 /// se abrió antes entra en solo lectura, y de ahí dependen los gates de la sesión (S1).
 ///
 /// Confinado al main actor. Ver docs/specs/C5-dividir-workspacecontroller.md.
@@ -35,6 +35,8 @@ final class WorkspaceController {
     var closingProjectURL: URL?
     var showingProjectWizard = false
     let runner = ProcessRunner()
+    let automations = AutomationController()
+    var automationPanelSelected = false
     let database = DatabaseController()
     let agent: AgentController
     @ObservationIgnored let errors = ErrorCenter()
@@ -133,7 +135,9 @@ final class WorkspaceController {
         if draft.openWhenCreated { guard await prepareToLeave() else { return false } }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        try encoder.encode(project).write(to: draft.url, options: .withoutOverwriting)
+        let data = try encoder.encode(project)
+        try FileManager.default.createDirectory(at: draft.folder, withIntermediateDirectories: true)
+        try data.write(to: draft.url, options: .withoutOverwriting)
         trust.markTrusted(draft.url)
         for item in project.projects where !item.command.isEmpty {
             trust.approve(command: item.command, project: item.id, workspaceURL: draft.url)
@@ -248,8 +252,9 @@ final class WorkspaceController {
             agent.shutdown()
         }
         guard await files.resolveDirty() else { return false }
-        if runner.hasActiveProcesses {
+        if runner.hasActiveProcesses || automations.isRunning {
             guard session.dialogs.confirmStopProcesses() else { return false }
+            automations.cancel()
             runner.stopAll()
         }
         guard await database.prepareToLeave() else { return false }
