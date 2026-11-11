@@ -46,9 +46,8 @@ struct KrabzikApp: App {
             CommandMenu("Proyecto") {
                 Button("Iniciar", action: controller.startAll).keyboardShortcut("r").disabled(controller.runnableProjects.isEmpty)
                 Button("Detener") {
-                    controller.automations.cancel()
                     controller.runner.stopAll()
-                }.keyboardShortcut(".").disabled(!controller.runner.hasActiveProcesses && !controller.automations.isRunning)
+                }.keyboardShortcut(".").disabled(!controller.runner.hasActiveProcesses)
             }
             CommandMenu("SQL") {
                 Button("Abrir script…", action: controller.files.importScripts).disabled(controller.workspace == nil)

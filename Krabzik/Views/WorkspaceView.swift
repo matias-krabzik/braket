@@ -23,7 +23,7 @@ struct WorkspaceView: View {
                                 SQLResultsPanel(execution: document.sqlExecution) { controller.database.resultsVisible = false }
                                     .frame(minHeight: 140, idealHeight: 220, maxHeight: 350)
                             } else if controller.processesVisible {
-                                AutomationBottomPanel(controller: controller)
+                                ProcessPanel(controller: controller)
                                     .frame(minHeight: 150, idealHeight: 240, maxHeight: 440)
                             }
                         }
@@ -65,7 +65,7 @@ struct WorkspaceView: View {
                         if controller.selectedDocument?.language == "SQL" { controller.database.resultsVisible.toggle() }
                         else { controller.processesVisible.toggle() }
                     } label: { Image(systemName: "rectangle.bottomthird.inset.filled") }
-                        .help("Mostrar procesos y automatizaciones")
+                        .help("Mostrar procesos")
                 }
             }
         }

@@ -56,7 +56,6 @@ final class ProjectClosing {
                 processes.append(CodeProject(id: run.id, name: run.name, path: ".", kind: .files, command: ""))
             }
         }
-        if controller.automations.execution?.workspaceURL == url { controller.automations.cancel(automaticallyForce: false) }
         for process in processes where run(for: process.id)?.status.active == true {
             controller.runner.stop(process.id, automaticallyForce: false)
         }

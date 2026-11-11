@@ -16,13 +16,6 @@ struct SettingsView: View {
                 }
             }
             .tabItem { Label("Proyecto", systemImage: "folder") }
-            Group {
-                if let url = controller.workspaceURL {
-                    AutomationSettingsView(controller: controller).id(url)
-                } else {
-                    Text("Abrí un proyecto para configurar automatizaciones.")
-                }
-            }.tabItem { Label("Automatizaciones", systemImage: "list.bullet.rectangle") }
             UpdatesSettingsView().tabItem { Label("Actualizaciones", systemImage: "arrow.triangle.2.circlepath") }
         }
         .padding(12)

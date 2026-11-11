@@ -35,8 +35,6 @@ final class WorkspaceController {
     var closingProjectURL: URL?
     var showingProjectWizard = false
     let runner = ProcessRunner()
-    let automations = AutomationController()
-    var automationPanelSelected = false
     let database = DatabaseController()
     let agent: AgentController
     @ObservationIgnored let errors = ErrorCenter()
@@ -252,9 +250,8 @@ final class WorkspaceController {
             agent.shutdown()
         }
         guard await files.resolveDirty() else { return false }
-        if runner.hasActiveProcesses || automations.isRunning {
+        if runner.hasActiveProcesses {
             guard session.dialogs.confirmStopProcesses() else { return false }
-            automations.cancel()
             runner.stopAll()
         }
         guard await database.prepareToLeave() else { return false }
