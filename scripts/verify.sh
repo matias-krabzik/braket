@@ -150,12 +150,18 @@ else
   fi
   mkdir -p .build/Logs/Verification
   log=$(mktemp "$PWD/.build/Logs/Verification/xcodebuild.XXXXXX")
+  signing_args=()
+  if [[ "${GITHUB_ACTIONS:-false}" == "true" ]]; then
+    # Los runners no tienen certificados privados; XCTest admite firma ad hoc.
+    # Esta excepción solo afecta al comando de pruebas, nunca a una distribución.
+    signing_args=(CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= CODE_SIGN_STYLE=Manual)
+  fi
   # Tope por prueba: un diálogo modal que se cuele en una prueba cuelga la corrida
   # indefinidamente. Con el tope falla en 2 minutos y dice cuál fue.
   if xcodebuild -project Braket.xcodeproj -scheme Braket -destination 'platform=macOS' \
        -derivedDataPath .build -parallel-testing-enabled NO \
        -test-timeouts-enabled YES -default-test-execution-time-allowance 120 \
-       -maximum-test-execution-time-allowance 300 test > "$log" 2>&1; then
+       -maximum-test-execution-time-allowance 300 "${signing_args[@]}" test > "$log" 2>&1; then
     ok "$(grep -E 'Executed [0-9]+ tests' "$log" | tail -1 | sed 's/^[[:space:]]*//')"
   else
     fail "las pruebas no pasaron; log en $log"
