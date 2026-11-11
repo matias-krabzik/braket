@@ -148,7 +148,8 @@ else
   else
     info "sin .build/mysql-test-port: se saltan las 6 pruebas de MySQL real (ver README)"
   fi
-  log=$(mktemp -t krabzik-verify)
+  mkdir -p .build/Logs/Verification
+  log=$(mktemp "$PWD/.build/Logs/Verification/xcodebuild.XXXXXX")
   # Tope por prueba: un diálogo modal que se cuele en una prueba cuelga la corrida
   # indefinidamente. Con el tope falla en 2 minutos y dice cuál fue.
   if xcodebuild -project Braket.xcodeproj -scheme Braket -destination 'platform=macOS' \
@@ -158,10 +159,13 @@ else
     ok "$(grep -E 'Executed [0-9]+ tests' "$log" | tail -1 | sed 's/^[[:space:]]*//')"
   else
     fail "las pruebas no pasaron; log en $log"
-    # Solo fallos de XCTest y errores del compilador: el log trae mucho ruido del
-    # sistema que matchea "error" y tapa el fallo real.
-    grep -E "^[^ ]+\.swift:[0-9]+: error:|' failed \(|^.*: error: unable to" "$log" \
-      | sed 's|.*/KrabzikTests/|KrabzikTests/|' | head -10 | sed 's/^/      /'
+    # Incluye errores de firma, resolución de paquetes y compilación con columna.
+    # El final conserva contexto incluso cuando Xcode usa otro formato de error.
+    info "Errores detectados:"
+    grep -E "error:|' failed \(|Testing failed:|TEST FAILED" "$log" \
+      | sed -n '1,30p' | sed 's/^/      /'
+    info "Últimas 60 líneas de xcodebuild (log completo en el artefacto logs de CI):"
+    tail -60 "$log" | sed 's/^/      /'
   fi
 fi
 
