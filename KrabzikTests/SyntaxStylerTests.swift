@@ -85,6 +85,71 @@ import XCTest
         XCTAssertTrue(plain.isEmpty)
     }
 
+    func testHTMLScriptsAndStylesUseTheirOwnGrammars() async {
+        let code = "<h1>🦀 café</h1><script>const total = 42; // nota\n</script>" +
+            "<style>body { width: 12px; color: #abc; }</style><p>const plain = 7;</p>"
+        let result = await spans(code, extension: "html")
+        XCTAssertEqual(color("h1", in: code, spans: result), EditorPalette.blue)
+        XCTAssertEqual(color("const total", in: code, spans: result), EditorPalette.purple)
+        XCTAssertEqual(color("42", in: code, spans: result), EditorPalette.orange)
+        XCTAssertEqual(color("nota", in: code, spans: result), EditorPalette.muted)
+        XCTAssertEqual(color("body", in: code, spans: result), EditorPalette.blue)
+        XCTAssertEqual(color("12", in: code, spans: result), EditorPalette.orange)
+        XCTAssertEqual(color("abc", in: code, spans: result), EditorPalette.green)
+        XCTAssertNil(color("const plain", in: code, spans: result))
+    }
+
+    func testHTMLVisibleRangeRetainsEmbeddedCommentContextAndBlockIsolation() async {
+        let code = "<script>/* comentario\nconst hidden = 42; */</script>" +
+            "<script>/* sin cerrar</script><script>const visible = 1;</script>"
+        let syntax = SyntaxHighlighter(text: code, url: URL(fileURLWithPath: "/tmp/test.html"))
+        let range = (code as NSString).range(of: "const hidden = 42;")
+        let result = await syntax.highlights(in: range)
+        XCTAssertEqual(color("const hidden", in: code, spans: result), EditorPalette.muted)
+        XCTAssertTrue(result.allSatisfy { NSIntersectionRange($0.range, range) == $0.range })
+        let all = await syntax.highlights(in: NSRange(location: 0, length: code.utf16.count))
+        XCTAssertEqual(color("const visible", in: code, spans: all), EditorPalette.purple)
+    }
+
+    func testHTMLUnfinishedAndEmptyEmbeddedBlocks() async {
+        for code in ["<script></script><script>const value = 42;", "<style></style><style>p { width: 42px;"] {
+            let result = await spans(code, extension: "html")
+            XCTAssertEqual(color("42", in: code, spans: result), EditorPalette.orange)
+        }
+    }
+
+    func testHTMLScriptTypesAndComments() async {
+        let code = "<script TYPE='module'>export const total = 1;</script>" +
+            "<script type='application/ld+json'>{\"count\": 42}</script>" +
+            "<script type='text/template'>const plain = 7;</script>" +
+            "<!-- <script>const comment = 2;</script> -->"
+        let result = await spans(code, extension: "html")
+        XCTAssertEqual(color("export", in: code, spans: result), EditorPalette.purple)
+        XCTAssertEqual(color("42", in: code, spans: result), EditorPalette.orange)
+        XCTAssertNil(color("const plain", in: code, spans: result))
+        XCTAssertEqual(color("const comment", in: code, spans: result), EditorPalette.muted)
+    }
+
+    func testHTMLEmbeddedEditsMatchFreshParseIncludingUnicodeAndUndo() async {
+        var code = "<p>🦀</p><script>const count = 42;</script><style>p { width: 12px; }</style>"
+        let syntax = SyntaxHighlighter(text: code, url: URL(fileURLWithPath: "/tmp/test.html"))
+        _ = await syntax.highlights(in: NSRange(location: 0, length: code.utf16.count))
+        let edits = [("🦀", "🐙\n🎉"), ("42", "'café 🦀'"), ("12", "25"),
+                     ("const count", "/*\nconst count"), ("/*\n", ""), ("'café 🦀'", "42"),
+                     ("<script>", "<script type='text/template'>"),
+                     ("<script type='text/template'>", "<script>"),
+                     ("<style>p { width: 25px; }</style>", "")]
+        for (old, replacement) in edits {
+            let range = (code as NSString).range(of: old)
+            XCTAssertNotEqual(range.location, NSNotFound)
+            syntax.replace(range, with: replacement)
+            code = (code as NSString).replacingCharacters(in: range, with: replacement)
+            let incremental = await syntax.highlights(in: NSRange(location: 0, length: code.utf16.count))
+            let fresh = await spans(code, extension: "html")
+            XCTAssertEqual(incremental.map { "\($0.range):\($0.token)" }, fresh.map { "\($0.range):\($0.token)" }, old)
+        }
+    }
+
     func testApplyingColorsPreservesTextSelectionAndUndo() async throws {
         let document = try EditorDocument(url: URL(fileURLWithPath: "/tmp/test.js"), data: Data("const x = 1;".utf8))
         let surface = EditorSurface(document: document)
