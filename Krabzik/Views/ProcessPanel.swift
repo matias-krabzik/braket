@@ -30,7 +30,13 @@ struct ProcessPanel: View {
                 }
                 .frame(width: 210).background(Theme.bar)
                 Rectangle().fill(Theme.border).frame(width: 1)
-                if let project = controller.selectedProject, let run = controller.runner.runs[project.id] {
+                if controller.workflowVisible {
+                    ScrollView {
+                        Text(controller.workflows.log.isEmpty ? "Todavía no se ejecutó este flujo." : controller.workflows.log)
+                            .font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                    }
+                } else if let project = controller.selectedProject, let run = controller.runner.runs[project.id] {
                     ConsoleView(run: run, theme: AppSettings.shared.theme).id(project.id)
                 } else { Theme.background }
             }

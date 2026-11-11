@@ -1,12 +1,30 @@
 import SwiftUI
 
+private struct WorkflowPortSource: Equatable {
+    let nodeID: UUID
+    let isNo: Bool
+}
+
 struct WorkflowView: View {
     @Bindable var controller: WorkspaceController
     let workspaceURL: URL
     @State private var selectedNode: UUID?
+    @State private var zoom: CGFloat = 1
+    @State private var zoomAtGestureStart: CGFloat?
+    @State private var pan: CGSize = .zero
+    @State private var livePan: CGSize = .zero
+    @State private var draggedNode: UUID?
+    @State private var liveNodeDrag: CGSize = .zero
+    @State private var pendingConnection: WorkflowPortSource?
+    @State private var connectionPreview: CGPoint?
+    @State private var hoveredInput: UUID?
 
     private var flow: Workflow? { controller.workflows.selected }
     private var index: Int? { controller.workflows.file.workflows.firstIndex { $0.id == controller.workflows.selectedID } }
+    private var canEdit: Bool { !controller.isReadOnly && !controller.workflows.isRunning }
+    private var selectedTriggerKind: WorkflowKind? {
+        flow?.nodes.first(where: { $0.id == selectedNode && $0.kind.isTrigger })?.kind
+    }
 
     var body: some View {
         @Bindable var model = controller.workflows
@@ -15,94 +33,306 @@ struct WorkflowView: View {
                 Image(systemName: "point.3.connected.trianglepath.dotted").foregroundStyle(Theme.accent)
                 Text(flow?.name ?? "Automatización").font(.system(size: 12, weight: .semibold))
                 Spacer()
-                Picker("Modo", selection: $model.editing) {
-                    Text("Ejecución").tag(false)
-                    Text("Editar").tag(true)
-                }.pickerStyle(.segmented).labelsHidden().frame(width: 180)
-                if model.editing {
-                    Menu { ForEach(WorkflowKind.allCases.filter { $0 != .start }, id: \.self) { kind in
+                Menu { ForEach(WorkflowKind.allCases.filter(available), id: \.self) { kind in
                         Button(kind.title) { add(kind) }
                     } } label: { Label("Bloque", systemImage: "plus") }
-                    Button("Guardar") { model.save() }
-                } else {
-                    Button(model.isRunning ? "Detener" : "Ejecutar") {
-                        if model.isRunning { model.stop() }
-                        else { model.run(workspace: workspaceURL, root: controller.workflowRoot,
-                                         runner: controller.runner, trusted: !controller.isReadOnly) }
-                    }.disabled(controller.isReadOnly)
-                }
+                    .disabled(!canEdit)
+                Button("Guardar") { model.save() }.disabled(!canEdit)
+                Button(model.isRunning ? "Detener" : selectedTriggerKind == .event || selectedTriggerKind == .schedule
+                    ? "Probar" : "Ejecutar") {
+                    if model.isRunning { model.stop() }
+                    else { model.save()
+                        if model.error.isEmpty {
+                            model.run(workspace: workspaceURL, root: controller.workflowRoot,
+                                      runner: controller.runner, trusted: !controller.isReadOnly,
+                                      trigger: selectedTriggerKind ?? .start)
+                        }
+                    }
+                }.disabled(controller.isReadOnly || (!model.isRunning &&
+                    flow?.nodes.contains { $0.kind == (selectedTriggerKind ?? .start) } != true))
             }.controlSize(.small).padding(.horizontal, 12).frame(height: 36).background(Theme.bar)
             Divider()
-            HStack(spacing: 0) {
-                GeometryReader { geometry in
-                    let scale = min(1, geometry.size.width / 1100, geometry.size.height / 400)
-                    ZStack(alignment: .topLeading) {
-                        Color.clear.frame(width: 1100, height: 400)
-                        if let flow {
-                            Canvas { context, _ in
-                                for node in flow.nodes {
-                                    for (destination, color) in [(node.next, node.kind == .decision ? Color.green : Theme.accent),
-                                                                 (node.no, Color.orange)] {
-                                        guard let destination,
-                                              let target = flow.nodes.first(where: { $0.id == destination }) else { continue }
-                                        var path = Path()
-                                        let start = CGPoint(x: node.x + 170, y: node.y + 27)
-                                        let end = CGPoint(x: target.x, y: target.y + 27)
-                                        path.move(to: start)
-                                        path.addCurve(to: end, control1: CGPoint(x: start.x + 45, y: start.y),
-                                                      control2: CGPoint(x: end.x - 45, y: end.y))
-                                        context.stroke(path, with: .color(color.opacity(0.7)), lineWidth: 2)
+            GeometryReader { geometry in
+                ZStack(alignment: .topLeading) {
+                    Canvas { context, size in
+                        drawDots(in: &context, size: size)
+                        drawConnections(in: &context, size: size)
+                    }
+                    .contentShape(Rectangle())
+                    .gesture(DragGesture(minimumDistance: 3)
+                        .onChanged { livePan = $0.translation }
+                        .onEnded { pan.width += $0.translation.width
+                            pan.height += $0.translation.height
+                            livePan = .zero })
+                    .onTapGesture {
+                        selectedNode = nil
+                        pendingConnection = nil
+                        connectionPreview = nil
+                    }
+                    if let flow {
+                        ForEach(flow.nodes) { node in
+                            WorkflowNodeCard(node: node, selected: selectedNode == node.id,
+                                             status: model.visited[node.id], active: model.activeNodeID == node.id)
+                                .scaleEffect(zoom)
+                                .position(nodeCenter(node, size: geometry.size))
+                                .onTapGesture { selectedNode = node.id }
+                                .gesture(DragGesture(minimumDistance: 3)
+                                    .onChanged { value in
+                                        guard canEdit else { return }
+                                        selectedNode = node.id
+                                        draggedNode = node.id
+                                        liveNodeDrag = value.translation
                                     }
-                                }
-                            }.frame(width: 1100, height: 400)
-                            ForEach(flow.nodes) { node in
-                                WorkflowNodeCard(node: node, selected: selectedNode == node.id,
-                                                 status: model.visited[node.id], active: model.activeNodeID == node.id)
-                                    .offset(x: node.x, y: node.y)
-                                    .onTapGesture { selectedNode = node.id }
-                                    .gesture(model.editing ? DragGesture(minimumDistance: 4).onEnded { gesture in
-                                        move(node.id, dx: gesture.translation.width, dy: gesture.translation.height)
-                                    } : nil)
+                                    .onEnded { value in
+                                        guard canEdit else { return }
+                                        move(node.id, dx: value.translation.width / zoom,
+                                             dy: value.translation.height / zoom)
+                                        draggedNode = nil
+                                        liveNodeDrag = .zero
+                                    })
+                        }
+                        ForEach(flow.nodes.filter { !$0.kind.isTrigger }) { node in
+                            inputPort(for: node, size: geometry.size)
+                                .position(inputPoint(node, size: geometry.size))
+                                .onTapGesture { connect(to: node.id) }
+                        }
+                        ForEach(flow.nodes.filter { $0.kind != .end }) { node in
+                            outputPort(for: node, isNo: false, size: geometry.size)
+                                .position(outputPoint(node, isNo: false, size: geometry.size))
+                            if node.kind == .decision {
+                                outputPort(for: node, isNo: true, size: geometry.size)
+                                    .position(outputPoint(node, isNo: true, size: geometry.size))
                             }
                         }
-                    }.frame(width: 1100, height: 400, alignment: .topLeading)
-                        .scaleEffect(scale, anchor: .topLeading)
-                        .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
-                        .background(Theme.background)
+                    }
+                    VStack {
+                        Spacer()
+                        HStack(spacing: 4) {
+                            Button { zoom = max(0.65, zoom - 0.1) } label: { Image(systemName: "minus") }
+                            Text("\(Int(zoom * 100)) %").monospacedDigit().frame(width: 48)
+                            Button { zoom = min(1.6, zoom + 0.1) } label: { Image(systemName: "plus") }
+                        }
+                        .font(.system(size: 11)).buttonStyle(.borderless)
+                        .padding(7).background(Theme.bar, in: RoundedRectangle(cornerRadius: 7))
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .padding(12)
+                    }
                 }
-                if let index, let nodeIndex = model.file.workflows[index].nodes.firstIndex(where: { $0.id == selectedNode }) {
-                    Divider()
-                    WorkflowInspector(node: $model.file.workflows[index].nodes[nodeIndex],
-                                      choices: model.file.workflows[index].nodes, editing: model.editing,
-                                      remove: { remove(model.file.workflows[index].nodes[nodeIndex].id) })
-                        .frame(width: 270).background(Theme.bar)
-                }
+                .coordinateSpace(name: "workflowCanvas")
+                .background(Theme.background)
+                .simultaneousGesture(MagnificationGesture()
+                    .onChanged { value in
+                        if zoomAtGestureStart == nil { zoomAtGestureStart = zoom }
+                        zoom = min(1.6, max(0.65, (zoomAtGestureStart ?? zoom) * value))
+                    }
+                    .onEnded { _ in zoomAtGestureStart = nil })
+            }
+            if let index, let nodeIndex = model.file.workflows[index].nodes.firstIndex(where: { $0.id == selectedNode }) {
+                Divider()
+                WorkflowInspector(node: $model.file.workflows[index].nodes[nodeIndex],
+                                  choices: model.file.workflows[index].nodes, canEdit: canEdit,
+                                  rootURL: controller.workflowRoot,
+                                  remove: { remove(model.file.workflows[index].nodes[nodeIndex].id) },
+                                  close: { selectedNode = nil })
+                    .id(model.file.workflows[index].nodes[nodeIndex].id)
+                    .frame(height: inspectorHeight(for: model.file.workflows[index].nodes[nodeIndex].kind))
+                    .background(Theme.bar)
             }
         }.onAppear { model.configure(workspaceURL, root: controller.workflowRoot) }
+            .onChange(of: model.selectedID) { _, _ in
+                selectedNode = nil
+                pendingConnection = nil
+            }
+    }
+
+    private func available(_ kind: WorkflowKind) -> Bool {
+        !kind.isTrigger || flow?.nodes.contains(where: { $0.kind == kind }) != true
+    }
+
+    private func inspectorHeight(for kind: WorkflowKind) -> CGFloat {
+        switch kind {
+        case .script: 360
+        case .decision: 215
+        case .end: 150
+        case .start, .event, .schedule: 250
+        }
+    }
+
+    private func nodeCenter(_ node: WorkflowNode, size: CGSize) -> CGPoint {
+        let drag = draggedNode == node.id ? liveNodeDrag : .zero
+        return CGPoint(x: (CGFloat(node.x) + (node.kind.isTrigger ? 30 : halfWidth(of: node)) - 550) * zoom
+                        + size.width / 2 + pan.width + livePan.width + drag.width,
+                       y: (CGFloat(node.y) + (node.kind.isTrigger ? 30 : 27) - 200) * zoom
+                        + size.height / 2 + pan.height + livePan.height + drag.height)
+    }
+
+    private func halfWidth(of node: WorkflowNode) -> CGFloat { node.kind == .decision ? 100 : 85 }
+
+    private func inputPoint(_ node: WorkflowNode, size: CGSize) -> CGPoint {
+        let center = nodeCenter(node, size: size)
+        return CGPoint(x: center.x - halfWidth(of: node) * zoom, y: center.y)
+    }
+
+    private func outputPoint(_ node: WorkflowNode, isNo: Bool, size: CGSize) -> CGPoint {
+        let center = nodeCenter(node, size: size)
+        return CGPoint(x: center.x + (node.kind.isTrigger ? 30 : halfWidth(of: node)) * zoom,
+                       y: center.y + (node.kind == .decision ? (isNo ? 12 : -12) * zoom : 0))
+    }
+
+    private func inputPort(for node: WorkflowNode, size: CGSize) -> some View {
+        Circle()
+            .fill(Theme.background)
+            .frame(width: 15 * zoom, height: 15 * zoom)
+            .overlay(Circle().stroke(hoveredInput == node.id ? Theme.accent : Theme.accent.opacity(0.8),
+                                     lineWidth: hoveredInput == node.id ? 3 : 2))
+            .frame(width: 30, height: 30)
+            .contentShape(Circle())
+            .help(pendingConnection == nil ? "Entrada de \(node.title)" : "Conectar con \(node.title)")
+    }
+
+    private func outputPort(for node: WorkflowNode, isNo: Bool, size: CGSize) -> some View {
+        let source = WorkflowPortSource(nodeID: node.id, isNo: isNo)
+        let color: Color = node.kind == .decision ? (isNo ? .red : .green) : Theme.accent
+        return Image(systemName: pendingConnection == source ? "arrow.right" : "plus")
+            .font(.system(size: 11, weight: .bold))
+            .foregroundStyle(color)
+            .frame(width: 20 * zoom, height: 20 * zoom)
+            .background(Theme.background, in: Circle())
+            .overlay(Circle().stroke(color, lineWidth: 2))
+            .frame(width: 32, height: 32)
+            .contentShape(Circle())
+            .onTapGesture {
+                guard canEdit else { return }
+                pendingConnection = pendingConnection == source ? nil : source
+                connectionPreview = nil
+            }
+            .gesture(DragGesture(minimumDistance: 3, coordinateSpace: .named("workflowCanvas"))
+                .onChanged { value in
+                    guard canEdit else { return }
+                    pendingConnection = source
+                    connectionPreview = value.location
+                    hoveredInput = dropTarget(at: value.location, size: size)
+                }
+                .onEnded { value in
+                    guard canEdit else { return }
+                    if let target = dropTarget(at: value.location, size: size) { connect(to: target) }
+                    connectionPreview = nil
+                    hoveredInput = nil
+                })
+            .help(node.kind == .decision ? (isNo ? "Conectar salida No" : "Conectar salida Sí")
+                  : "Conectar salida de \(node.title)")
+    }
+
+    private func dropTarget(at point: CGPoint, size: CGSize) -> UUID? {
+        flow?.nodes.filter { !$0.kind.isTrigger }.first { node in
+            let input = inputPoint(node, size: size)
+            return hypot(input.x - point.x, input.y - point.y) <= 30
+        }?.id
+    }
+
+    private func connect(to targetID: UUID) {
+        guard canEdit, let pendingConnection, let index else { return }
+        if controller.workflows.file.workflows[index]
+            .connect(from: pendingConnection.nodeID, isNo: pendingConnection.isNo, to: targetID) {
+            self.pendingConnection = nil
+            connectionPreview = nil
+            hoveredInput = nil
+        }
+    }
+
+    private func drawDots(in context: inout GraphicsContext, size: CGSize) {
+        let step = 24 * zoom
+        let xOffset = (size.width / 2 + pan.width + livePan.width - 550 * zoom)
+            .truncatingRemainder(dividingBy: step)
+        let yOffset = (size.height / 2 + pan.height + livePan.height - 200 * zoom)
+            .truncatingRemainder(dividingBy: step)
+        for x in stride(from: xOffset, through: size.width, by: step) {
+            for y in stride(from: yOffset, through: size.height, by: step) {
+                context.fill(Path(ellipseIn: CGRect(x: x, y: y, width: 2, height: 2)),
+                             with: .color(Theme.accent.opacity(0.20)))
+            }
+        }
+    }
+
+    private func drawConnections(in context: inout GraphicsContext, size: CGSize) {
+        guard let flow else { return }
+        for node in flow.nodes {
+            for (destination, isNo, color) in [(node.next, false, node.kind == .decision ? Color.green : Theme.accent),
+                                               (node.no, true, Color.red)] {
+                guard let destination, let target = flow.nodes.first(where: { $0.id == destination }) else { continue }
+                drawArrow(in: &context, from: outputPoint(node, isNo: isNo, size: size),
+                          to: inputPoint(target, size: size), color: color,
+                          targetWidth: halfWidth(of: target) * 2 * zoom)
+            }
+        }
+        if let pendingConnection, let source = flow.nodes.first(where: { $0.id == pendingConnection.nodeID }) {
+            let start = outputPoint(source, isNo: pendingConnection.isNo, size: size)
+            let end = connectionPreview ?? CGPoint(x: start.x + 65 * zoom, y: start.y)
+            let color: Color = source.kind == .decision ? (pendingConnection.isNo ? .red : .green) : Theme.accent
+            drawArrow(in: &context, from: start, to: end, color: color)
+        }
+    }
+
+    private func drawArrow(in context: inout GraphicsContext, from start: CGPoint, to end: CGPoint,
+                           color: Color, targetWidth: CGFloat = 0) {
+        var path = Path()
+        path.move(to: start)
+        if end.x < start.x + 24 * zoom {
+            let direction: CGFloat = end.y >= start.y ? 1 : -1
+            let right = max(start.x, end.x + targetWidth) + 55 * zoom
+            let outsideY = end.y + direction * 82 * zoom
+            let left = end.x - 55 * zoom
+            let corner = 14 * zoom
+            path.addLine(to: CGPoint(x: right - corner, y: start.y))
+            path.addQuadCurve(to: CGPoint(x: right, y: start.y + direction * corner),
+                              control: CGPoint(x: right, y: start.y))
+            path.addLine(to: CGPoint(x: right, y: outsideY - direction * corner))
+            path.addQuadCurve(to: CGPoint(x: right - corner, y: outsideY),
+                              control: CGPoint(x: right, y: outsideY))
+            path.addLine(to: CGPoint(x: left + corner, y: outsideY))
+            path.addQuadCurve(to: CGPoint(x: left, y: outsideY - direction * corner),
+                              control: CGPoint(x: left, y: outsideY))
+            path.addLine(to: CGPoint(x: left, y: end.y + direction * corner))
+            path.addQuadCurve(to: CGPoint(x: left + corner, y: end.y),
+                              control: CGPoint(x: left, y: end.y))
+            path.addLine(to: end)
+        } else {
+            let control = max(30, abs(end.x - start.x) * 0.35)
+            path.addCurve(to: end, control1: CGPoint(x: start.x + control, y: start.y),
+                          control2: CGPoint(x: end.x - control, y: end.y))
+        }
+        context.stroke(path, with: .color(color.opacity(0.85)), lineWidth: 2)
+        var tip = Path()
+        tip.move(to: CGPoint(x: end.x - 8, y: end.y - 4))
+        tip.addLine(to: end)
+        tip.addLine(to: CGPoint(x: end.x - 8, y: end.y + 4))
+        context.stroke(tip, with: .color(color.opacity(0.85)), style: StrokeStyle(lineWidth: 2,
+                                                                                  lineCap: .round, lineJoin: .round))
     }
 
     private func add(_ kind: WorkflowKind) {
-        guard let index else { return }
-        let node = WorkflowNode(kind: kind, title: kind.title, x: 180 + Double(flow?.nodes.count ?? 0) * 75, y: 360)
+        guard let index, available(kind) else { return }
+        let triggerCount = flow?.nodes.filter { $0.kind.isTrigger }.count ?? 0
+        let node = WorkflowNode(kind: kind, title: kind.title,
+                                x: kind.isTrigger ? 70 : 180 + Double(flow?.nodes.count ?? 0) * 75,
+                                y: kind.isTrigger ? 220 + Double(triggerCount) * 90 : 360)
         controller.workflows.file.workflows[index].nodes.append(node)
         selectedNode = node.id
     }
 
     private func move(_ id: UUID, dx: CGFloat, dy: CGFloat) {
         guard let index, let nodeIndex = controller.workflows.file.workflows[index].nodes.firstIndex(where: { $0.id == id }) else { return }
-        controller.workflows.file.workflows[index].nodes[nodeIndex].x = max(0,
-                                                                            min(900,
-                                                                                controller.workflows.file.workflows[index].nodes[nodeIndex]
-                                                                                .x + dx))
-        controller.workflows.file.workflows[index].nodes[nodeIndex].y = max(0,
-                                                                            min(510,
-                                                                                controller.workflows.file.workflows[index].nodes[nodeIndex]
-                                                                                .y + dy))
+        controller.workflows.file.workflows[index].nodes[nodeIndex].x += Double(dx)
+        controller.workflows.file.workflows[index].nodes[nodeIndex].y += Double(dy)
     }
 
     private func remove(_ id: UUID) {
-        guard let index else { return }
-        controller.workflows.file.workflows[index].nodes.removeAll { $0.id == id && $0.kind != .start }
+        guard let index,
+              let node = controller.workflows.file.workflows[index].nodes.first(where: { $0.id == id }) else { return }
+        if node.kind.isTrigger && controller.workflows.file.workflows[index].nodes.filter({ $0.kind.isTrigger }).count == 1 {
+            return
+        }
+        controller.workflows.file.workflows[index].nodes.removeAll { $0.id == id }
         for nodeIndex in controller.workflows.file.workflows[index].nodes.indices {
             if controller.workflows.file.workflows[index].nodes[nodeIndex].next == id {
                 controller.workflows.file.workflows[index].nodes[nodeIndex].next = nil
@@ -124,62 +354,307 @@ private struct WorkflowNodeCard: View {
     private var color: Color {
         switch node.kind {
         case .start: return .green
+        case .event: return .cyan
+        case .schedule: return .indigo
         case .script: return Theme.accent
         case .decision: return .orange
         case .end: return .purple
         }
     }
 
+    private var symbol: String {
+        switch node.kind {
+        case .start: "play.fill"
+        case .event: "bolt.fill"
+        case .schedule: "clock.fill"
+        case .script: "terminal"
+        case .decision: "arrow.triangle.branch"
+        case .end: "stop.fill"
+        }
+    }
+
+    private var finishColor: Color {
+        guard let status else { return .purple }
+        return status == .exited(0) ? .green : .red
+    }
+
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: node.kind == .start ? "play.fill" : node.kind == .script ? "terminal" : node
-                .kind == .decision ? "arrow.triangle.branch" : "checkmark.flag")
-                .foregroundStyle(color)
-            Text(node.title).lineLimit(1)
-            Spacer(minLength: 0)
-            if let status { Image(systemName: status == .exited(0) ? "checkmark.circle.fill" : "xmark.circle.fill")
-                .foregroundStyle(status == .exited(0) ? .green : .red) }
-        }.font(.system(size: 11, weight: .medium)).padding(.horizontal, 10).frame(width: 170, height: 54)
-            .background(color.opacity(active ? 0.24 : 0.10), in: RoundedRectangle(cornerRadius: 7))
-            .overlay(RoundedRectangle(cornerRadius: 7).stroke(color.opacity(selected ? 0.95 : 0.5), lineWidth: selected ? 2 : 1))
+        Group {
+            if node.kind.isTrigger {
+                Image(systemName: symbol)
+                    .font(.system(size: 23, weight: .semibold))
+                    .foregroundStyle(color)
+                    .frame(width: 60, height: 60)
+                    .background(color.opacity(active ? 0.24 : 0.10), in: Circle())
+                    .overlay(Circle().stroke(color.opacity(selected ? 0.95 : 0.5), lineWidth: selected ? 2 : 1))
+                    .help(node.title)
+            } else if node.kind == .end {
+                HStack(spacing: 9) {
+                    Image(systemName: status == nil ? "stop.fill" : status == .exited(0) ? "checkmark" : "xmark")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 29, height: 29)
+                        .background(finishColor, in: Circle())
+                    Text(node.title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 10).frame(width: 170, height: 54)
+                .background(LinearGradient(colors: [finishColor.opacity(0.19), finishColor.opacity(0.08)],
+                                           startPoint: .topLeading, endPoint: .bottomTrailing), in: Capsule())
+                .overlay(Capsule().stroke(finishColor.opacity(selected ? 0.95 : 0.55),
+                                          lineWidth: selected ? 2 : 1))
+                .shadow(color: finishColor.opacity(0.13), radius: 7, y: 3)
+            } else {
+                HStack(spacing: 8) {
+                    if node.kind == .decision {
+                        DecisionBranchIcon()
+                    } else {
+                        Image(systemName: symbol)
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(color)
+                            .frame(width: 25, height: 25)
+                    }
+                    Text(node.title).lineLimit(1)
+                    Spacer(minLength: 0)
+                    if let status {
+                        Image(systemName: status == .exited(0) ? "checkmark.circle.fill" : "xmark.circle.fill")
+                            .foregroundStyle(status == .exited(0) ? .green : .red)
+                    }
+                }
+                .font(.system(size: 11, weight: .medium)).padding(.horizontal, 10)
+                .frame(width: node.kind == .decision ? 200 : 170, height: 54)
+                .background(color.opacity(active ? 0.24 : 0.10), in: RoundedRectangle(cornerRadius: 7))
+                .overlay(RoundedRectangle(cornerRadius: 7)
+                    .stroke(color.opacity(selected ? 0.95 : 0.5), lineWidth: selected ? 2 : 1))
+            }
+        }
+    }
+}
+
+private struct DecisionBranchIcon: View {
+    var body: some View {
+        Canvas { context, _ in
+            var stem = Path()
+            stem.move(to: CGPoint(x: 2, y: 12.5))
+            stem.addLine(to: CGPoint(x: 12, y: 12.5))
+            context.stroke(stem, with: .color(.orange), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+
+            var yes = Path()
+            yes.move(to: CGPoint(x: 12, y: 12.5))
+            yes.addLine(to: CGPoint(x: 20, y: 5))
+            yes.addLine(to: CGPoint(x: 28, y: 5))
+            context.stroke(yes, with: .color(.green), style: StrokeStyle(lineWidth: 2.5,
+                                                                         lineCap: .round, lineJoin: .round))
+
+            var no = Path()
+            no.move(to: CGPoint(x: 12, y: 12.5))
+            no.addLine(to: CGPoint(x: 20, y: 20))
+            no.addLine(to: CGPoint(x: 28, y: 20))
+            context.stroke(no, with: .color(.red), style: StrokeStyle(lineWidth: 2.5,
+                                                                      lineCap: .round, lineJoin: .round))
+        }
+        .frame(width: 29, height: 25)
+        .accessibilityLabel("Bifurcación Sí y No")
     }
 }
 
 private struct WorkflowInspector: View {
     @Binding var node: WorkflowNode
     let choices: [WorkflowNode]
-    let editing: Bool
+    let canEdit: Bool
+    let rootURL: URL
     let remove: () -> Void
+    let close: () -> Void
+
+    private var summary: String {
+        switch node.kind {
+        case .script: node.command.split(separator: "\n").first.map(String.init) ?? "Sin comando"
+        case .decision: "Dos resultados"
+        case .end: "Finaliza el flujo"
+        case .start: "Inicio manual"
+        case .event: "Disparador por evento"
+        case .schedule: "Disparador por horario"
+        }
+    }
+
+    private var symbol: String {
+        switch node.kind {
+        case .script: "terminal"
+        case .decision: "arrow.triangle.branch"
+        case .end: "stop.fill"
+        case .start: "play.fill"
+        case .event: "bolt.fill"
+        case .schedule: "clock.fill"
+        }
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(node.kind.title).font(.headline)
-            TextField("Nombre", text: $node.title).disabled(!editing)
-            if node.kind == .script {
-                Text("Comando").font(.caption).foregroundStyle(.secondary)
-                TextEditor(text: $node.command).font(.system(size: 11, design: .monospaced))
-                    .frame(height: 110).disabled(!editing)
-                Text("Se ejecuta con zsh en la carpeta del proyecto; podés usar xcodebuild y las herramientas instaladas.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            if node.kind != .end {
-                Picker(node.kind == .decision ? "Si sí" : "Siguiente", selection: $node.next) {
-                    Text("Sin conexión").tag(Optional<UUID>.none)
-                    ForEach(choices.filter { $0.id != node.id && $0.kind != .start }) { item in
-                        Text(item.title).tag(Optional(item.id))
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 9) {
+                Image(systemName: symbol)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 32, height: 32)
+                    .background(Theme.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 7))
+                Text(node.kind.title).font(.system(size: 12, weight: .semibold))
+                TextField("Nombre del bloque", text: $node.title)
+                    .font(.system(size: 12)).frame(maxWidth: 250).disabled(!canEdit)
+                Text(summary).font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    .frame(maxWidth: 250, alignment: .leading)
+                Spacer(minLength: 0)
+                if canEdit {
+                    Button("Quitar bloque", role: .destructive, action: remove)
+                        .disabled(node.kind.isTrigger && choices.filter { $0.kind.isTrigger }.count == 1)
+                }
+                Button(action: close) { Image(systemName: "xmark") }.buttonStyle(.plain)
+                    .accessibilityLabel("Cerrar ajustes")
+            }.padding(.horizontal, 12).padding(.vertical, 8)
+            Divider()
+            ScrollView(.vertical) {
+                VStack(spacing: 8) {
+                    switch node.kind {
+                    case .script:
+                        WorkflowSettingsCard(title: "Comando", symbol: "terminal") {
+                            Text("Se ejecuta con zsh.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            TextEditor(text: $node.command)
+                                .font(.system(size: 11, design: .monospaced))
+                                .frame(height: 70).disabled(!canEdit)
+                        }
+                        WorkflowSettingsCard(title: "Ubicación", symbol: "folder") {
+                            HStack(spacing: 8) {
+                                TextField("Carpeta del proyecto", text: $node.settings.workingDirectory)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .disabled(!canEdit)
+                                Button("Elegir…", action: chooseWorkingDirectory).disabled(!canEdit)
+                            }
+                            Text("Ruta relativa al proyecto o ruta absoluta. Vacío: carpeta del proyecto.")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        WorkflowSettingsCard(title: "Tiempo límite", symbol: "timer") {
+                            HStack(spacing: 8) {
+                                TextField("Segundos", value: $node.settings.timeoutSeconds, format: .number)
+                                    .frame(width: 100).disabled(!canEdit)
+                                Text("segundos · 0 = sin límite")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        WorkflowSettingsCard(title: "Variables de entorno", symbol: "curlybraces") {
+                            ForEach($node.settings.environment) { $variable in
+                                HStack(spacing: 8) {
+                                    TextField("NOMBRE", text: $variable.name)
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .frame(maxWidth: 180)
+                                    TextField("Valor", text: $variable.value)
+                                        .font(.system(size: 11, design: .monospaced))
+                                    if canEdit {
+                                        Button {
+                                            node.settings.environment.removeAll { $0.id == variable.id }
+                                        } label: { Image(systemName: "minus.circle") }
+                                            .buttonStyle(.plain)
+                                            .accessibilityLabel("Quitar variable \(variable.name)")
+                                    }
+                                }.disabled(!canEdit)
+                            }
+                            if canEdit {
+                                Button {
+                                    node.settings.environment.append(WorkflowEnvironmentVariable())
+                                } label: { Label("Variable", systemImage: "plus") }
+                                    .buttonStyle(.plain)
+                                    .disabled(node.settings.environment.count >= 50)
+                            }
+                        }
+                        WorkflowSettingsCard(title: "Continuación", symbol: "arrow.right") {
+                            destinationPicker("Siguiente bloque", selection: $node.next)
+                        }
+                    case .decision:
+                        WorkflowSettingsCard(title: "Ramas", symbol: "arrow.triangle.branch") {
+                            HStack(spacing: 14) {
+                                destinationPicker("Sí · el paso anterior terminó bien", selection: $node.next)
+                                destinationPicker("No · el paso anterior falló", selection: $node.no)
+                            }
+                        }
+                    case .start, .event, .schedule:
+                        WorkflowSettingsCard(title: "Disparador", symbol: symbol) {
+                            Text(node.kind == .start ? "Inicia el flujo al pulsar Ejecutar."
+                                 : "Podés probar este disparador manualmente desde el grafo.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        WorkflowSettingsCard(title: "Continuación", symbol: "arrow.right") {
+                            destinationPicker("Siguiente bloque", selection: $node.next)
+                        }
+                    case .end:
+                        WorkflowSettingsCard(title: "Finalización", symbol: "stop.fill") {
+                            Text("Este bloque termina la ejecución del flujo.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
-                }.disabled(!editing)
+                }.padding(10)
             }
-            if node.kind == .decision {
-                Picker("Si no", selection: $node.no) {
-                    Text("Sin conexión").tag(Optional<UUID>.none)
-                    ForEach(choices.filter { $0.id != node.id && $0.kind != .start }) { item in
-                        Text(item.title).tag(Optional(item.id))
-                    }
-                }.disabled(!editing)
+        }.textFieldStyle(.roundedBorder)
+    }
+
+    private func chooseWorkingDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Elegir carpeta"
+        panel.directoryURL = rootURL
+        guard panel.runModal() == .OK, let chosen = panel.url?.standardizedFileURL else { return }
+        let rootPath = rootURL.standardizedFileURL.path
+        if chosen.path == rootPath { node.settings.workingDirectory = "" }
+        else if chosen.path.hasPrefix(rootPath + "/") {
+            node.settings.workingDirectory = String(chosen.path.dropFirst(rootPath.count + 1))
+        } else { node.settings.workingDirectory = chosen.path }
+    }
+
+    private func destinationPicker(_ label: String, selection: Binding<UUID?>) -> some View {
+        HStack(spacing: 10) {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            Picker(label, selection: selection) {
+                Text("Sin conexión").tag(Optional<UUID>.none)
+                ForEach(choices.filter { $0.id != node.id && !$0.kind.isTrigger }) { item in
+                    Text(item.title).tag(Optional(item.id))
+                }
+            }.labelsHidden().frame(maxWidth: 220).disabled(!canEdit)
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+private struct WorkflowSettingsCard<Content: View>: View {
+    let title: String
+    let symbol: String
+    @State private var expanded = true
+    let content: Content
+
+    init(title: String, symbol: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.symbol = symbol
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button { expanded.toggle() } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold)).frame(width: 12)
+                    Image(systemName: symbol).foregroundStyle(Theme.accent).frame(width: 16)
+                    Text(title).font(.system(size: 11, weight: .semibold))
+                    Spacer()
+                }.contentShape(Rectangle())
+            }.buttonStyle(.plain).padding(10)
+            if expanded {
+                Divider()
+                VStack(alignment: .leading, spacing: 7) { content }
+                    .padding(.horizontal, 12).padding(.vertical, 9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            if node.kind != .start, editing { Button("Quitar bloque", role: .destructive, action: remove) }
-            Spacer()
-        }.padding(14).textFieldStyle(.roundedBorder)
+        }
+        .background(Theme.background, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border))
     }
 }

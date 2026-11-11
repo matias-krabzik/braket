@@ -6,16 +6,24 @@ enum EditorPalette {
         background(for: AppSettings.shared.theme)
     }
     static func background(for theme: AppTheme) -> NSColor {
-        theme == .graphite
+        if theme == .light { return NSColor(srgbRed: 0.99, green: 0.99, blue: 0.995, alpha: 1) }
+        return theme == .graphite
             ? NSColor(srgbRed: 0.122, green: 0.125, blue: 0.137, alpha: 1)
             : NSColor(calibratedRed: 0.105, green: 0.116, blue: 0.137, alpha: 1)
     }
-    static let text = NSColor(srgbRed: 0.89, green: 0.90, blue: 0.92, alpha: 1)
-    static let muted = NSColor(srgbRed: 0.53, green: 0.55, blue: 0.59, alpha: 1)
-    static let blue = NSColor(calibratedRed: 0.49, green: 0.72, blue: 0.97, alpha: 1)
-    static let purple = NSColor(calibratedRed: 0.76, green: 0.61, blue: 0.93, alpha: 1)
-    static let green = NSColor(calibratedRed: 0.60, green: 0.77, blue: 0.65, alpha: 1)
-    static let orange = NSColor(calibratedRed: 0.87, green: 0.70, blue: 0.52, alpha: 1)
+    static let text = adaptive(light: (0.16, 0.19, 0.24), dark: (0.89, 0.90, 0.92))
+    static let muted = adaptive(light: (0.40, 0.44, 0.49), dark: (0.53, 0.55, 0.59))
+    static let blue = adaptive(light: (0.12, 0.32, 0.65), dark: (0.49, 0.72, 0.97))
+    static let purple = adaptive(light: (0.48, 0.22, 0.64), dark: (0.76, 0.61, 0.93))
+    static let green = adaptive(light: (0.19, 0.40, 0.26), dark: (0.60, 0.77, 0.65))
+    static let orange = adaptive(light: (0.57, 0.31, 0.12), dark: (0.87, 0.70, 0.52))
+
+    private static func adaptive(light: (Double, Double, Double), dark: (Double, Double, Double)) -> NSColor {
+        NSColor(name: nil) { appearance in
+            let rgb = appearance.bestMatch(from: [.aqua, .darkAqua]) == .aqua ? light : dark
+            return NSColor(srgbRed: rgb.0, green: rgb.1, blue: rgb.2, alpha: 1)
+        }
+    }
 }
 
 struct CodeEditor: NSViewRepresentable {
@@ -126,7 +134,7 @@ private final class ObserverToken: @unchecked Sendable {
         textView.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
         textView.textColor = EditorPalette.text
         textView.backgroundColor = EditorPalette.background
-        textView.insertionPointColor = .white
+        textView.insertionPointColor = EditorPalette.text
         textView.defaultParagraphStyle = paragraph
         textView.typingAttributes = baseAttributes
         textView.string = document.text
@@ -155,6 +163,7 @@ private final class ObserverToken: @unchecked Sendable {
     func applyTheme(_ theme: AppTheme) {
         guard appliedTheme != theme else { return }
         appliedTheme = theme
+        appearance = NSAppearance(named: theme == .light ? .aqua : .darkAqua)
         scrollView.backgroundColor = EditorPalette.background(for: theme)
         textView.backgroundColor = EditorPalette.background(for: theme)
         gutter.needsDisplay = true

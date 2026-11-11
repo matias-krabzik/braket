@@ -153,6 +153,7 @@ private struct WindowBridge: NSViewRepresentable {
     func makeNSView(context: Context) -> WindowView { WindowView() }
 
     func updateNSView(_ view: WindowView, context: Context) {
+        NSApp.appearance = NSAppearance(named: theme == .light ? .aqua : .darkAqua)
         view.window?.backgroundColor = EditorPalette.background
         view.appDelegate = delegate
         view.projectURL = projectURL

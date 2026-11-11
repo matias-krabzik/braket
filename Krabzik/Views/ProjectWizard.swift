@@ -40,7 +40,7 @@ struct ProjectWizard: View {
         .frame(width: 780, height: 570)
         .background(Theme.background)
         .tint(Theme.accent)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.colorScheme)
         .disabled(busy)
         .interactiveDismissDisabled(busy || detecting)
     }

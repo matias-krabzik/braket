@@ -40,7 +40,7 @@ struct WelcomeView: View {
                     Spacer()
                 }
                 .padding(.horizontal, 8).frame(height: 40)
-                .background(Color.white.opacity(settingsHovered ? 0.06 : 0), in: RoundedRectangle(cornerRadius: 7))
+                .background(Theme.surfaceInk.opacity(settingsHovered ? 0.06 : 0), in: RoundedRectangle(cornerRadius: 7))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -53,7 +53,7 @@ struct WelcomeView: View {
         .padding(.bottom, 20)
         .frame(width: 240)
         .frame(maxHeight: .infinity)
-        .background(Color.black.opacity(0.035))
+        .background(AppSettings.shared.theme == .light ? Theme.sidebar.opacity(0.65) : Color.black.opacity(0.035))
     }
 
     private var recentProjects: some View {
@@ -104,23 +104,28 @@ struct WelcomeView: View {
 }
 
 private struct WelcomeBackground: View {
-    private let graphite = Color(red: 35 / 255, green: 38 / 255, blue: 44 / 255)
-    private let light = Color(red: 81 / 255, green: 87 / 255, blue: 94 / 255)
+    private var isLight: Bool { AppSettings.shared.theme == .light }
+    private var base: Color {
+        isLight ? Color(red: 0.985, green: 0.99, blue: 1) : Color(red: 35 / 255, green: 38 / 255, blue: 44 / 255)
+    }
+    private var glow: Color {
+        isLight ? Color(red: 0.78, green: 0.85, blue: 0.96) : Color(red: 81 / 255, green: 87 / 255, blue: 94 / 255)
+    }
 
     var body: some View {
         GeometryReader { geometry in
             let span = max(geometry.size.width, geometry.size.height)
             ZStack {
-                graphite
+                base
                 RadialGradient(stops: [
-                    .init(color: light.opacity(0.48), location: 0),
-                    .init(color: light.opacity(0.22), location: 0.45),
-                    .init(color: light.opacity(0), location: 1)
+                    .init(color: glow.opacity(0.48), location: 0),
+                    .init(color: glow.opacity(0.22), location: 0.45),
+                    .init(color: glow.opacity(0), location: 1)
                 ], center: UnitPoint(x: 0.12, y: 0.06), startRadius: 0, endRadius: span * 0.7)
                 RadialGradient(stops: [
-                    .init(color: light.opacity(0.25), location: 0),
-                    .init(color: light.opacity(0.08), location: 0.5),
-                    .init(color: light.opacity(0), location: 1)
+                    .init(color: glow.opacity(0.25), location: 0),
+                    .init(color: glow.opacity(0.08), location: 0.5),
+                    .init(color: glow.opacity(0), location: 1)
                 ], center: UnitPoint(x: 0.95, y: 1.08), startRadius: 0, endRadius: span * 0.55)
             }
         }
@@ -149,7 +154,7 @@ private struct WelcomeAction: View {
                     .accessibilityHidden(true)
             }
             .padding(.horizontal, 12).frame(height: 42)
-            .background(prominent ? Theme.accent.opacity(isHovered ? 0.2 : 0.12) : Color.white.opacity(isHovered ? 0.07 : 0.035),
+            .background(prominent ? Theme.accent.opacity(isHovered ? 0.2 : 0.12) : Theme.surfaceInk.opacity(isHovered ? 0.07 : 0.035),
                         in: RoundedRectangle(cornerRadius: 9))
             .overlay {
                 RoundedRectangle(cornerRadius: 9)

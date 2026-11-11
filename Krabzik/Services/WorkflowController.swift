@@ -94,8 +94,10 @@ final class WorkflowController {
         } catch { self.error = error.localizedDescription }
     }
 
-    func run(workspace: URL, root: URL, runner: ProcessRunner, trusted: Bool) {
+    func run(workspace: URL, root: URL, runner: ProcessRunner, trusted: Bool,
+             trigger: WorkflowKind = .start) {
         guard trusted, !isRunning, let selected else { return }
+        guard trigger.isTrigger, selected.nodes.contains(where: { $0.kind == trigger }) else { return }
         do { try file.validate() } catch { self.error = error.localizedDescription
         return }
         self.runner = runner
@@ -105,7 +107,7 @@ final class WorkflowController {
         error = ""
         editing = false
         isRunning = true
-        task = Task { await execute(selected, workspace: workspace, root: root, runner: runner) }
+        task = Task { await execute(selected, workspace: workspace, root: root, runner: runner, trigger: trigger) }
     }
 
     func stop() {
@@ -113,11 +115,12 @@ final class WorkflowController {
         if let activeProcess { runner?.stop(activeProcess) }
     }
 
-    private func execute(_ flow: Workflow, workspace: URL, root: URL, runner: ProcessRunner) async {
+    private func execute(_ flow: Workflow, workspace: URL, root: URL, runner: ProcessRunner,
+                         trigger: WorkflowKind) async {
         defer { isRunning = false
         activeNodeID = nil
         activeProcess = nil }
-        var current = flow.nodes.first { $0.kind == .start }?.id
+        var current = flow.nodes.first { $0.kind == trigger }?.id
         var previousSucceeded = true
         var transitions = 0
         while let id = current, !cancelled {
@@ -129,7 +132,7 @@ final class WorkflowController {
             activeNodeID = id
             log += "\n▸ \(node.title)\n"
             switch node.kind {
-            case .start:
+            case .start, .event, .schedule:
                 visited[id] = .exited(0)
                 current = node.next
             case .decision:
@@ -146,16 +149,32 @@ final class WorkflowController {
                     visited[id] = .failed(error)
                     return
                 }
-                let project = CodeProject(id: node.id, name: node.title, path: root.path, kind: .files, command: node.command)
-                runner.start(project, workspaceURL: workspace)
+                let configuredPath = node.settings.workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+                let directory = configuredPath.isEmpty ? root
+                    : (configuredPath.hasPrefix("/") ? URL(fileURLWithPath: configuredPath)
+                       : root.appendingPathComponent(configuredPath)).standardizedFileURL
+                let project = CodeProject(id: node.id, name: node.title, path: directory.path,
+                                          kind: .files, command: node.command)
+                let environment = Dictionary(uniqueKeysWithValues: node.settings.environment.map { ($0.name, $0.value) })
+                runner.start(project, workspaceURL: workspace, environment: environment)
                 activeProcess = node.id
                 let run = runner.state(for: node.id)
-                while run.status.active, !cancelled { try? await Task.sleep(for: .milliseconds(100)) }
+                let deadline = node.settings.timeoutSeconds > 0
+                    ? Date().addingTimeInterval(TimeInterval(node.settings.timeoutSeconds)) : nil
+                var timedOut = false
+                while run.status.active, !cancelled {
+                    if let deadline, Date() >= deadline, !timedOut {
+                        timedOut = true
+                        runner.stop(node.id)
+                    }
+                    try? await Task.sleep(for: .milliseconds(100))
+                }
                 if cancelled { runner.stop(node.id)
                 break }
-                visited[id] = run.status
+                visited[id] = timedOut ? .failed("Tiempo límite de \(node.settings.timeoutSeconds) s agotado") : run.status
                 log += run.output + "\n"
-                previousSucceeded = run.status == .exited(0)
+                if timedOut { log += "Tiempo límite de \(node.settings.timeoutSeconds) s agotado.\n" }
+                previousSucceeded = !timedOut && run.status == .exited(0)
                 current = node.next
             }
         }

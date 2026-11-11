@@ -61,7 +61,7 @@ final class FileTreeCell: NSTableCellView {
         }
         else if node.isDirectory {
             icon.image = NSImage(systemSymbolName: "folder.fill", accessibilityDescription: nil)
-            icon.contentTintColor = NSColor(calibratedRed: 0.49, green: 0.68, blue: 0.87, alpha: 1)
+            icon.contentTintColor = EditorPalette.blue
         } else {
             icon.image = FileIcons.display(FileIcons.file(node.url), monochrome: monochrome)
             if icon.image?.isTemplate == true { icon.contentTintColor = .labelColor }
@@ -69,7 +69,7 @@ final class FileTreeCell: NSTableCellView {
         let label = NSTextField(labelWithString: node.name)
         label.font = .systemFont(ofSize: 12, weight: node.project == nil ? .regular : .medium)
         label.lineBreakMode = .byTruncatingMiddle
-        label.textColor = NSColor(calibratedWhite: 0.88, alpha: 1)
+        label.textColor = NSColor.labelColor
         let detail = NSTextField(labelWithString: node.project?.kind.rawValue ?? "")
         detail.font = .systemFont(ofSize: 10)
         detail.textColor = .tertiaryLabelColor
@@ -119,7 +119,9 @@ final class FileTreeRow: NSTableRowView {
     weak var outline: NSOutlineView?
     weak var node: FileNode?
 
-    override var interiorBackgroundStyle: NSView.BackgroundStyle { .emphasized }
+    // La selección usa un fondo tenue propio, no el relleno oscuro de AppKit.
+    // `.emphasized` fuerza etiquetas e íconos blancos incluso en el tema claro.
+    override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
 
     override func drawBackground(in dirtyRect: NSRect) {
         super.drawBackground(in: dirtyRect)

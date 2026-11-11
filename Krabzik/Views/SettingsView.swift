@@ -22,7 +22,7 @@ struct SettingsView: View {
         .frame(width: 580, height: 620)
         .background(Theme.background)
         .tint(Theme.accent)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.colorScheme)
     }
 
     private var general: some View {
@@ -57,6 +57,6 @@ struct SettingsView: View {
         .padding(12)
         .background(Theme.background)
         .tint(Theme.accent)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.colorScheme)
     }
 }

@@ -182,7 +182,7 @@ struct AgentPanel: View {
             }
             .font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(8).background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 5))
+            .padding(8).background(Theme.surfaceInk.opacity(0.05), in: RoundedRectangle(cornerRadius: 5))
             HStack {
                 Button("Elegir otro…", action: agent.chooseExecutable)
                 Spacer()
@@ -304,7 +304,7 @@ private struct AgentRequestView: View {
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(7)
-            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 5))
+            .background(Theme.surfaceInk.opacity(0.05), in: RoundedRectangle(cornerRadius: 5))
     }
 
     private var answersIncomplete: Bool {

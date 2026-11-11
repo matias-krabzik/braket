@@ -18,17 +18,18 @@ struct WorkspaceView: View {
                         VSplitView {
                             editorArea
                                 .frame(minWidth: 520, maxWidth: .infinity, minHeight: 240, maxHeight: .infinity)
-                            if let document = controller.selectedDocument, document.language == "SQL", controller.database.resultsVisible,
+                            if !controller.workflowVisible, let document = controller.selectedDocument,
+                               document.language == "SQL", controller.database.resultsVisible,
                                document.sqlExecution.isRunning || document.sqlExecution.error != nil || !document.sqlExecution.results
                                .isEmpty {
                                 SQLResultsPanel(execution: document.sqlExecution) { controller.database.resultsVisible = false }
                                     .frame(minHeight: 140, idealHeight: 220, maxHeight: 350)
-                            } else if controller.processesVisible {
+                            } else if controller.processesVisible && !controller.workflowVisible {
                                 ProcessPanel(controller: controller)
                                     .frame(minHeight: 150, idealHeight: 240, maxHeight: 440)
                             }
                         }
-                        if controller.agent.visible {
+                        if controller.agent.visible && !controller.workflowVisible {
                             AgentPanel(controller: controller).frame(minWidth: 300, idealWidth: 350, maxWidth: 460)
                         }
                     }
@@ -41,7 +42,7 @@ struct WorkspaceView: View {
         .background(Theme.background)
         .tint(Theme.accent)
         .disabled(controller.isRestoringSession)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.colorScheme)
         .frame(minWidth: controller.workspace == nil ? 760 : 900, minHeight: controller.workspace == nil ? 420 : 580)
         .toolbar {
             if controller.workspace != nil {
@@ -59,10 +60,12 @@ struct WorkspaceView: View {
                         .help("Configuración")
                         .accessibilityLabel("Configuración")
                 }
-                ToolbarItem(placement: .primaryAction) {
-                    Button { controller.agent.visible.toggle() } label: { Image(systemName: "sparkles") }
-                        .help("Mostrar Codex").accessibilityLabel("Mostrar Codex")
-                        .disabled(controller.isReadOnly)
+                if !controller.workflowVisible {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button { controller.agent.visible.toggle() } label: { Image(systemName: "sparkles") }
+                            .help("Mostrar Codex").accessibilityLabel("Mostrar Codex")
+                            .disabled(controller.isReadOnly)
+                    }
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button(action: controller.startAll) { Image(systemName: "play.fill") }
@@ -70,12 +73,14 @@ struct WorkspaceView: View {
                         .disabled(controller.runnableProjects.isEmpty || controller.runnableProjects
                             .allSatisfy { controller.runner.runs[$0.id]?.status.active == true })
                 }
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        if controller.selectedDocument?.language == "SQL" { controller.database.resultsVisible.toggle() }
-                        else { controller.processesVisible.toggle() }
-                    } label: { Image(systemName: "rectangle.bottomthird.inset.filled") }
-                        .help("Mostrar procesos")
+                if !controller.workflowVisible {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            if controller.selectedDocument?.language == "SQL" { controller.database.resultsVisible.toggle() }
+                            else { controller.processesVisible.toggle() }
+                        } label: { Image(systemName: "rectangle.bottomthird.inset.filled") }
+                            .help("Mostrar procesos")
+                    }
                 }
             }
         }
@@ -275,7 +280,7 @@ private struct WorkspaceEditorTab: View {
                     .foregroundStyle(.secondary)
                     .opacity(showsClose ? 1 : 0)
                     .frame(width: 24, height: 24)
-                    .background(Color.white.opacity(closeHovered ? 0.07 : 0), in: RoundedRectangle(cornerRadius: 4))
+                    .background(Theme.surfaceInk.opacity(closeHovered ? 0.07 : 0), in: RoundedRectangle(cornerRadius: 4))
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -286,8 +291,8 @@ private struct WorkspaceEditorTab: View {
             .help("Cerrar \(title)" + (isDirty ? " · cambios sin guardar" : ""))
         }
         .padding(.trailing, 4).fixedSize(horizontal: true, vertical: false)
-        .background(Color.white.opacity(selected ? 0.09 : hovered ? 0.025 : 0), in: RoundedRectangle(cornerRadius: 7))
-        .overlay { RoundedRectangle(cornerRadius: 7).strokeBorder(Color.white.opacity(selected ? 0.045 : 0)) }
+        .background(Theme.surfaceInk.opacity(selected ? 0.09 : hovered ? 0.025 : 0), in: RoundedRectangle(cornerRadius: 7))
+        .overlay { RoundedRectangle(cornerRadius: 7).strokeBorder(Theme.surfaceInk.opacity(selected ? 0.045 : 0)) }
         .shadow(color: .black.opacity(selected ? 0.14 : 0), radius: 1, y: 1)
         .onHover { hovered = $0 }
         .help(tooltip)

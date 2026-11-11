@@ -78,7 +78,7 @@ struct ProjectRail: View {
             .padding(28)
             .frame(width: 400)
             .background(Theme.background)
-            .preferredColorScheme(.dark)
+            .preferredColorScheme(Theme.colorScheme)
         }
     }
 
