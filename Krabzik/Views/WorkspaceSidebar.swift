@@ -96,7 +96,8 @@ struct WorkspaceSidebar: View {
                     if !matches.isEmpty {
                         LazyVStack(alignment: .leading, spacing: 0) {
                             ForEach(matches) { match in
-                                Button { controller.files.open(match.url) } label: {
+                                Button { if match.url.lastPathComponent.hasSuffix(".flow.json") { controller.openWorkflowFile(match.url) }
+                                else { controller.files.open(match.url) } } label: {
                                     HStack(spacing: 8) {
                                         Image(nsImage: FileIcons.display(FileIcons.file(match.url),
                                                                          monochrome: workspace.codeIconMonochrome))

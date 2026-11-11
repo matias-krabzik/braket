@@ -35,6 +35,19 @@ final class WorkspaceController {
     var closingProjectURL: URL?
     var showingProjectWizard = false
     let runner = ProcessRunner()
+    let workflows = WorkflowController()
+    var workflowVisible = false
+    var workflowTabOpen = false
+    var workflowRoot: URL {
+        workspace?.projects.first?.directory(relativeTo: workspaceURL ?? URL(fileURLWithPath: "/")) ?? workspaceURL?
+        .deletingLastPathComponent() ?? URL(fileURLWithPath: "/") }
+    func openWorkflowFile(_ path: URL) {
+        guard path.lastPathComponent.hasSuffix(".flow.json"), let workspaceURL else { return }
+        workflows.configure(workspaceURL, root: workflowRoot, selectedFile: path)
+        workflowTabOpen = true
+        workflowVisible = true
+    }
+
     let database = DatabaseController()
     let agent: AgentController
     @ObservationIgnored let errors = ErrorCenter()
@@ -68,7 +81,8 @@ final class WorkspaceController {
     var recentProjects: [URL] { recents.urls }
     var selectedDocumentID: URL? {
         get { docs.selectedID }
-        set { docs.selectedID = newValue }
+        set { docs.selectedID = newValue
+            if newValue != nil { workflowVisible = false } }
     }
 
     var selectedProject: CodeProject? {
@@ -250,8 +264,9 @@ final class WorkspaceController {
             agent.shutdown()
         }
         guard await files.resolveDirty() else { return false }
-        if runner.hasActiveProcesses {
+        if runner.hasActiveProcesses || workflows.isRunning {
             guard session.dialogs.confirmStopProcesses() else { return false }
+            workflows.stop()
             runner.stopAll()
         }
         guard await database.prepareToLeave() else { return false }

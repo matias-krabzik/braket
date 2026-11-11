@@ -210,7 +210,10 @@ struct FileTree: NSViewRepresentable {
 
         @objc func clicked() {
             guard let outline, outline.clickedRow >= 0, let node = outline.item(atRow: outline.clickedRow) as? FileNode else { return }
-            if !node.isDirectory { controller.files.open(node.url) }
+            if !node.isDirectory {
+                if node.url.lastPathComponent.hasSuffix(".flow.json") { controller.openWorkflowFile(node.url) }
+                else { controller.files.open(node.url) }
+            }
         }
 
         private func load(_ node: FileNode) {

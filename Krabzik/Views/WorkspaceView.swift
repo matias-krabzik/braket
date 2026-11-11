@@ -16,7 +16,8 @@ struct WorkspaceView: View {
                                 .background(SidebarWidthPersistence())
                         }
                         VSplitView {
-                            editor.frame(minWidth: 520, maxWidth: .infinity, minHeight: 240, maxHeight: .infinity)
+                            editorArea
+                                .frame(minWidth: 520, maxWidth: .infinity, minHeight: 240, maxHeight: .infinity)
                             if let document = controller.selectedDocument, document.language == "SQL", controller.database.resultsVisible,
                                document.sqlExecution.isRunning || document.sqlExecution.error != nil || !document.sqlExecution.results
                                .isEmpty {
@@ -32,7 +33,7 @@ struct WorkspaceView: View {
                         }
                     }
                 }
-                EditorStatusBar(document: controller.selectedDocument)
+                EditorStatusBar(document: controller.workflowVisible ? nil : controller.selectedDocument)
             } else {
                 WelcomeView(controller: controller)
             }
@@ -44,6 +45,15 @@ struct WorkspaceView: View {
         .frame(minWidth: controller.workspace == nil ? 760 : 900, minHeight: controller.workspace == nil ? 420 : 580)
         .toolbar {
             if controller.workspace != nil {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { if let url = controller.workspaceURL {
+                        controller.workflows.configure(url, root: controller.workflowRoot)
+                        controller.workflowTabOpen = true
+                        controller.workflowVisible = true
+                    } } label: {
+                        Image(systemName: "point.3.connected.trianglepath.dotted")
+                    }.help("Abrir automatización").accessibilityLabel("Abrir automatización")
+                }
                 ToolbarItem(placement: .primaryAction) {
                     SettingsLink { Image(systemName: "gearshape") }
                         .help("Configuración")
@@ -102,6 +112,48 @@ struct WorkspaceView: View {
         .task { await controller.start() }
     }
 
+    private var editorArea: some View {
+        VStack(spacing: 0) {
+            if !controller.documents.isEmpty || controller.workflowTabOpen {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 4) {
+                        ForEach(controller.documents) { document in
+                            WorkspaceEditorTab(title: document.url.lastPathComponent,
+                                               icon: Image(nsImage: FileIcons.file(document.url)),
+                                               tooltip: document.url.path,
+                                               isDirty: document.isDirty,
+                                               selected: !controller.workflowVisible && controller.selectedDocumentID == document.id,
+                                               select: { controller.selectedDocumentID = document.id },
+                                               close: { controller.closeDocument(document) })
+                        }
+                        if controller.workflowTabOpen {
+                            WorkspaceEditorTab(title: controller.workflows.selected?.name ?? "Automatización",
+                                               icon: Image(systemName: "point.3.connected.trianglepath.dotted"),
+                                               tooltip: controller.workflows.selected?.name ?? "Automatización",
+                                               selected: controller.workflowVisible,
+                                               select: { controller.workflowVisible = true },
+                                               close: {
+                                                   controller.workflowVisible = false
+                                                   controller.workflowTabOpen = false
+                                               })
+                        }
+                    }.padding(.horizontal, 9).padding(.vertical, 7)
+                }.background(Theme.bar)
+                Rectangle().fill(Theme.border).frame(height: 1)
+            }
+            if controller.workflowVisible, let url = controller.workspaceURL {
+                WorkflowView(controller: controller, workspaceURL: url)
+            } else { editor }
+        }
+        .onChange(of: controller.selectedDocumentID) { old, new in
+            if new != old, new != nil { controller.workflowVisible = false }
+        }
+        .onChange(of: controller.workspaceURL) { _, _ in
+            controller.workflowVisible = false
+            controller.workflowTabOpen = false
+        }
+    }
+
     /// Barra persistente: en solo lectura el usuario tiene que saber por qué no puede
     /// ejecutar nada, y poder confiar en el proyecto desde ahí.
     private var readOnlyBanner: some View {
@@ -122,20 +174,6 @@ struct WorkspaceView: View {
 
     private var editor: some View {
         VStack(spacing: 0) {
-            if !controller.documents.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 4) {
-                        ForEach(controller.documents) { document in
-                            DocumentTab(document: document, selected: controller.selectedDocumentID == document.id,
-                                        select: { controller.selectedDocumentID = document.id },
-                                        close: { controller.closeDocument(document) })
-                        }
-                    }
-                    .padding(.horizontal, 9).padding(.vertical, 7)
-                }
-                .background(Theme.bar)
-                Rectangle().fill(Theme.border).frame(height: 1)
-            }
             if let document = controller.selectedDocument {
                 HStack(spacing: 7) {
                     Text(breadcrumb(document.url)).lineLimit(1).truncationMode(.middle)
@@ -197,8 +235,11 @@ private struct EditorStatusBar: View {
     }
 }
 
-private struct DocumentTab: View {
-    let document: EditorDocument
+private struct WorkspaceEditorTab: View {
+    let title: String
+    let icon: Image
+    let tooltip: String
+    var isDirty = false
     let selected: Bool
     let select: () -> Void
     let close: () -> Void
@@ -206,18 +247,18 @@ private struct DocumentTab: View {
     @State private var closeHovered = false
     @FocusState private var closeFocused: Bool
 
-    private var showsDirtyIndicator: Bool { document.isDirty && !closeHovered && !closeFocused }
-    private var showsClose: Bool { selected || hovered || closeFocused || document.isDirty }
+    private var showsDirtyIndicator: Bool { isDirty && !closeHovered && !closeFocused }
+    private var showsClose: Bool { selected || hovered || closeFocused || isDirty }
 
     var body: some View {
         HStack(spacing: 4) {
             Button(action: select) {
                 HStack(spacing: 7) {
-                    Image(nsImage: FileIcons.file(document.url))
+                    icon
                         .resizable().scaledToFit().frame(width: 14, height: 14)
                         .opacity(selected ? 1 : 0.75)
                         .accessibilityHidden(true)
-                    Text(document.url.lastPathComponent)
+                    Text(title)
                         .font(.system(size: 12, weight: selected ? .medium : .regular))
                         .lineLimit(1).truncationMode(.middle)
                         .foregroundStyle(selected ? .primary : .secondary)
@@ -240,16 +281,16 @@ private struct DocumentTab: View {
             .buttonStyle(.plain)
             .focused($closeFocused)
             .onHover { closeHovered = $0 }
-            .accessibilityLabel("Cerrar \(document.url.lastPathComponent)")
-            .accessibilityValue(document.isDirty ? "Cambios sin guardar" : "")
-            .help("Cerrar \(document.url.lastPathComponent)" + (document.isDirty ? " · cambios sin guardar" : ""))
+            .accessibilityLabel("Cerrar \(title)")
+            .accessibilityValue(isDirty ? "Cambios sin guardar" : "")
+            .help("Cerrar \(title)" + (isDirty ? " · cambios sin guardar" : ""))
         }
         .padding(.trailing, 4).fixedSize(horizontal: true, vertical: false)
         .background(Color.white.opacity(selected ? 0.09 : hovered ? 0.025 : 0), in: RoundedRectangle(cornerRadius: 7))
         .overlay { RoundedRectangle(cornerRadius: 7).strokeBorder(Color.white.opacity(selected ? 0.045 : 0)) }
         .shadow(color: .black.opacity(selected ? 0.14 : 0), radius: 1, y: 1)
         .onHover { hovered = $0 }
-        .help(document.url.path)
+        .help(tooltip)
     }
 }
 
