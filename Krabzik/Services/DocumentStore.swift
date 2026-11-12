@@ -42,9 +42,16 @@ final class DocumentStore {
         guard !openingFiles.contains(url) else { return }
         openingFiles.insert(url)
         defer { openingFiles.remove(url) }
-        let data = try await Task.detached(priority: .userInitiated) { try DocumentIO.read(url) }.value
-        guard stillValid() else { return }
-        let document = try EditorDocument(url: url, data: data)
+        let document: EditorDocument
+        if DocumentIO.isPreviewableImage(url) {
+            let preview = try await Task.detached(priority: .userInitiated) { try DocumentIO.preview(url) }.value
+            guard stillValid() else { return }
+            document = try EditorDocument(url: url, previewData: preview)
+        } else {
+            let data = try await Task.detached(priority: .userInitiated) { try DocumentIO.read(url) }.value
+            guard stillValid() else { return }
+            document = try EditorDocument(url: url, data: data)
+        }
         documents.append(document)
         selectedID = document.id
     }
@@ -52,6 +59,7 @@ final class DocumentStore {
     /// Guarda el documento. Lanza si el archivo cambió en disco desde que se leyó.
     @discardableResult
     func save(_ document: EditorDocument) async throws -> Bool {
+        guard document.previewImage == nil else { return false }
         guard !document.isSaving else { return false }
         document.isSaving = true
         defer { document.isSaving = false }
@@ -67,7 +75,11 @@ final class DocumentStore {
 
     /// Escribe una copia en otra ruta. El documento abierto no cambia.
     func saveCopy(of document: EditorDocument, to url: URL) throws {
-        try Data(document.text.utf8).write(to: url, options: .atomic)
+        if document.previewImage != nil {
+            try Data(contentsOf: document.url, options: .mappedIfSafe).write(to: url, options: .atomic)
+        } else {
+            try Data(document.text.utf8).write(to: url, options: .atomic)
+        }
     }
 
     /// Lo cierra y selecciona el vecino. No pregunta nada: quien decide si hay que
@@ -82,7 +94,11 @@ final class DocumentStore {
 
     /// Relee el archivo descartando lo que el usuario escribió.
     func reload(_ document: EditorDocument) throws {
-        document.acceptExternalData(try DocumentIO.read(document.url), discardEdits: true)
+        if document.previewImage != nil {
+            try document.acceptExternalPreviewData(DocumentIO.preview(document.url))
+        } else {
+            document.acceptExternalData(try DocumentIO.read(document.url), discardEdits: true)
+        }
     }
 
     /// Relee del disco los documentos que cumplen el predicado, para cuando algo de
@@ -95,9 +111,13 @@ final class DocumentStore {
                  stillValid: @MainActor @escaping () -> Bool = { true }) async {
         for document in documents where predicate(document.url) {
             let url = document.url
-            let data = try? await Task.detached(priority: .utility) { try DocumentIO.read(url) }.value
+            let data = try? await Task.detached(priority: .utility) {
+                try DocumentIO.isPreviewableImage(url) ? DocumentIO.preview(url) : DocumentIO.read(url)
+            }.value
             guard stillValid(), documents.contains(where: { $0 === document }) else { continue }
-            if let data { document.acceptExternalData(data) }
+            if let data, document.previewImage != nil {
+                try? document.acceptExternalPreviewData(data)
+            } else if let data { document.acceptExternalData(data) }
             else { document.hasExternalChange = true }
         }
     }

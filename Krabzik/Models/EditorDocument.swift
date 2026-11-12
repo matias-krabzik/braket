@@ -1,4 +1,7 @@
+import AppKit
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 import Observation
 
 /// Un archivo abierto en el editor.
@@ -14,6 +17,7 @@ final class EditorDocument: Identifiable {
     var isDirty = false
     var isSaving = false
     var hasExternalChange = false
+    var previewImage: NSImage?
     var line = 1
     var column = 1
     /// El texto del documento. **No se mantiene actualizado en cada tecla**: leer
@@ -60,6 +64,14 @@ final class EditorDocument: Identifiable {
         self.originalData = data
     }
 
+    init(url: URL, previewData: Data) throws {
+        guard let image = NSImage(data: previewData), image.isValid else { throw WorkspaceError.invalidImage }
+        self.id = url.standardizedFileURL
+        self.cachedText = ""
+        self.originalData = Data()
+        self.previewImage = image
+    }
+
     /// La llama el editor en cada cambio: O(1). El texto se relee cuando alguien lo pida.
     func markTextStale() { textIsStale = true }
 
@@ -84,11 +96,53 @@ final class EditorDocument: Identifiable {
         hasExternalChange = false
         (editorStorage as? EditorSurface)?.reloadFromDocument()
     }
+
+    func acceptExternalPreviewData(_ data: Data) throws {
+        guard let image = NSImage(data: data), image.isValid else { throw WorkspaceError.invalidImage }
+        previewImage = image
+        hasExternalChange = false
+    }
 }
 
 /// Leer y escribir archivos del editor, con los dos límites que importan: 5 MB de
 /// tamaño y la comprobación de que el archivo en disco sigue siendo el que se leyó.
 enum DocumentIO {
+    private static let imageExtensions: Set<String> = ["png", "apng", "jpg", "jpeg", "gif", "webp", "heic", "heif",
+                                                       "bmp", "tif", "tiff", "ico", "icns", "avif", "jp2", "j2k",
+                                                       "psd", "svg"]
+
+    static func isPreviewableImage(_ url: URL) -> Bool {
+        imageExtensions.contains(url.pathExtension.lowercased())
+    }
+
+    /// ImageIO lee desde la URL y reduce la imagen antes de llevarla al editor.
+    /// El límite de 5 MB corresponde únicamente a documentos de texto.
+    static func preview(_ url: URL) throws -> Data {
+        if url.pathExtension.lowercased() == "svg" {
+            let values = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+            guard values.isRegularFile == true, (values.fileSize ?? 0) <= 10 * 1024 * 1024 else {
+                throw WorkspaceError.invalidImage
+            }
+            let data = try Data(contentsOf: url)
+            guard FileIcons.safeSVG(data) else { throw WorkspaceError.invalidImage }
+            return data
+        }
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+              CGImageSourceGetCount(source) > 0,
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true,
+                  kCGImageSourceCreateThumbnailWithTransform: true,
+                  kCGImageSourceThumbnailMaxPixelSize: 2600
+              ] as CFDictionary) else { throw WorkspaceError.invalidImage }
+        guard let output = CFDataCreateMutable(nil, 0) else { throw WorkspaceError.invalidImage }
+        guard let destination = CGImageDestinationCreateWithData(output, UTType.png.identifier as CFString, 1, nil) else {
+            throw WorkspaceError.invalidImage
+        }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else { throw WorkspaceError.invalidImage }
+        return output as Data
+    }
+
     static func read(_ url: URL) throws -> Data {
         let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
         guard size <= 5 * 1024 * 1024 else { throw WorkspaceError.largeFile }

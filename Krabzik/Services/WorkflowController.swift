@@ -1,6 +1,18 @@
 import Foundation
 import Observation
 
+struct WorkflowTransition: Hashable {
+    let from: UUID
+    let to: UUID
+    let isNo: Bool
+}
+
+struct WorkflowStepResult: Equatable {
+    let summary: String
+    let detail: String
+    let successful: Bool
+}
+
 @MainActor @Observable
 final class WorkflowController {
     var file = WorkflowFile()
@@ -10,15 +22,22 @@ final class WorkflowController {
     var isRunning = false
     var activeNodeID: UUID?
     var visited: [UUID: RunStatus] = [:]
+    var traversedTransitions: Set<WorkflowTransition> = []
+    var results: [UUID: WorkflowStepResult] = [:]
     var log = ""
     var error = ""
     @ObservationIgnored private var workspaceURL: URL?
     @ObservationIgnored private var rootURL: URL?
     @ObservationIgnored private var baseline: [URL: Data] = [:]
     @ObservationIgnored private var runner: ProcessRunner?
+    @ObservationIgnored private let aiRunner = WorkflowCodexRunner()
+    @ObservationIgnored private var activeAI = false
     @ObservationIgnored private var activeProcess: UUID?
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var cancelled = false
+    /// Quién pregunta por un script sin aprobar. Por defecto **niega**, igual que
+    /// `ProjectLibrary.confirmCommand`: la interfaz inyecta el diálogo real en `forApp()`.
+    @ObservationIgnored var confirmCommand: @MainActor (CommandPrompt) -> CommandDecision = { _ in .cancel }
 
     var selected: Workflow? { file.workflows.first { $0.id == selectedID } }
     var directoryURL: URL? { rootURL?.appendingPathComponent(".braket/automations", isDirectory: true) }
@@ -35,10 +54,14 @@ final class WorkflowController {
             if changed {
                 var flows: [Workflow] = []
                 baseline = [:]
+                if let directoryURL {
+                    try WorkflowStorage.requireRealFiles([directoryURL.deletingLastPathComponent(), directoryURL])
+                }
                 if let directoryURL, FileManager.default.fileExists(atPath: directoryURL.path) {
                     let files = try FileManager.default.contentsOfDirectory(at: directoryURL, includingPropertiesForKeys: nil)
                         .filter { $0.lastPathComponent.hasSuffix(".flow.json") }.sorted { $0.path < $1.path }
                     guard files.count <= 24 else { throw WorkflowError.invalid("Demasiados flujos.") }
+                    try WorkflowStorage.requireRealFiles(files)
                     for path in files {
                         let data = try Data(contentsOf: path)
                         guard data.count <= 256_000 else { throw WorkflowError.invalid("Archivo de flujo demasiado grande.") }
@@ -77,9 +100,11 @@ final class WorkflowController {
         do {
             try file.validate()
             guard let directoryURL else { throw WorkflowError.invalid("No hay un proyecto abierto.") }
+            try WorkflowStorage.requireRealFiles([directoryURL.deletingLastPathComponent(), directoryURL])
             try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
             for flow in file.workflows {
                 guard let path = storageURL(for: flow) else { continue }
+                try WorkflowStorage.requireRealFiles([path])
                 let current = try? Data(contentsOf: path)
                 guard current == baseline[path] else {
                     throw WorkflowError
@@ -94,34 +119,51 @@ final class WorkflowController {
         } catch { self.error = error.localizedDescription }
     }
 
-    func run(workspace: URL, root: URL, runner: ProcessRunner, trusted: Bool,
+    /// `approvals` es donde se recuerda lo que el usuario aprobó. Confiar en el proyecto no
+    /// alcanza para correr un script: ver `WorkflowScriptApproval`.
+    func run(workspace: URL, root: URL, runner: ProcessRunner, trusted: Bool, approvals: TrustStore,
+             agent: AgentController? = nil,
              trigger: WorkflowKind = .start) {
         guard trusted, !isRunning, let selected else { return }
         guard trigger.isTrigger, selected.nodes.contains(where: { $0.kind == trigger }) else { return }
         do { try file.validate() } catch { self.error = error.localizedDescription
         return }
+        for node in selected.scripts(from: trigger) {
+            let approval = WorkflowScriptApproval(node: node, root: root)
+            guard approval.authorize(store: approvals, workspaceURL: workspace, ask: confirmCommand) else {
+                self.error = "No se ejecutó: falta aprobar el script «\(node.title)»."
+                return
+            }
+        }
         self.runner = runner
         cancelled = false
         visited = [:]
+        traversedTransitions = []
+        results = [:]
         log = ""
         error = ""
         editing = false
         isRunning = true
-        task = Task { await execute(selected, workspace: workspace, root: root, runner: runner, trigger: trigger) }
+        task = Task { await execute(selected, workspace: workspace, root: root, runner: runner,
+                                    agent: agent, trigger: trigger) }
     }
 
     func stop() {
         cancelled = true
         if let activeProcess { runner?.stop(activeProcess) }
+        if activeAI { aiRunner.stop() }
     }
 
     private func execute(_ flow: Workflow, workspace: URL, root: URL, runner: ProcessRunner,
-                         trigger: WorkflowKind) async {
+                         agent: AgentController?, trigger: WorkflowKind) async {
         defer { isRunning = false
         activeNodeID = nil
-        activeProcess = nil }
+        activeProcess = nil
+        activeAI = false }
         var current = flow.nodes.first { $0.kind == trigger }?.id
         var previousSucceeded = true
+        var previousOutput = ""
+        var previousExitCode: Int32?
         var transitions = 0
         while let id = current, !cancelled {
             transitions += 1
@@ -134,28 +176,52 @@ final class WorkflowController {
             switch node.kind {
             case .start, .event, .schedule:
                 visited[id] = .exited(0)
+                results[id] = WorkflowStepResult(summary: "OK", detail: "Disparador activado.", successful: true)
+                previousOutput = "ok"
+                previousExitCode = 0
                 current = node.next
+                recordTransition(from: id, to: current, isNo: false)
             case .decision:
-                visited[id] = .exited(0)
-                log += previousSucceeded ? "Sí\n" : "No\n"
-                current = previousSucceeded ? node.next : node.no
+                do {
+                    let matches = try node.condition.evaluate(previousSucceeded: previousSucceeded,
+                                                              output: previousOutput, exitCode: previousExitCode)
+                    visited[id] = .exited(matches ? 0 : 1)
+                    results[id] = WorkflowStepResult(summary: matches ? "Sí" : "No",
+                                                     detail: matches ? "Se cumplió la condición." : "No se cumplió la condición.",
+                                                     successful: matches)
+                    log += matches ? "Sí\n" : "No\n"
+                    previousSucceeded = matches
+                    previousExitCode = matches ? 0 : 1
+                    current = matches ? node.next : node.no
+                    recordTransition(from: id, to: current, isNo: !matches)
+                } catch {
+                    self.error = error.localizedDescription
+                    visited[id] = .failed(error.localizedDescription)
+                    results[id] = WorkflowStepResult(summary: "Error", detail: error.localizedDescription,
+                                                     successful: false)
+                    log += "Error: \(error.localizedDescription)\n"
+                    return
+                }
             case .end:
                 visited[id] = previousSucceeded ? .exited(0) : .exited(1)
+                results[id] = WorkflowStepResult(summary: "Finalizado",
+                                                 detail: "El flujo terminó en «\(node.title)».",
+                                                 successful: previousSucceeded)
                 log += "Fin: \(node.title)\n"
                 current = nil
             case .script:
                 guard !node.command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                     error = "El bloque \(node.title) no tiene comando."
                     visited[id] = .failed(error)
+                    results[id] = WorkflowStepResult(summary: "Error", detail: error, successful: false)
                     return
                 }
-                let configuredPath = node.settings.workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
-                let directory = configuredPath.isEmpty ? root
-                    : (configuredPath.hasPrefix("/") ? URL(fileURLWithPath: configuredPath)
-                       : root.appendingPathComponent(configuredPath)).standardizedFileURL
+                let directory = node.resolvedDirectory(root: root)
                 let project = CodeProject(id: node.id, name: node.title, path: directory.path,
                                           kind: .files, command: node.command)
-                let environment = Dictionary(uniqueKeysWithValues: node.settings.environment.map { ($0.name, $0.value) })
+                var environment = Dictionary(uniqueKeysWithValues: node.settings.environment.map { ($0.name, $0.value) })
+                environment["BRAKET_INPUT"] = previousOutput
+                environment["BRAKET_PREVIOUS_EXIT_CODE"] = previousExitCode.map(String.init) ?? ""
                 runner.start(project, workspaceURL: workspace, environment: environment)
                 activeProcess = node.id
                 let run = runner.state(for: node.id)
@@ -170,14 +236,67 @@ final class WorkflowController {
                     try? await Task.sleep(for: .milliseconds(100))
                 }
                 if cancelled { runner.stop(node.id)
+                visited[id] = .failed("Detenido")
+                results[id] = WorkflowStepResult(summary: "Detenido", detail: run.output, successful: false)
                 break }
                 visited[id] = timedOut ? .failed("Tiempo límite de \(node.settings.timeoutSeconds) s agotado") : run.status
                 log += run.output + "\n"
                 if timedOut { log += "Tiempo límite de \(node.settings.timeoutSeconds) s agotado.\n" }
+                let summary: String
+                if timedOut { summary = "Tiempo agotado" }
+                else if case .exited(let code) = run.status { summary = "Salida \(code)" }
+                else { summary = "Error" }
+                results[id] = WorkflowStepResult(summary: summary, detail: run.output,
+                                                 successful: !timedOut && run.status == .exited(0))
+                previousOutput = run.capturedOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+                if timedOut { previousExitCode = 124 }
+                else if case .exited(let code) = run.status { previousExitCode = code }
+                else { previousExitCode = 1 }
                 previousSucceeded = !timedOut && run.status == .exited(0)
                 current = node.next
+                recordTransition(from: id, to: current, isNo: false)
+            case .ai:
+                do {
+                    guard !node.ai.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                        throw WorkflowError.invalid("El bloque \(node.title) necesita un prompt.")
+                    }
+                    guard let agent else {
+                        throw WorkflowError.invalid("Conectá Codex para ejecutar este bloque.")
+                    }
+                    activeAI = true
+                    let text = try await aiRunner.run(prompt: node.ai.prompt, input: previousOutput,
+                                                      model: node.ai.model, root: root, agent: agent)
+                    activeAI = false
+                    if cancelled { break }
+                    let delivered = try WorkflowAIOutput.deliver(text, settings: node.ai, root: root)
+                    previousOutput = delivered.output
+                    previousExitCode = 0
+                    previousSucceeded = true
+                    visited[id] = .exited(0)
+                    results[id] = WorkflowStepResult(summary: "Codex · OK", detail: delivered.detail,
+                                                     successful: true)
+                    log += "Codex terminó. \(node.ai.outputMode == .output ? "Texto disponible" : "Archivo guardado").\n"
+                } catch {
+                    activeAI = false
+                    let message = cancelled ? "Ejecución detenida." : error.localizedDescription
+                    previousOutput = ""
+                    previousExitCode = 1
+                    previousSucceeded = false
+                    visited[id] = .failed(message)
+                    results[id] = WorkflowStepResult(summary: cancelled ? "Detenido" : "Codex · Error",
+                                                     detail: message, successful: false)
+                    log += "Codex: \(message)\n"
+                }
+                if cancelled { break }
+                current = node.next
+                recordTransition(from: id, to: current, isNo: false)
             }
         }
         if cancelled { log += "\nEjecución detenida.\n" }
+    }
+
+    private func recordTransition(from: UUID, to: UUID?, isNo: Bool) {
+        guard let to else { return }
+        traversedTransitions.insert(WorkflowTransition(from: from, to: to, isNo: isNo))
     }
 }

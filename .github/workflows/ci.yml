@@ -15,6 +15,10 @@ name: CI
 on:
   workflow_dispatch:
 
+# El token solo necesita leer el código; las acciones de abajo no escriben nada.
+permissions:
+  contents: read
+
 jobs:
   verify:
     runs-on: macos-latest

@@ -15,6 +15,7 @@ import SwiftUI
     var loading = false
     var expanded: Bool
     var projectIcon: NSImage?
+    var flutterProject = false
     var loadingIcon = false
     var watcher: DispatchSourceFileSystemObject?
 
@@ -222,6 +223,7 @@ struct FileTree: NSViewRepresentable {
             loadProjectIcon(node)
             let token = generation
             let url = node.url
+            let inheritedFlutterProject = node.flutterProject
             queue.async { [weak self, weak node] in
                 let result: Result<[(URL, Bool)], Error> = Result {
                     let keys: Set<URLResourceKey> = [.isDirectoryKey, .isSymbolicLinkKey]
@@ -243,7 +245,12 @@ struct FileTree: NSViewRepresentable {
                     switch result {
                     case .success(let entries):
                         let old = Dictionary(uniqueKeysWithValues: (node.children ?? []).map { ($0.url, $0) })
-                        node.children = entries.map { old[$0.0] ?? FileNode(url: $0.0, isDirectory: $0.1) }
+                        node.flutterProject = inheritedFlutterProject || entries.contains { $0.0.lastPathComponent == "pubspec.yaml" }
+                        node.children = entries.map { entry in
+                            let child = old[entry.0] ?? FileNode(url: entry.0, isDirectory: entry.1)
+                            child.flutterProject = node.flutterProject
+                            return child
+                        }
                         self.outline?.reloadItem(node, reloadChildren: true)
                         self.restoreExpansion(node)
                         self.refreshDisclosure()

@@ -1,6 +1,11 @@
 import AppKit
 import Observation
 
+struct CodexModelChoice: Identifiable, Equatable {
+    let id: String
+    let name: String
+}
+
 /// Dueño de la conversación con Codex: el estado que ve el panel y el protocolo.
 ///
 /// Habla por `CodexTransport` (un proceso hijo, JSONL por tuberías) y traduce sus
@@ -26,6 +31,7 @@ final class AgentController {
     var activity = ""
     var account = ""
     var model = ""
+    var availableModels: [CodexModelChoice] = []
     var isConnecting = false
     var isRunning = false
     var isStopping = false
@@ -168,6 +174,34 @@ final class AgentController {
     var approvedIdentity: BinaryIdentity? {
         guard let data = defaults.data(forKey: "approvedCodexBinary") else { return nil }
         return try? JSONDecoder().decode(BinaryIdentity.self, from: data)
+    }
+
+    var approvedExecutableURL: URL? {
+        guard connected, let approvedIdentity else { return nil }
+        return CodexExecutable.search(override: defaults.string(forKey: "codexExecutable"),
+                                      excludedRoots: excludedRoots).candidates
+            .first { $0.identity == approvedIdentity }?.url
+    }
+
+    func loadModels() async {
+        guard connected, !account.isEmpty else { return }
+        do {
+            var choices: [CodexModelChoice] = []
+            var cursor: String?
+            for _ in 0..<10 {
+                var params: [String: JSONValue] = ["includeHidden": .bool(false)]
+                if let cursor { params["cursor"] = .string(cursor) }
+                let catalog = try await transport.request("model/list", .object(params))
+                choices += catalog["data"].array.compactMap { item in
+                    guard let id = item["model"].string, !id.isEmpty,
+                          let name = item["displayName"].string, !item["hidden"].bool else { return nil }
+                    return CodexModelChoice(id: id, name: name)
+                }
+                cursor = catalog["nextCursor"].string
+                if cursor == nil { break }
+            }
+            availableModels = choices
+        } catch { self.error = "No se pudo cargar la lista de modelos: \(error.localizedDescription)" }
     }
 
     /// `true` si el candidato pendiente reemplaza a uno aprobado antes: el diálogo

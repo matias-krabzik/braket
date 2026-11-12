@@ -195,8 +195,16 @@ struct WorkspaceView: View {
                     }.font(.system(size: 11)).padding(.horizontal, 18).padding(.vertical, 6)
                 }
                 if document.language == "SQL" { SQLToolbar(document: document, controller: controller) }
-                CodeEditor(document: document, theme: AppSettings.shared.theme).id(document.id)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if let image = document.previewImage {
+                    Image(nsImage: image)
+                        .resizable().interpolation(.high).scaledToFit()
+                        .padding(20)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .accessibilityLabel("Vista previa de \(document.url.lastPathComponent)")
+                } else {
+                    CodeEditor(document: document, theme: AppSettings.shared.theme).id(document.id)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             } else {
                 VStack(spacing: 14) {
                     Image(systemName: "curlybraces").font(.system(size: 43, weight: .ultraLight)).foregroundStyle(.quaternary)
@@ -228,9 +236,14 @@ private struct EditorStatusBar: View {
             if let document {
                 if document.isSaving { Text("Guardando…") }
                 Spacer()
-                Text("\(document.line):\(document.column)").monospacedDigit()
-                Text(document.language)
-                Text("UTF-8")
+                if document.previewImage != nil {
+                    Text("Vista previa")
+                    Text(document.url.pathExtension.uppercased())
+                } else {
+                    Text("\(document.line):\(document.column)").monospacedDigit()
+                    Text(document.language)
+                    Text("UTF-8")
+                }
             } else { Spacer() }
         }
         .font(.system(size: 10)).foregroundStyle(.secondary)

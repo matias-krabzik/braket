@@ -32,9 +32,10 @@ struct CodeProjectIcon: Codable, Equatable {
 
     var tintOpacity: Double { tintStrength ?? 0.12 }
 
-    static let assets = ["angular", "astro", "bash", "c", "composer", "cplusplus", "csharp", "css3", "dart",
-                         "docker", "git", "go", "html5", "java", "javascript", "json", "laravel", "markdown", "nodejs",
-                         "npm", "php", "python", "react", "ruby", "rust", "svelte", "swift", "typescript", "vuejs", "yaml"]
+    static let assets = ["android", "angular", "apple", "astro", "bash", "c", "chrome", "composer", "cplusplus",
+                         "csharp", "css3", "dart", "docker", "flutter", "git", "go", "html5", "java", "javascript",
+                         "json", "laravel", "linux", "markdown", "nodejs", "npm", "php", "python", "react", "ruby",
+                         "rust", "svelte", "swift", "typescript", "vuejs", "windows8", "yaml"]
 
     var isValid: Bool {
         Self.assets.contains(asset) && (imageData?.count ?? 0) <= 131_072

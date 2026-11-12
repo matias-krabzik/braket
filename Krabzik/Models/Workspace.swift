@@ -298,7 +298,7 @@ struct Workspace: Codable, Equatable {
 /// ve el usuario. Los cuatro casos de C7 llevan el campo en el mensaje porque el
 /// `.kzk` es JSON legible y se puede corregir a mano.
 enum WorkspaceError: LocalizedError, Equatable {
-    case unsupportedVersion, duplicateProject, binaryFile, largeFile, externalChange, missingFolder
+    case unsupportedVersion, duplicateProject, binaryFile, invalidImage, largeFile, externalChange, missingFolder
     /// Los tres de C7 llevan el campo y el subproyecto en el mensaje: el `.kzk` es
     /// JSON legible y se puede corregir a mano si se sabe dónde mirar.
     case tooManyEntries(String)
@@ -315,6 +315,7 @@ enum WorkspaceError: LocalizedError, Equatable {
         case .unsupportedVersion: return "La versión de este proyecto no es compatible."
         case .duplicateProject: return "El proyecto contiene identificadores duplicados."
         case .binaryFile: return "Este archivo no es texto UTF-8."
+        case .invalidImage: return "No se pudo mostrar esta imagen. El archivo puede estar dañado o usar un formato no compatible."
         case .largeFile: return "El editor admite archivos de hasta 5 MB en esta versión."
         case .externalChange: return "El archivo cambió en el disco. Guardá una copia para conservar tus cambios."
         case .missingFolder: return "No se encuentra la carpeta del subproyecto."

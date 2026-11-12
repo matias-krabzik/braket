@@ -27,13 +27,12 @@ import AppKit
         let alert = NSAlert()
         alert.messageText = "¿Ejecutar el comando de «\(prompt.project)»?"
         alert.informativeText = "Se ejecuta con tu usuario y tu entorno completo."
-        alert.accessoryView = textBox("""
-        Carpeta:
-        \(prompt.directory)
-
-        Comando:
-        \(prompt.command)
-        """)
+        var lines = [prompt.isExternal ? "Carpeta FUERA de la carpeta del proyecto:" : "Carpeta:", prompt.directory,
+                     "", "Comando:", prompt.command]
+        if !prompt.environment.isEmpty {
+            lines += ["", "Variables de entorno que agrega:"] + prompt.environment.map { "  \($0)" }
+        }
+        alert.accessoryView = textBox(lines.joined(separator: "\n"))
         alert.addButton(withTitle: "Ejecutar una vez")
         alert.addButton(withTitle: "Ejecutar siempre este comando")
         alert.addButton(withTitle: "Cancelar")
@@ -90,6 +89,7 @@ extension WorkspaceController {
         let controller = WorkspaceController(settings: .shared)
         controller.confirmTrust = TrustPrompts.ask
         controller.projects.confirmCommand = TrustPrompts.askCommand
+        controller.workflows.confirmCommand = TrustPrompts.askCommand
         controller.session.dialogs = .real
         return controller
     }

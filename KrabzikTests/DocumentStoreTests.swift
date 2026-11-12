@@ -1,4 +1,5 @@
 @testable import Krabzik
+import AppKit
 import XCTest
 
 /// Los archivos abiertos, sin un solo diálogo: es el criterio 5 de C5. Si alguna de estas
@@ -69,6 +70,69 @@ final class DocumentStoreTests: XCTestCase {
             XCTAssertEqual(error as? WorkspaceError, .binaryFile)
         }
         XCTAssertTrue(store.documents.isEmpty)
+    }
+
+    func testLargePNGOpensAsPreviewWithoutChangingTheFile() async throws {
+        let root = try directory()
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 1400, pixelsHigh: 1400,
+                                                    bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
+                                                    isPlanar: false, colorSpaceName: .deviceRGB,
+                                                    bytesPerRow: 0, bitsPerPixel: 0))
+        let bytes = try XCTUnwrap(bitmap.bitmapData)
+        var seed: UInt32 = 0x1234ABCD
+        for index in 0..<(bitmap.bytesPerRow * bitmap.pixelsHigh) {
+            seed = seed &* 1664525 &+ 1013904223
+            bytes[index] = UInt8(truncatingIfNeeded: seed >> 24)
+        }
+        let data = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+        XCTAssertGreaterThan(data.count, 5 * 1024 * 1024)
+        let url = root.appendingPathComponent("large.png")
+        try data.write(to: url)
+        let store = DocumentStore()
+
+        try await store.open(url)
+
+        let document = try XCTUnwrap(store.selected)
+        XCTAssertNotNil(document.previewImage)
+        let saved = try await store.save(document)
+        XCTAssertFalse(saved)
+        XCTAssertEqual(try Data(contentsOf: url), data)
+        let copy = root.appendingPathComponent("copy.png")
+        try store.saveCopy(of: document, to: copy)
+        XCTAssertEqual(try Data(contentsOf: copy), data)
+    }
+
+    func testDamagedPNGReportsImageError() async throws {
+        let root = try directory()
+        let url = root.appendingPathComponent("damaged.png")
+        try Data("bad".utf8).write(to: url)
+        let store = DocumentStore()
+        do {
+            try await store.open(url)
+            XCTFail("un PNG dañado no debe abrirse")
+        } catch {
+            XCTAssertEqual(error as? WorkspaceError, .invalidImage)
+        }
+    }
+
+    func testSVGOpensAsPreviewAndRejectsExternalReferences() async throws {
+        let root = try directory()
+        let url = root.appendingPathComponent("diagram.svg")
+        let safe = #"<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"><rect width="120" height="80" fill="blue"/></svg>"#
+        try Data(safe.utf8).write(to: url)
+        let store = DocumentStore()
+        try await store.open(url)
+        XCTAssertNotNil(store.selected?.previewImage)
+
+        let unsafe = root.appendingPathComponent("external.svg")
+        let referenced = #"<svg xmlns="http://www.w3.org/2000/svg"><image href="https://example.com/image.png"/></svg>"#
+        try Data(referenced.utf8).write(to: unsafe)
+        do {
+            try await store.open(unsafe)
+            XCTFail("una imagen con referencias externas no debe abrirse")
+        } catch {
+            XCTAssertEqual(error as? WorkspaceError, .invalidImage)
+        }
     }
 
     func testSavePropagatesAnExternalChange() async throws {

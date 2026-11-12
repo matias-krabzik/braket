@@ -11,7 +11,7 @@ final class FileIconsTests: XCTestCase {
     }
 
     func testPackagedVectorLogosAndFileTypes() throws {
-        for name in ["laravel", "php", "angular", "astro", "nodejs", "html5", "css3", "javascript", "typescript",
+        for name in ["flutter", "android", "apple", "chrome", "windows8", "linux", "laravel", "php", "angular", "astro", "nodejs", "html5", "css3", "javascript", "typescript",
                      "react", "vuejs", "svelte", "json", "yaml", "markdown", "swift", "dart", "python", "ruby",
                      "go", "rust", "java", "c", "cplusplus", "csharp", "docker", "git", "bash", "npm", "composer"] {
             XCTAssertTrue(try XCTUnwrap(FileIcons.asset(name), name).isValid)
@@ -20,6 +20,20 @@ final class FileIconsTests: XCTestCase {
                         "Dockerfile": "docker", ".gitignore": "git", "composer.lock": "composer", "style.css": "css3"]
         for (file, expected) in mappings { XCTAssertEqual(FileIcons.assetName(for: URL(fileURLWithPath: file)), expected) }
         XCTAssertNil(FileIcons.assetName(for: URL(fileURLWithPath: "other.xyz")))
+        XCTAssertEqual(FileIcons.assetName(for: URL(fileURLWithPath: "pubspec.yaml")), "flutter")
+    }
+
+    func testFlutterDestinationsUsePlatformIcons() throws {
+        let root = try directory()
+        try Data("name: sample".utf8).write(to: root.appendingPathComponent("pubspec.yaml"))
+        XCTAssertEqual(ProjectIconFiles.read(at: root, kind: .files).technology, "flutter")
+        let destinations = ["android": "android", "ios": "apple", "macos": "apple", "web": "chrome",
+                            "windows": "windows8", "linux": "linux"]
+        for (folder, icon) in destinations {
+            XCTAssertEqual(FileIcons.folderTechnology(folder, inFlutterProject: true), icon)
+            XCTAssertNil(FileIcons.folderTechnology(folder, inFlutterProject: false))
+        }
+        XCTAssertNil(FileIcons.folderTechnology("lib", inFlutterProject: true))
     }
 
     func testDeclaredLocalFaviconTakesPriorityAndInvalidDataFallsBack() throws {

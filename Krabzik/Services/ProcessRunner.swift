@@ -28,6 +28,7 @@ final class ProjectRun: Identifiable {
     let id: UUID
     var status: RunStatus = .idle
     var output = ""
+    var capturedOutput = ""
     var revision = 0
     @ObservationIgnored var workspaceURL: URL?
     @ObservationIgnored var name = ""
@@ -136,6 +137,7 @@ final class ProcessRunner {
         run.generation = UUID()
         let generation = run.generation
         run.output = "$ \(project.command)\n"
+        run.capturedOutput = ""
         run.revision += 1
 
         var descriptors: [Int32] = [0, 0]
@@ -194,6 +196,10 @@ final class ProcessRunner {
         let batch = OutputBatch { [weak run] text in
             guard let run, run.generation == generation else { return }
             run.append(text)
+            run.capturedOutput += text
+            if run.capturedOutput.utf8.count > 200_000 {
+                run.capturedOutput = String(run.capturedOutput.suffix(120_000))
+            }
         }
         DispatchQueue.global(qos: .utility).async {
             var buffer = [UInt8](repeating: 0, count: 16_384)

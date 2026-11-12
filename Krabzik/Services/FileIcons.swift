@@ -23,7 +23,8 @@ enum FileIcons {
         let symbol: String
         switch url.pathExtension.lowercased() {
         case "sql": symbol = "externaldrive.fill"
-        case "png", "jpg", "jpeg", "gif", "webp", "svg", "ico": symbol = "photo"
+        case "png", "apng", "jpg", "jpeg", "gif", "webp", "svg", "ico", "icns", "heic", "heif",
+             "bmp", "tif", "tiff", "avif", "jp2", "j2k", "psd": symbol = "photo"
         case "zip", "gz", "tar": symbol = "archivebox"
         case "pdf": symbol = "doc.richtext"
         default: symbol = "doc"
@@ -33,6 +34,7 @@ enum FileIcons {
 
     nonisolated static func assetName(for url: URL) -> String? {
         let name = url.lastPathComponent.lowercased()
+        if name == "pubspec.yaml" || name == "pubspec.lock" { return "flutter" }
         if name == "package.json" || name.hasPrefix("package-lock.") { return "npm" }
         if name == "composer.json" || name == "composer.lock" { return "composer" }
         if name == "dockerfile" || name.hasPrefix("docker-compose") { return "docker" }
@@ -46,6 +48,18 @@ enum FileIcons {
                           "rs": "rust", "java": "java", "c": "c", "h": "c", "cpp": "cplusplus",
                           "hpp": "cplusplus", "cs": "csharp", "sh": "bash", "zsh": "bash"]
         return extensions[url.pathExtension.lowercased()]
+    }
+
+    nonisolated static func folderTechnology(_ name: String, inFlutterProject: Bool) -> String? {
+        guard inFlutterProject else { return nil }
+        switch name.lowercased() {
+        case "android": return "android"
+        case "ios", "macos": return "apple"
+        case "web": return "chrome"
+        case "windows": return "windows8"
+        case "linux": return "linux"
+        default: return nil
+        }
     }
 
     nonisolated static func technology(_ kind: ProjectKind) -> String? {
@@ -156,11 +170,14 @@ enum FileIcons {
            ] as CFDictionary) {
             return NSImage(cgImage: image, size: NSSize(width: 18, height: 18))
         }
-        guard let text = String(data: data, encoding: .utf8), text.contains("<svg"),
-              !text.localizedCaseInsensitiveContains("<!ENTITY"), !text.localizedCaseInsensitiveContains("<!DOCTYPE"),
-              !text.localizedCaseInsensitiveContains("<image"), !text.localizedCaseInsensitiveContains("<script"),
-              !text.localizedCaseInsensitiveContains("href"), !text.localizedCaseInsensitiveContains("url(") else { return nil }
+        guard safeSVG(data) else { return nil }
         return NSImage(data: data)
+    }
+
+    nonisolated static func safeSVG(_ data: Data) -> Bool {
+        guard let text = String(data: data, encoding: .utf8), text.localizedCaseInsensitiveContains("<svg") else { return false }
+        return !["<!entity", "<!doctype", "<image", "<script", "href", "url(", "@import", "<foreignobject"]
+            .contains { text.localizedCaseInsensitiveContains($0) }
     }
 }
 
@@ -194,7 +211,7 @@ struct ProjectIconFiles: Sendable {
             .compactMap { boundedData($0, within: root) }.prefix(8)
         var technology = FileIcons.technology(kind)
         if kind == .files {
-            let manifests = [("Package.swift", "swift"), ("pubspec.yaml", "dart"), ("Cargo.toml", "rust"),
+            let manifests = [("pubspec.yaml", "flutter"), ("Package.swift", "swift"), ("Cargo.toml", "rust"),
                              ("go.mod", "go"), ("pyproject.toml", "python"), ("Gemfile", "ruby")]
             technology = manifests.first { FileManager.default.fileExists(atPath: root.appendingPathComponent($0.0).path) }?.1
         }

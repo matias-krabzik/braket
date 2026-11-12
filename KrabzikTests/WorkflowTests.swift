@@ -2,6 +2,11 @@
 import XCTest
 
 @MainActor final class WorkflowTests: XCTestCase {
+    /// Un almacén aislado: las pruebas no tocan las aprobaciones reales del usuario.
+    private func approvingStore() throws -> TrustStore {
+        try TrustStore(defaults: XCTUnwrap(UserDefaults(suiteName: "WorkflowTests-\(UUID().uuidString)")))
+    }
+
     func testConnectingPortsUpdatesBranchesAndRejectsCycles() throws {
         var flow = Workflow.first()
         let script = try XCTUnwrap(flow.nodes.first(where: { $0.kind == .script }))
@@ -42,11 +47,17 @@ import XCTest
         for kind in [WorkflowKind.event, .schedule] {
             let trigger = WorkflowNode(kind: kind, title: kind.title, x: 70, y: 300, next: finalNode.id)
             model.file.workflows[0].nodes.append(trigger)
-            model.run(workspace: workspace, root: root, runner: runner, trusted: true, trigger: kind)
+            // El script del flujo no cuelga de estos disparadores: no hay nada que aprobar.
+            model.run(workspace: workspace, root: root, runner: runner, trusted: true,
+                      approvals: try approvingStore(), trigger: kind)
             let deadline = Date().addingTimeInterval(5)
             while model.isRunning, Date() < deadline { try await Task.sleep(for: .milliseconds(30)) }
             XCTAssertFalse(model.isRunning)
             XCTAssertEqual(model.visited[trigger.id], .exited(0))
+            XCTAssertEqual(model.results[trigger.id]?.summary, "OK")
+            XCTAssertEqual(model.results[finalNode.id]?.summary, "Finalizado")
+            XCTAssertTrue(model.traversedTransitions.contains(WorkflowTransition(
+                from: trigger.id, to: finalNode.id, isNo: false)))
         }
     }
 
@@ -76,22 +87,29 @@ import XCTest
         model.configure(workspace, root: root)
         XCTAssertEqual(model.selected?.nodes.count, 5, model.error)
         let script = try XCTUnwrap(model.file.workflows[0].nodes.firstIndex { $0.kind == .script })
-        model.file.workflows[0].nodes[script].command = "echo branch-test; exit 3"
+        model.file.workflows[0].nodes[script].command = "exit 3"
         model.save()
         XCTAssertTrue(model.error.isEmpty)
         let reloaded = WorkflowController()
         reloaded.configure(workspace, root: root)
         let reloadedFlow = try XCTUnwrap(reloaded.file.workflows.first, reloaded.error)
-        XCTAssertEqual(reloadedFlow.nodes[script].command, "echo branch-test; exit 3")
+        XCTAssertEqual(reloadedFlow.nodes[script].command, "exit 3")
         let runner = ProcessRunner()
         defer { runner.terminateImmediately() }
-        reloaded.run(workspace: workspace, root: root, runner: runner, trusted: true)
+        reloaded.confirmCommand = { _ in .once }
+        reloaded.run(workspace: workspace, root: root, runner: runner, trusted: true, approvals: try approvingStore())
         let deadline = Date().addingTimeInterval(5)
         while reloaded.isRunning, Date() < deadline { try await Task.sleep(for: .milliseconds(30)) }
         XCTAssertFalse(reloaded.isRunning)
         XCTAssertTrue(reloaded.log.contains("No"))
-        XCTAssertTrue(reloaded.log.contains("Fin: Revisar cambios"))
-        XCTAssertFalse(reloaded.log.contains("Fin: Proyecto listo"))
+        XCTAssertTrue(reloaded.log.contains("Fin: Sin commits nuevos"))
+        XCTAssertFalse(reloaded.log.contains("Fin: Commits pendientes"))
+        let decision = try XCTUnwrap(reloadedFlow.nodes.first { $0.kind == .decision })
+        let no = try XCTUnwrap(decision.no)
+        let yes = try XCTUnwrap(decision.next)
+        XCTAssertEqual(reloaded.results[decision.id]?.summary, "No")
+        XCTAssertTrue(reloaded.traversedTransitions.contains(WorkflowTransition(from: decision.id, to: no, isNo: true)))
+        XCTAssertFalse(reloaded.traversedTransitions.contains(WorkflowTransition(from: decision.id, to: yes, isNo: false)))
     }
 
     func testScriptSettingsPersistAndApplyToProcess() async throws {
@@ -103,10 +121,12 @@ import XCTest
         let model = WorkflowController()
         model.configure(workspace, root: root)
         let index = try XCTUnwrap(model.file.workflows[0].nodes.firstIndex { $0.kind == .script })
-        model.file.workflows[0].nodes[index].command = "printf '%s:%s' \"$BRAKET_TEST\" \"$PWD\""
-        model.file.workflows[0].nodes[index].settings = WorkflowScriptSettings(
-            workingDirectory: "scripts", timeoutSeconds: 5,
-            environment: [WorkflowEnvironmentVariable(name: "BRAKET_TEST", value: "configured")])
+        model.file.workflows[0].nodes[index].command = "printf '%s:%s:%s' \"$BRAKET_TEST\" \"$PWD\" \"$BRAKET_INPUT\""
+        model.file.workflows[0].nodes[index].settings = WorkflowScriptSettings(workingDirectory: "scripts", timeoutSeconds: 5,
+                                                                               environment: [
+                                                                                   WorkflowEnvironmentVariable(name: "BRAKET_TEST",
+                                                                                                               value: "configured")
+                                                                               ])
         model.save()
         XCTAssertTrue(model.error.isEmpty, model.error)
 
@@ -115,11 +135,12 @@ import XCTest
         XCTAssertEqual(restored.selected?.nodes[index].settings.timeoutSeconds, 5)
         let runner = ProcessRunner()
         defer { runner.terminateImmediately() }
-        restored.run(workspace: workspace, root: root, runner: runner, trusted: true)
+        restored.confirmCommand = { _ in .once }
+        restored.run(workspace: workspace, root: root, runner: runner, trusted: true, approvals: try approvingStore())
         let deadline = Date().addingTimeInterval(8)
         while restored.isRunning, Date() < deadline { try await Task.sleep(for: .milliseconds(30)) }
         XCTAssertFalse(restored.isRunning)
-        XCTAssertTrue(restored.log.contains("configured:\(subfolder.path)"), restored.log)
+        XCTAssertTrue(restored.log.contains("configured:\(subfolder.path):ok"), restored.log)
     }
 
     func testScriptTimeoutMarksStepAsFailed() async throws {
@@ -135,11 +156,152 @@ import XCTest
         let id = model.file.workflows[0].nodes[index].id
         let runner = ProcessRunner()
         defer { runner.terminateImmediately() }
-        model.run(workspace: workspace, root: root, runner: runner, trusted: true)
+        model.confirmCommand = { _ in .once }
+        model.run(workspace: workspace, root: root, runner: runner, trusted: true, approvals: try approvingStore())
         let deadline = Date().addingTimeInterval(8)
         while model.isRunning, Date() < deadline { try await Task.sleep(for: .milliseconds(30)) }
         XCTAssertFalse(model.isRunning)
         XCTAssertEqual(model.visited[id], .failed("Tiempo límite de 1 s agotado"))
-        XCTAssertTrue(model.log.contains("Fin: Revisar cambios"), model.log)
+        XCTAssertTrue(model.log.contains("Fin: Sin commits nuevos"), model.log)
+    }
+
+    func testIfComparesTextAndNumbersWithAllOperators() throws {
+        var condition = WorkflowCondition(mode: .compare, valueType: .number,
+                                          operation: .equal,
+                                          left: WorkflowOperand(source: .previousOutput),
+                                          right: WorkflowOperand(value: "3"))
+        let expected: [(WorkflowComparisonOperator, Bool)] = [
+            (.equal, false), (.notEqual, true), (.less, true),
+            (.lessOrEqual, true), (.greater, false), (.greaterOrEqual, false)
+        ]
+        for (operation, result) in expected {
+            condition.operation = operation
+            XCTAssertEqual(try condition.evaluate(previousSucceeded: false, output: "2,5", exitCode: nil), result)
+        }
+        condition.valueType = .text
+        condition.right.value = "abc"
+        condition.operation = .less
+        XCTAssertTrue(try condition.evaluate(previousSucceeded: false, output: "Abc", exitCode: nil))
+        condition.operation = .equal
+        XCTAssertFalse(try condition.evaluate(previousSucceeded: false, output: "Abc", exitCode: nil))
+        condition.valueType = .number
+        XCTAssertThrowsError(try condition.evaluate(previousSucceeded: false, output: "Abc", exitCode: nil))
+    }
+
+    func testIfCanComparePreviousScriptOutputAndExitCode() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let workspace = root.appendingPathComponent("Example.kzk")
+        let model = WorkflowController()
+        model.configure(workspace, root: root)
+        let script = try XCTUnwrap(model.file.workflows[0].nodes.firstIndex { $0.kind == .script })
+        let decision = try XCTUnwrap(model.file.workflows[0].nodes.firstIndex { $0.kind == .decision })
+        model.file.workflows[0].nodes[script].command = "printf '42'"
+        model.file.workflows[0].nodes[decision].condition = WorkflowCondition(mode: .compare, valueType: .number, operation: .greater,
+                                                                              left: WorkflowOperand(source: .previousOutput),
+                                                                              right: WorkflowOperand(value: "40"))
+        let originalEnd = try XCTUnwrap(model.file.workflows[0].nodes[decision].next)
+        let capture = WorkflowNode(kind: .script, title: "Recibir salida",
+                                   command: "printf '%s' \"$BRAKET_INPUT\" > recibido.txt",
+                                   x: 650, y: 120, next: originalEnd)
+        model.file.workflows[0].nodes[decision].next = capture.id
+        model.file.workflows[0].nodes.append(capture)
+        model.save()
+        XCTAssertTrue(model.error.isEmpty, model.error)
+        let restored = WorkflowController()
+        restored.configure(workspace, root: root)
+        let runner = ProcessRunner()
+        defer { runner.terminateImmediately() }
+        restored.confirmCommand = { _ in .once }
+        restored.run(workspace: workspace, root: root, runner: runner, trusted: true, approvals: try approvingStore())
+        let deadline = Date().addingTimeInterval(5)
+        while restored.isRunning, Date() < deadline { try await Task.sleep(for: .milliseconds(30)) }
+        XCTAssertFalse(restored.isRunning)
+        XCTAssertTrue(restored.log.contains("Fin: Commits pendientes"), restored.log)
+        XCTAssertFalse(restored.log.contains("Fin: Sin commits nuevos"), restored.log)
+        XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("recibido.txt"), encoding: .utf8), "42")
+        let selectedDecision = try XCTUnwrap(restored.selected?.nodes.first { $0.kind == .decision })
+        XCTAssertEqual(restored.results[selectedDecision.id]?.summary, "Sí")
+        XCTAssertTrue(restored.traversedTransitions.contains(WorkflowTransition(
+            from: selectedDecision.id, to: try XCTUnwrap(selectedDecision.next), isNo: false)))
+
+        var exitCondition = WorkflowCondition(mode: .compare, valueType: .number,
+                                              operation: .equal,
+                                              left: WorkflowOperand(source: .previousExitCode),
+                                              right: WorkflowOperand(value: "0"))
+        XCTAssertTrue(try exitCondition.evaluate(previousSucceeded: false, output: "", exitCode: 0))
+        exitCondition.right.value = "1"
+        XCTAssertFalse(try exitCondition.evaluate(previousSucceeded: true, output: "", exitCode: 0))
+    }
+
+    func testOlderIfUsesPreviousExitCodeComparedWithZero() throws {
+        let flow = Workflow.first()
+        let encoded = try JSONEncoder().encode(flow)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        var nodes = try XCTUnwrap(object["nodes"] as? [[String: Any]])
+        for index in nodes.indices { nodes[index].removeValue(forKey: "condition") }
+        object["nodes"] = nodes
+        let legacy = try JSONSerialization.data(withJSONObject: object)
+        let restored = try JSONDecoder().decode(Workflow.self, from: legacy)
+        let decision = try XCTUnwrap(restored.nodes.first { $0.kind == .decision })
+        XCTAssertEqual(decision.condition.left.source, .previousExitCode)
+        XCTAssertEqual(decision.condition.right.value, "0")
+        XCTAssertTrue(try decision.condition.evaluate(previousSucceeded: false, output: "", exitCode: 0))
+        XCTAssertFalse(try decision.condition.evaluate(previousSucceeded: true, output: "", exitCode: 2))
+    }
+
+    func testCodexOutputModesAndProjectBoundary() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var settings = WorkflowAISettings(prompt: "Notas", outputMode: .output,
+                                          outputPath: "docs/releases/draft-notes.md")
+        XCTAssertEqual(try WorkflowAIOutput.deliver("## Cambios", settings: settings, root: root).output, "## Cambios")
+        settings.outputMode = .file
+        XCTAssertEqual(try WorkflowAIOutput.deliver("## Cambios", settings: settings, root: root).output, "")
+        let file = root.appendingPathComponent(settings.outputPath)
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "## Cambios")
+        settings.outputMode = .filePath
+        XCTAssertEqual(try WorkflowAIOutput.deliver("## Nuevo", settings: settings, root: root).output, file.path)
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "## Nuevo")
+        settings.outputPath = "../afuera.md"
+        XCTAssertThrowsError(try WorkflowAIOutput.deliver("No", settings: settings, root: root))
+    }
+
+    func testCodexStepSendsPreviousOutputAndReceivesFinalText() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let executable = root.appendingPathComponent("fake-codex")
+        let fixture = """
+        #!/usr/bin/env python3
+        import json, sys
+        def send(value):
+            sys.stdout.write(json.dumps(value) + '\\n')
+            sys.stdout.flush()
+        for line in sys.stdin:
+            message = json.loads(line)
+            method = message.get('method')
+            request_id = message.get('id')
+            if method == 'initialize':
+                send({'id': request_id, 'result': {}})
+            elif method == 'thread/start':
+                send({'id': request_id, 'result': {'thread': {'id': 'workflow-thread'}}})
+            elif method == 'turn/start':
+                prompt = message['params']['input'][0]['text']
+                text = '## Cambios\\n- abc Arreglar editor' if 'abc Arreglar editor' in prompt else 'ENTRADA FALTANTE'
+                send({'id': request_id, 'result': {'turn': {'id': 'workflow-turn'}}})
+                send({'method': 'item/completed', 'params': {'threadId': 'workflow-thread',
+                      'item': {'id': 'answer', 'type': 'agentMessage', 'phase': 'final', 'text': text}}})
+                send({'method': 'turn/completed', 'params': {'threadId': 'workflow-thread',
+                      'turn': {'id': 'workflow-turn', 'status': 'completed'}}})
+        """
+        try fixture.write(to: executable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let codex = WorkflowCodexRunner()
+        let result = try await codex.run(prompt: "Generá notas", input: "abc Arreglar editor",
+                                         model: "modelo-de-prueba", root: root, executable: executable)
+        XCTAssertEqual(result, "## Cambios\n- abc Arreglar editor")
     }
 }

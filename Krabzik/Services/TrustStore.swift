@@ -125,6 +125,10 @@ struct CommandPrompt: Sendable {
     let project: String
     let command: String
     let directory: String
+    /// `NOMBRE=valor` de lo que se agrega al entorno. Vacío en los comandos de subproyecto.
+    var environment: [String] = []
+    /// La carpeta de trabajo cae fuera de la carpeta del proyecto.
+    var isExternal = false
 }
 
 /// Lo que el usuario decidió sobre un comando que nunca se ejecutó en este proyecto.

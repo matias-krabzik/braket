@@ -60,8 +60,14 @@ final class FileTreeCell: NSTableCellView {
             if icon.image?.isTemplate == true { icon.contentTintColor = .labelColor }
         }
         else if node.isDirectory {
-            icon.image = NSImage(systemSymbolName: "folder.fill", accessibilityDescription: nil)
-            icon.contentTintColor = EditorPalette.blue
+            if let name = FileIcons.folderTechnology(node.name, inFlutterProject: node.flutterProject),
+               let technology = FileIcons.asset(name) {
+                icon.image = FileIcons.display(technology, monochrome: monochrome)
+                if icon.image?.isTemplate == true { icon.contentTintColor = .labelColor }
+            } else {
+                icon.image = NSImage(systemSymbolName: "folder.fill", accessibilityDescription: nil)
+                icon.contentTintColor = EditorPalette.blue
+            }
         } else {
             icon.image = FileIcons.display(FileIcons.file(node.url), monochrome: monochrome)
             if icon.image?.isTemplate == true { icon.contentTintColor = .labelColor }

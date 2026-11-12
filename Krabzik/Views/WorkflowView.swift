@@ -45,6 +45,7 @@ struct WorkflowView: View {
                         if model.error.isEmpty {
                             model.run(workspace: workspaceURL, root: controller.workflowRoot,
                                       runner: controller.runner, trusted: !controller.isReadOnly,
+                                      approvals: controller.session.trustStore, agent: controller.agent,
                                       trigger: selectedTriggerKind ?? .start)
                         }
                     }
@@ -65,14 +66,14 @@ struct WorkflowView: View {
                             pan.height += $0.translation.height
                             livePan = .zero })
                     .onTapGesture {
-                        selectedNode = nil
                         pendingConnection = nil
                         connectionPreview = nil
                     }
                     if let flow {
                         ForEach(flow.nodes) { node in
                             WorkflowNodeCard(node: node, selected: selectedNode == node.id,
-                                             status: model.visited[node.id], active: model.activeNodeID == node.id)
+                                             status: model.visited[node.id], result: model.results[node.id],
+                                             active: model.isRunning && model.activeNodeID == node.id)
                                 .scaleEffect(zoom)
                                 .position(nodeCenter(node, size: geometry.size))
                                 .onTapGesture { selectedNode = node.id }
@@ -132,6 +133,10 @@ struct WorkflowView: View {
                 WorkflowInspector(node: $model.file.workflows[index].nodes[nodeIndex],
                                   choices: model.file.workflows[index].nodes, canEdit: canEdit,
                                   rootURL: controller.workflowRoot,
+                                  models: controller.agent.availableModels,
+                                  codexConnected: controller.agent.connected && !controller.agent.account.isEmpty,
+                                  openCodex: { controller.agent.visible = true },
+                                  result: model.results[model.file.workflows[index].nodes[nodeIndex].id],
                                   remove: { remove(model.file.workflows[index].nodes[nodeIndex].id) },
                                   close: { selectedNode = nil })
                     .id(model.file.workflows[index].nodes[nodeIndex].id)
@@ -139,6 +144,10 @@ struct WorkflowView: View {
                     .background(Theme.bar)
             }
         }.onAppear { model.configure(workspaceURL, root: controller.workflowRoot) }
+            .task(id: controller.agent.connected) {
+                if controller.agent.connected { await controller.agent.loadModels() }
+                else { await controller.agent.connect() }
+            }
             .onChange(of: model.selectedID) { _, _ in
                 selectedNode = nil
                 pendingConnection = nil
@@ -152,8 +161,9 @@ struct WorkflowView: View {
     private func inspectorHeight(for kind: WorkflowKind) -> CGFloat {
         switch kind {
         case .script: 360
-        case .decision: 215
-        case .end: 150
+        case .ai: 390
+        case .decision: 300
+        case .end: 210
         case .start, .event, .schedule: 250
         }
     }
@@ -256,13 +266,18 @@ struct WorkflowView: View {
 
     private func drawConnections(in context: inout GraphicsContext, size: CGSize) {
         guard let flow else { return }
+        let traversed = controller.workflows.traversedTransitions
+        let hasExecution = !controller.workflows.results.isEmpty
         for node in flow.nodes {
             for (destination, isNo, color) in [(node.next, false, node.kind == .decision ? Color.green : Theme.accent),
                                                (node.no, true, Color.red)] {
                 guard let destination, let target = flow.nodes.first(where: { $0.id == destination }) else { continue }
+                let taken = traversed.contains(WorkflowTransition(from: node.id, to: destination, isNo: isNo))
                 drawArrow(in: &context, from: outputPoint(node, isNo: isNo, size: size),
                           to: inputPoint(target, size: size), color: color,
-                          targetWidth: halfWidth(of: target) * 2 * zoom)
+                          targetWidth: halfWidth(of: target) * 2 * zoom,
+                          opacity: hasExecution ? (taken ? 1 : 0.16) : 0.85,
+                          lineWidth: taken ? 3.5 : 2)
             }
         }
         if let pendingConnection, let source = flow.nodes.first(where: { $0.id == pendingConnection.nodeID }) {
@@ -274,7 +289,8 @@ struct WorkflowView: View {
     }
 
     private func drawArrow(in context: inout GraphicsContext, from start: CGPoint, to end: CGPoint,
-                           color: Color, targetWidth: CGFloat = 0) {
+                           color: Color, targetWidth: CGFloat = 0,
+                           opacity: Double = 0.85, lineWidth: CGFloat = 2) {
         var path = Path()
         path.move(to: start)
         if end.x < start.x + 24 * zoom {
@@ -301,12 +317,12 @@ struct WorkflowView: View {
             path.addCurve(to: end, control1: CGPoint(x: start.x + control, y: start.y),
                           control2: CGPoint(x: end.x - control, y: end.y))
         }
-        context.stroke(path, with: .color(color.opacity(0.85)), lineWidth: 2)
+        context.stroke(path, with: .color(color.opacity(opacity)), lineWidth: lineWidth)
         var tip = Path()
         tip.move(to: CGPoint(x: end.x - 8, y: end.y - 4))
         tip.addLine(to: end)
         tip.addLine(to: CGPoint(x: end.x - 8, y: end.y + 4))
-        context.stroke(tip, with: .color(color.opacity(0.85)), style: StrokeStyle(lineWidth: 2,
+        context.stroke(tip, with: .color(color.opacity(opacity)), style: StrokeStyle(lineWidth: lineWidth,
                                                                                   lineCap: .round, lineJoin: .round))
     }
 
@@ -349,6 +365,7 @@ private struct WorkflowNodeCard: View {
     let node: WorkflowNode
     let selected: Bool
     let status: RunStatus?
+    let result: WorkflowStepResult?
     let active: Bool
 
     private var color: Color {
@@ -357,6 +374,7 @@ private struct WorkflowNodeCard: View {
         case .event: return .cyan
         case .schedule: return .indigo
         case .script: return Theme.accent
+        case .ai: return .indigo
         case .decision: return .orange
         case .end: return .purple
         }
@@ -368,6 +386,7 @@ private struct WorkflowNodeCard: View {
         case .event: "bolt.fill"
         case .schedule: "clock.fill"
         case .script: "terminal"
+        case .ai: "sparkles"
         case .decision: "arrow.triangle.branch"
         case .end: "stop.fill"
         }
@@ -428,6 +447,26 @@ private struct WorkflowNodeCard: View {
                     .stroke(color.opacity(selected ? 0.95 : 0.5), lineWidth: selected ? 2 : 1))
             }
         }
+        .overlay(alignment: .bottom) {
+            if let result {
+                Text(result.summary)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(result.successful ? Color.green : Color.red)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(Theme.background, in: Capsule())
+                    .overlay(Capsule().strokeBorder((result.successful ? Color.green : Color.red).opacity(0.65)))
+                    .offset(y: 18)
+                    .allowsHitTesting(false)
+            } else if active {
+                Text("Ejecutando…")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Theme.accent)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(Theme.background, in: Capsule())
+                    .offset(y: 18)
+                    .allowsHitTesting(false)
+            }
+        }
     }
 }
 
@@ -463,13 +502,18 @@ private struct WorkflowInspector: View {
     let choices: [WorkflowNode]
     let canEdit: Bool
     let rootURL: URL
+    let models: [CodexModelChoice]
+    let codexConnected: Bool
+    let openCodex: () -> Void
+    let result: WorkflowStepResult?
     let remove: () -> Void
     let close: () -> Void
 
     private var summary: String {
         switch node.kind {
         case .script: node.command.split(separator: "\n").first.map(String.init) ?? "Sin comando"
-        case .decision: "Dos resultados"
+        case .ai: node.ai.model.isEmpty ? "Modelo automático" : node.ai.model
+        case .decision: "\(node.condition.left.source == .previousExitCode ? "Código" : "Salida") · \(node.condition.operation.title)"
         case .end: "Finaliza el flujo"
         case .start: "Inicio manual"
         case .event: "Disparador por evento"
@@ -480,6 +524,7 @@ private struct WorkflowInspector: View {
     private var symbol: String {
         switch node.kind {
         case .script: "terminal"
+        case .ai: "sparkles"
         case .decision: "arrow.triangle.branch"
         case .end: "stop.fill"
         case .start: "play.fill"
@@ -513,11 +558,24 @@ private struct WorkflowInspector: View {
             Divider()
             ScrollView(.vertical) {
                 VStack(spacing: 8) {
+                    if let result {
+                        WorkflowSettingsCard(title: "Última ejecución", symbol: result.successful ? "checkmark.circle" : "circle.dotted.circle") {
+                            Text(result.summary)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(result.successful ? Color.green : Color.red)
+                            Text(String(result.detail.suffix(8_000)))
+                                .font(.system(size: 11, design: node.kind == .script ? .monospaced : .default))
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
                     switch node.kind {
                     case .script:
                         WorkflowSettingsCard(title: "Comando", symbol: "terminal") {
                             Text("Se ejecuta con zsh.")
                                 .font(.caption).foregroundStyle(.secondary)
+                            Text("La salida anterior está en $BRAKET_INPUT; su código en $BRAKET_PREVIOUS_EXIT_CODE.")
+                                .font(.caption2).foregroundStyle(.secondary)
                             TextEditor(text: $node.command)
                                 .font(.system(size: 11, design: .monospaced))
                                 .frame(height: 70).disabled(!canEdit)
@@ -564,15 +622,95 @@ private struct WorkflowInspector: View {
                                     .buttonStyle(.plain)
                                     .disabled(node.settings.environment.count >= 50)
                             }
+                            Text("Se guardan en el archivo del flujo, que Git puede commitear: no pongas contraseñas ni tokens.")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        WorkflowSettingsCard(title: "Continuación", symbol: "arrow.right") {
+                            destinationPicker("Siguiente bloque", selection: $node.next)
+                        }
+                    case .ai:
+                        WorkflowSettingsCard(title: "Entrada", symbol: "arrow.down.doc") {
+                            Text("Recibe el texto que entregó el bloque anterior.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        WorkflowSettingsCard(title: "Prompt", symbol: "text.bubble") {
+                            TextEditor(text: $node.ai.prompt)
+                                .font(.system(size: 11, design: .monospaced))
+                                .frame(height: 95).disabled(!canEdit)
+                        }
+                        WorkflowSettingsCard(title: "Modelo", symbol: "sparkles") {
+                            HStack(spacing: 10) {
+                                Picker("Modelo", selection: $node.ai.model) {
+                                    Text("Automático").tag("")
+                                    ForEach(models) { model in Text(model.name).tag(model.id) }
+                                    if !node.ai.model.isEmpty && !models.contains(where: { $0.id == node.ai.model }) {
+                                        Text(node.ai.model).tag(node.ai.model)
+                                    }
+                                }.labelsHidden().frame(maxWidth: 270).disabled(!canEdit)
+                                if !codexConnected {
+                                    Button("Conectar Codex", action: openCodex)
+                                }
+                            }
+                        }
+                        WorkflowSettingsCard(title: "Resultado", symbol: "doc.badge.arrow.down") {
+                            Picker("Destino", selection: $node.ai.outputMode) {
+                                ForEach(WorkflowAIOutputMode.allCases, id: \.self) { mode in
+                                    Text(mode.title).tag(mode)
+                                }
+                            }.labelsHidden().frame(maxWidth: 270).disabled(!canEdit)
+                            if node.ai.outputMode != .output {
+                                TextField("Ruta dentro del proyecto", text: $node.ai.outputPath)
+                                    .font(.system(size: 11, design: .monospaced)).disabled(!canEdit)
+                                Text("El archivo se guarda dentro del proyecto.")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
                         }
                         WorkflowSettingsCard(title: "Continuación", symbol: "arrow.right") {
                             destinationPicker("Siguiente bloque", selection: $node.next)
                         }
                     case .decision:
+                        WorkflowSettingsCard(title: "Condición", symbol: "equal") {
+                            HStack(spacing: 10) {
+                                Text("Del paso anterior").font(.caption).foregroundStyle(.secondary)
+                                Picker("Dato del paso anterior", selection: previousValueBinding) {
+                                    Text("Salida").tag(WorkflowValueSource.previousOutput)
+                                    Text("Código de salida").tag(WorkflowValueSource.previousExitCode)
+                                }.labelsHidden().frame(width: 190).disabled(!canEdit)
+                                if node.condition.left.source == .previousOutput {
+                                    Text("Tipo").font(.caption).foregroundStyle(.secondary)
+                                    Picker("Tipo", selection: $node.condition.valueType) {
+                                        ForEach(WorkflowValueType.allCases, id: \.self) { type in
+                                            Text(type.title).tag(type)
+                                        }
+                                    }.labelsHidden().frame(width: 120).disabled(!canEdit)
+                                }
+                            }
+                            HStack(spacing: 10) {
+                                Text("Comparación").font(.caption).foregroundStyle(.secondary)
+                                Picker("Comparación", selection: $node.condition.operation) {
+                                    ForEach(WorkflowComparisonOperator.allCases, id: \.self) { operation in
+                                        Text(operation.title).tag(operation)
+                                    }
+                                }.labelsHidden().frame(width: 180).disabled(!canEdit)
+                                Text("con").font(.caption).foregroundStyle(.secondary)
+                                Picker("Valor de referencia", selection: $node.condition.right.source) {
+                                    Text("Valor fijo").tag(WorkflowValueSource.literal)
+                                    Text("Variable de entorno").tag(WorkflowValueSource.environment)
+                                }.labelsHidden().frame(width: 175).disabled(!canEdit)
+                                TextField(node.condition.right.source == .environment ? "Nombre de variable" : "Valor",
+                                          text: $node.condition.right.value)
+                                    .font(.system(size: 11, design: .monospaced)).disabled(!canEdit)
+                            }
+                            if node.condition.left.source == .previousOutput,
+                               node.condition.valueType == .text {
+                                Text("El texto se compara alfabéticamente y distingue mayúsculas.")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                                }
+                        }
                         WorkflowSettingsCard(title: "Ramas", symbol: "arrow.triangle.branch") {
                             HStack(spacing: 14) {
-                                destinationPicker("Sí · el paso anterior terminó bien", selection: $node.next)
-                                destinationPicker("No · el paso anterior falló", selection: $node.no)
+                                destinationPicker("Sí · se cumple", selection: $node.next)
+                                destinationPicker("No · no se cumple", selection: $node.no)
                             }
                         }
                     case .start, .event, .schedule:
@@ -608,6 +746,16 @@ private struct WorkflowInspector: View {
         else if chosen.path.hasPrefix(rootPath + "/") {
             node.settings.workingDirectory = String(chosen.path.dropFirst(rootPath.count + 1))
         } else { node.settings.workingDirectory = chosen.path }
+    }
+
+    private var previousValueBinding: Binding<WorkflowValueSource> {
+        Binding(get: { node.condition.left.source }, set: { source in
+            node.condition.left.source = source
+            if source == .previousExitCode {
+                node.condition.valueType = .number
+                if node.condition.right.source == .literal { node.condition.right.value = "0" }
+            }
+        })
     }
 
     private func destinationPicker(_ label: String, selection: Binding<UUID?>) -> some View {
