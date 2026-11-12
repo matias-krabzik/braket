@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AgentPanel: View {
     @Bindable var controller: WorkspaceController
+    var onClose: (() -> Void)? = nil
     @State private var showingDiff = false
     @State private var showingDiagnostics = false
 
@@ -25,7 +26,10 @@ struct AgentPanel: View {
                     .disabled(agent.isRunning || agent.messages.isEmpty)
                     .help("Nueva conversación")
                     .accessibilityLabel("Nueva conversación")
-                Button { agent.visible = false } label: { Image(systemName: "xmark") }
+                Button {
+                    if let onClose { onClose() }
+                    else { agent.visible = false }
+                } label: { Image(systemName: "xmark") }
                     .help("Cerrar panel Codex").accessibilityLabel("Cerrar panel Codex")
             }.buttonStyle(.plain).padding(.horizontal, 14).frame(height: 39).background(Theme.bar)
             Divider()

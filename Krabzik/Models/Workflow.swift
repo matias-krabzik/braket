@@ -84,13 +84,14 @@ enum WorkflowComparisonOperator: String, Codable, CaseIterable {
 }
 
 enum WorkflowValueSource: String, Codable, CaseIterable {
-    case literal, previousOutput, previousExitCode, environment
+    case literal, previousOutput, previousExitCode, environment, jsonField
     var title: String {
         switch self {
         case .literal: "Valor fijo"
         case .previousOutput: "Salida del último script"
         case .previousExitCode: "Código de salida"
         case .environment: "Variable de entorno"
+        case .jsonField: "Campo del JSON"
         }
     }
 }
@@ -99,7 +100,7 @@ struct WorkflowOperand: Codable, Equatable {
     var source: WorkflowValueSource = .literal
     var value = ""
 
-    func resolve(output: String, exitCode: Int32?, environment: [String: String]) throws -> String {
+    func resolve(output: String, exitCode: Int32?, environment: [String: String], json: String = "{}") throws -> String {
         switch source {
         case .literal: return value
         case .previousOutput: return output
@@ -111,6 +112,19 @@ struct WorkflowOperand: Codable, Equatable {
                 throw WorkflowError.invalid("No existe la variable de entorno \(value).")
             }
             return result
+        case .jsonField:
+            let path = value.split(separator: ".").map(String.init)
+            guard !path.isEmpty else { throw WorkflowError.invalid("Elegí un campo del JSON.") }
+            var current: Any = WorkflowJSON.decode(json)
+            for key in path {
+                guard let object = current as? [String: Any], let next = object[key] else {
+                    throw WorkflowError.invalid("El campo «\(value)» no existe en la entrada JSON.")
+                }
+                current = next
+            }
+            if let string = current as? String { return string }
+            if let number = current as? NSNumber { return number.stringValue }
+            throw WorkflowError.invalid("El campo «\(value)» debe contener texto o un número.")
         }
     }
 }
@@ -128,11 +142,11 @@ struct WorkflowCondition: Codable, Equatable {
                           right: WorkflowOperand(value: "0"))
     }
 
-    func evaluate(previousSucceeded: Bool, output: String, exitCode: Int32?,
+    func evaluate(previousSucceeded: Bool, output: String, exitCode: Int32?, json: String = "{}",
                   environment: [String: String] = ProcessInfo.processInfo.environment) throws -> Bool {
         if mode == .previousSuccess { return previousSucceeded }
-        let lhs = try left.resolve(output: output, exitCode: exitCode, environment: environment)
-        let rhs = try right.resolve(output: output, exitCode: exitCode, environment: environment)
+        let lhs = try left.resolve(output: output, exitCode: exitCode, environment: environment, json: json)
+        let rhs = try right.resolve(output: output, exitCode: exitCode, environment: environment, json: json)
         switch valueType {
         case .text:
             return operation.matches(lhs.compare(rhs, options: .literal))
@@ -180,7 +194,7 @@ extension WorkflowNode {
         } else {
             condition = savedCondition ?? .init()
             if kind == .decision {
-                if condition.left.source != .previousOutput && condition.left.source != .previousExitCode {
+                if condition.left.source != .previousOutput && condition.left.source != .previousExitCode && condition.left.source != .jsonField {
                     condition.left = WorkflowOperand(source: .previousOutput)
                 }
                 if condition.right.source != .literal && condition.right.source != .environment {
@@ -267,7 +281,7 @@ struct WorkflowFile: Codable {
                       node.ai.prompt.utf8.count <= 16_000, node.ai.model.utf8.count <= 100,
                       node.ai.outputPath.utf8.count <= 2_048,
                       node.kind != .decision || (node.condition.mode == .compare &&
-                          (node.condition.left.source == .previousOutput || node.condition.left.source == .previousExitCode) &&
+                          (node.condition.left.source == .previousOutput || node.condition.left.source == .previousExitCode || node.condition.left.source == .jsonField) &&
                           (node.condition.right.source == .literal || node.condition.right.source == .environment) &&
                           (node.condition.left.source != .previousExitCode || node.condition.valueType == .number)),
                       node.condition.left.value.utf8.count <= 2_048,

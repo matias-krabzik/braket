@@ -98,7 +98,7 @@ final class AgentController {
             }
             // Sin aprobación no se lanza nada: el binario corre con el entorno completo
             // del usuario, así que el usuario tiene que ver cuál es.
-            guard approvedIdentity == candidate.identity else {
+            guard isApproved(candidate) else {
                 pendingCandidate = candidate
                 return
             }
@@ -176,6 +176,37 @@ final class AgentController {
         return try? JSONDecoder().decode(BinaryIdentity.self, from: data)
     }
 
+    static func approvalMatches(_ candidate: CodexCandidate, approved: BinaryIdentity?,
+                                team: String?) -> Bool {
+        guard let approved else { return false }
+        if approved == candidate.identity { return true }
+        guard approved.path == candidate.identity.path, let team,
+              case .developerID(let currentTeam) = candidate.signature else { return false }
+        return team == currentTeam
+    }
+
+    /// Una actualización firmada del mismo ejecutable conserva la aprobación. Para
+    /// binarios ad hoc o sin firma, el hash sigue siendo la única autorización.
+    private func isApproved(_ candidate: CodexCandidate) -> Bool {
+        guard let approved = approvedIdentity else { return false }
+        let team = defaults.string(forKey: "approvedCodexTeam")
+        guard Self.approvalMatches(candidate, approved: approved, team: team) else { return false }
+        if approved == candidate.identity {
+            // Migra aprobaciones previas solo mientras el contenido aún coincide.
+            if team == nil,
+               case .developerID(let team) = candidate.signature {
+                defaults.set(team, forKey: "approvedCodexTeam")
+            }
+            return true
+        }
+        // Guardar la identidad nueva permite que el estado y los diagnósticos
+        // representen exactamente el binario que se acaba de ejecutar.
+        if let data = try? JSONEncoder().encode(candidate.identity) {
+            defaults.set(data, forKey: "approvedCodexBinary")
+        }
+        return true
+    }
+
     var approvedExecutableURL: URL? {
         guard connected, let approvedIdentity else { return nil }
         return CodexExecutable.search(override: defaults.string(forKey: "codexExecutable"),
@@ -215,6 +246,11 @@ final class AgentController {
         if let data = try? JSONEncoder().encode(candidate.identity) {
             defaults.set(data, forKey: "approvedCodexBinary")
         }
+        if case .developerID(let team) = candidate.signature {
+            defaults.set(team, forKey: "approvedCodexTeam")
+        } else {
+            defaults.removeObject(forKey: "approvedCodexTeam")
+        }
         pendingCandidate = nil
         Task { await connect() }
     }
@@ -232,6 +268,7 @@ final class AgentController {
         defaults.set(url.path, forKey: "codexExecutable")
         // Elegir un ejecutable no lo aprueba: se vuelve a pedir confirmación.
         defaults.removeObject(forKey: "approvedCodexBinary")
+        defaults.removeObject(forKey: "approvedCodexTeam")
         pendingCandidate = nil
         transport.stop()
         connected = false

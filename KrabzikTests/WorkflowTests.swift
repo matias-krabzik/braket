@@ -140,7 +140,10 @@ import XCTest
         let deadline = Date().addingTimeInterval(8)
         while restored.isRunning, Date() < deadline { try await Task.sleep(for: .milliseconds(30)) }
         XCTAssertFalse(restored.isRunning)
-        XCTAssertTrue(restored.log.contains("configured:\(subfolder.path):ok"), restored.log)
+        XCTAssertTrue(restored.log.contains("configured:\(subfolder.path):"), restored.log)
+        let scriptID = try XCTUnwrap(restored.selected?.nodes[index].id)
+        XCTAssertEqual(WorkflowJSON.decode(restored.inputJSON[scriptID] ?? "")["trigger"] as? String, "start")
+        XCTAssertEqual(WorkflowJSON.decode(restored.outputJSON[scriptID] ?? "")["exitCode"] as? Int, 0)
     }
 
     func testScriptTimeoutMarksStepAsFailed() async throws {
@@ -220,7 +223,8 @@ import XCTest
         XCTAssertFalse(restored.isRunning)
         XCTAssertTrue(restored.log.contains("Fin: Commits pendientes"), restored.log)
         XCTAssertFalse(restored.log.contains("Fin: Sin commits nuevos"), restored.log)
-        XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("recibido.txt"), encoding: .utf8), "42")
+        let received = try String(contentsOf: root.appendingPathComponent("recibido.txt"), encoding: .utf8)
+        XCTAssertEqual(WorkflowJSON.decode(received)["stdout"] as? String, "42")
         let selectedDecision = try XCTUnwrap(restored.selected?.nodes.first { $0.kind == .decision })
         XCTAssertEqual(restored.results[selectedDecision.id]?.summary, "Sí")
         XCTAssertTrue(restored.traversedTransitions.contains(WorkflowTransition(
@@ -251,20 +255,79 @@ import XCTest
         XCTAssertFalse(try decision.condition.evaluate(previousSucceeded: true, output: "", exitCode: 2))
     }
 
+    func testIfReadsAFieldFromIncomingJSON() throws {
+        let condition = WorkflowCondition(mode: .compare, valueType: .text,
+                                          operation: .notEqual,
+                                          left: WorkflowOperand(source: .jsonField, value: "data.commits"),
+                                          right: WorkflowOperand(value: ""))
+        XCTAssertTrue(try condition.evaluate(previousSucceeded: true, output: "", exitCode: nil,
+                                             json: "{\"data\":{\"commits\":\"abc\"}}"))
+        XCTAssertThrowsError(try condition.evaluate(previousSucceeded: true, output: "", exitCode: nil,
+                                                    json: "{}"))
+    }
+
+    func testSingleNodeUsesManualJSONAndDoesNotRunFollowingNodes() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let workspace = root.appendingPathComponent("Example.kzk")
+        let model = WorkflowController()
+        model.configure(workspace, root: root)
+        let decision = try XCTUnwrap(model.selected?.nodes.first { $0.kind == .decision })
+        let runner = ProcessRunner()
+        defer { runner.terminateImmediately() }
+        model.testNode(decision.id, input: "no es JSON", workspace: workspace, root: root,
+                       runner: runner, trusted: true, approvals: try approvingStore())
+        XCTAssertFalse(model.isRunning)
+        XCTAssertTrue(model.error.contains("JSON válido"))
+
+        let input = "{\"stdout\":\"abc\",\"stderr\":\"\",\"exitCode\":0}"
+        model.testNode(decision.id, input: input, workspace: workspace, root: root,
+                       runner: runner, trusted: true, approvals: try approvingStore())
+        let deadline = Date().addingTimeInterval(5)
+        while model.isRunning, Date() < deadline { try await Task.sleep(for: .milliseconds(30)) }
+        XCTAssertFalse(model.isRunning)
+        XCTAssertEqual(model.results[decision.id]?.summary, "Sí")
+        XCTAssertEqual(model.executionOrder, [decision.id])
+        XCTAssertEqual(model.inputJSON[decision.id], model.outputJSON[decision.id])
+        XCTAssertEqual(WorkflowJSON.decode(model.outputJSON[decision.id] ?? "")["stdout"] as? String, "abc")
+
+        model.testNode(decision.id, input: "{\"stdout\":\"\",\"exitCode\":0}",
+                       workspace: workspace, root: root, runner: runner,
+                       trusted: true, approvals: try approvingStore())
+        let secondDeadline = Date().addingTimeInterval(5)
+        while model.isRunning, Date() < secondDeadline { try await Task.sleep(for: .milliseconds(30)) }
+        XCTAssertEqual(model.results[decision.id]?.summary, "No")
+        XCTAssertEqual(model.results[decision.id]?.successful, true)
+        XCTAssertEqual(model.visited[decision.id], .exited(0))
+        XCTAssertEqual(model.executionOrder, [decision.id])
+        XCTAssertTrue(model.results[decision.id]?.detail.contains("No se cumplió") == true)
+    }
+
     func testCodexOutputModesAndProjectBoundary() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         var settings = WorkflowAISettings(prompt: "Notas", outputMode: .output,
                                           outputPath: "docs/releases/draft-notes.md")
-        XCTAssertEqual(try WorkflowAIOutput.deliver("## Cambios", settings: settings, root: root).output, "## Cambios")
+        let textResult = try WorkflowAIOutput.deliver("## Cambios", settings: settings, root: root)
+        XCTAssertEqual(WorkflowJSON.decode(textResult.output)["text"] as? String, "## Cambios")
         settings.outputMode = .file
-        XCTAssertEqual(try WorkflowAIOutput.deliver("## Cambios", settings: settings, root: root).output, "")
+        let fileResult = try WorkflowAIOutput.deliver("## Cambios", settings: settings, root: root)
+        let files = try XCTUnwrap(WorkflowJSON.decode(fileResult.output)["files"] as? [[String: String]])
+        XCTAssertEqual(files.first?["content"], "## Cambios")
         let file = root.appendingPathComponent(settings.outputPath)
-        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "## Cambios")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
         settings.outputMode = .filePath
-        XCTAssertEqual(try WorkflowAIOutput.deliver("## Nuevo", settings: settings, root: root).output, file.path)
-        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "## Nuevo")
+        XCTAssertEqual(WorkflowJSON.decode(try WorkflowAIOutput.deliver("## Nuevo", settings: settings, root: root).output)["files"] as? [[String: String]],
+                       [["name": settings.outputPath, "content": "## Nuevo", "mimeType": "text/markdown"]])
+        settings.outputMode = .output
+        let multiple = """
+        {"text":"Listo","files":[{"name":"a.md","content":"A","mimeType":"text/markdown"},{"name":"b.json","content":"{}","mimeType":"application/json"}]}
+        """
+        let multipleOutput = try WorkflowAIOutput.deliver(multiple, settings: settings, root: root).output
+        XCTAssertEqual((WorkflowJSON.decode(multipleOutput)["files"] as? [[String: String]])?.count, 2)
+        settings.outputMode = .file
         settings.outputPath = "../afuera.md"
         XCTAssertThrowsError(try WorkflowAIOutput.deliver("No", settings: settings, root: root))
     }

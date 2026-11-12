@@ -24,6 +24,9 @@ final class WorkflowController {
     var visited: [UUID: RunStatus] = [:]
     var traversedTransitions: Set<WorkflowTransition> = []
     var results: [UUID: WorkflowStepResult] = [:]
+    var inputJSON: [UUID: String] = [:]
+    var outputJSON: [UUID: String] = [:]
+    var executionOrder: [UUID] = []
     var log = ""
     var error = ""
     @ObservationIgnored private var workspaceURL: URL?
@@ -140,12 +143,53 @@ final class WorkflowController {
         visited = [:]
         traversedTransitions = []
         results = [:]
+        inputJSON = [:]
+        outputJSON = [:]
+        executionOrder = []
         log = ""
         error = ""
         editing = false
         isRunning = true
         task = Task { await execute(selected, workspace: workspace, root: root, runner: runner,
                                     agent: agent, trigger: trigger) }
+    }
+
+    func testNode(_ id: UUID, input: String, workspace: URL, root: URL, runner: ProcessRunner,
+                  trusted: Bool, approvals: TrustStore, agent: AgentController? = nil) {
+        guard trusted, !isRunning, let selected,
+              let node = selected.nodes.first(where: { $0.id == id }) else { return }
+        results.removeValue(forKey: id)
+        inputJSON.removeValue(forKey: id)
+        outputJSON.removeValue(forKey: id)
+        error = ""
+        do {
+            try file.validate()
+            guard input.utf8.count <= 64_000,
+                  let data = input.data(using: .utf8),
+                  let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+                throw WorkflowError.invalid("La entrada debe ser un objeto JSON válido de hasta 64 KB.")
+            }
+            if node.kind == .script {
+                let approval = WorkflowScriptApproval(node: node, root: root)
+                guard approval.authorize(store: approvals, workspaceURL: workspace, ask: confirmCommand) else {
+                    throw WorkflowError.invalid("No se ejecutó: falta aprobar el script «\(node.title)».")
+                }
+            }
+            self.runner = runner
+            cancelled = false
+            visited = [:]
+            traversedTransitions = []
+            results = [:]
+            inputJSON = [:]
+            outputJSON = [:]
+            executionOrder = []
+            log = ""
+            error = ""
+            isRunning = true
+            task = Task { await execute(selected, workspace: workspace, root: root, runner: runner,
+                                        agent: agent, trigger: node.kind,
+                                        startingNodeID: id, initialPayload: payload, singleStep: true) }
+        } catch { self.error = error.localizedDescription }
     }
 
     func stop() {
@@ -155,15 +199,18 @@ final class WorkflowController {
     }
 
     private func execute(_ flow: Workflow, workspace: URL, root: URL, runner: ProcessRunner,
-                         agent: AgentController?, trigger: WorkflowKind) async {
+                         agent: AgentController?, trigger: WorkflowKind,
+                         startingNodeID: UUID? = nil, initialPayload: [String: Any] = [:],
+                         singleStep: Bool = false) async {
         defer { isRunning = false
         activeNodeID = nil
         activeProcess = nil
         activeAI = false }
-        var current = flow.nodes.first { $0.kind == trigger }?.id
+        var current = startingNodeID ?? flow.nodes.first { $0.kind == trigger }?.id
         var previousSucceeded = true
-        var previousOutput = ""
-        var previousExitCode: Int32?
+        var previousOutput = initialPayload["stdout"] as? String ?? initialPayload["text"] as? String ?? ""
+        var payload = initialPayload
+        var previousExitCode: Int32? = (initialPayload["exitCode"] as? NSNumber).map { $0.int32Value }
         var transitions = 0
         while let id = current, !cancelled {
             transitions += 1
@@ -172,26 +219,40 @@ final class WorkflowController {
                 return
             }
             activeNodeID = id
+            executionOrder.append(id)
+            inputJSON[id] = WorkflowJSON.encode(payload)
             log += "\n▸ \(node.title)\n"
             switch node.kind {
             case .start, .event, .schedule:
                 visited[id] = .exited(0)
                 results[id] = WorkflowStepResult(summary: "OK", detail: "Disparador activado.", successful: true)
                 previousOutput = "ok"
+                payload = ["project": root.lastPathComponent, "trigger": node.kind.rawValue]
+                outputJSON[id] = WorkflowJSON.encode(payload)
                 previousExitCode = 0
                 current = node.next
                 recordTransition(from: id, to: current, isNo: false)
             case .decision:
                 do {
                     let matches = try node.condition.evaluate(previousSucceeded: previousSucceeded,
-                                                              output: previousOutput, exitCode: previousExitCode)
-                    visited[id] = .exited(matches ? 0 : 1)
+                                                              output: previousOutput, exitCode: previousExitCode,
+                                                              json: WorkflowJSON.encode(payload))
+                    visited[id] = .exited(0)
+                    let input = WorkflowJSON.encode(payload)
+                    let left = try node.condition.left.resolve(output: previousOutput,
+                                                               exitCode: previousExitCode,
+                                                               environment: ProcessInfo.processInfo.environment,
+                                                               json: input)
+                    let right = try node.condition.right.resolve(output: previousOutput,
+                                                                 exitCode: previousExitCode,
+                                                                 environment: ProcessInfo.processInfo.environment,
+                                                                 json: input)
                     results[id] = WorkflowStepResult(summary: matches ? "Sí" : "No",
-                                                     detail: matches ? "Se cumplió la condición." : "No se cumplió la condición.",
-                                                     successful: matches)
+                                                     detail: "\(left.prefix(160)) \(node.condition.operation.title) \(right.prefix(160))\n\(matches ? "Se cumplió" : "No se cumplió") la condición.",
+                                                     successful: true)
                     log += matches ? "Sí\n" : "No\n"
-                    previousSucceeded = matches
-                    previousExitCode = matches ? 0 : 1
+                    previousSucceeded = true
+                    outputJSON[id] = WorkflowJSON.encode(payload)
                     current = matches ? node.next : node.no
                     recordTransition(from: id, to: current, isNo: !matches)
                 } catch {
@@ -203,6 +264,7 @@ final class WorkflowController {
                     return
                 }
             case .end:
+                outputJSON[id] = WorkflowJSON.encode(payload)
                 visited[id] = previousSucceeded ? .exited(0) : .exited(1)
                 results[id] = WorkflowStepResult(summary: "Finalizado",
                                                  detail: "El flujo terminó en «\(node.title)».",
@@ -220,7 +282,8 @@ final class WorkflowController {
                 let project = CodeProject(id: node.id, name: node.title, path: directory.path,
                                           kind: .files, command: node.command)
                 var environment = Dictionary(uniqueKeysWithValues: node.settings.environment.map { ($0.name, $0.value) })
-                environment["BRAKET_INPUT"] = previousOutput
+                environment["BRAKET_INPUT"] = WorkflowJSON.encode(payload)
+                environment["BRAKET_PREVIOUS_OUTPUT"] = previousOutput
                 environment["BRAKET_PREVIOUS_EXIT_CODE"] = previousExitCode.map(String.init) ?? ""
                 runner.start(project, workspaceURL: workspace, environment: environment)
                 activeProcess = node.id
@@ -253,6 +316,8 @@ final class WorkflowController {
                 else if case .exited(let code) = run.status { previousExitCode = code }
                 else { previousExitCode = 1 }
                 previousSucceeded = !timedOut && run.status == .exited(0)
+                payload = ["stdout": previousOutput, "stderr": "", "exitCode": Int(previousExitCode ?? 1)]
+                outputJSON[id] = WorkflowJSON.encode(payload)
                 current = node.next
                 recordTransition(from: id, to: current, isNo: false)
             case .ai:
@@ -264,22 +329,26 @@ final class WorkflowController {
                         throw WorkflowError.invalid("Conectá Codex para ejecutar este bloque.")
                     }
                     activeAI = true
-                    let text = try await aiRunner.run(prompt: node.ai.prompt, input: previousOutput,
+                    let text = try await aiRunner.run(prompt: node.ai.prompt, input: WorkflowJSON.encode(payload),
                                                       model: node.ai.model, root: root, agent: agent)
                     activeAI = false
                     if cancelled { break }
                     let delivered = try WorkflowAIOutput.deliver(text, settings: node.ai, root: root)
                     previousOutput = delivered.output
+                    payload = WorkflowJSON.decode(delivered.output)
+                    outputJSON[id] = delivered.output
                     previousExitCode = 0
                     previousSucceeded = true
                     visited[id] = .exited(0)
                     results[id] = WorkflowStepResult(summary: "Codex · OK", detail: delivered.detail,
                                                      successful: true)
-                    log += "Codex terminó. \(node.ai.outputMode == .output ? "Texto disponible" : "Archivo guardado").\n"
+                    log += "Codex terminó. Resultado JSON disponible para el siguiente nodo.\n"
                 } catch {
                     activeAI = false
                     let message = cancelled ? "Ejecución detenida." : error.localizedDescription
                     previousOutput = ""
+                    payload = ["error": message]
+                    outputJSON[id] = WorkflowJSON.encode(payload)
                     previousExitCode = 1
                     previousSucceeded = false
                     visited[id] = .failed(message)
@@ -291,6 +360,7 @@ final class WorkflowController {
                 current = node.next
                 recordTransition(from: id, to: current, isNo: false)
             }
+            if singleStep { break }
         }
         if cancelled { log += "\nEjecución detenida.\n" }
     }
@@ -298,5 +368,21 @@ final class WorkflowController {
     private func recordTransition(from: UUID, to: UUID?, isNo: Bool) {
         guard let to else { return }
         traversedTransitions.insert(WorkflowTransition(from: from, to: to, isNo: isNo))
+    }
+}
+
+enum WorkflowJSON {
+    static func encode(_ object: [String: Any]) -> String {
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys, .prettyPrinted])
+        else { return "{}" }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    static func decode(_ text: String) -> [String: Any] {
+        guard let data = text.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return [:] }
+        return object
     }
 }
