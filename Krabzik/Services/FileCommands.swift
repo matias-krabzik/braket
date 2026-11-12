@@ -56,17 +56,17 @@ final class FileCommands {
     }
 
     func create(in directory: URL? = nil) {
-        guard session.workspace != nil else { return }
+        guard !session.isReadOnly, let workspaceURL = session.url else { return }
+        let system = ExplorerFileSystem(roots: session.mountedProjects.map { $0.directory(relativeTo: workspaceURL) })
         let suggested = directory
             ?? docs.selected?.url.deletingLastPathComponent()
-            ?? session.url?.deletingLastPathComponent()
+            ?? session.mountedProjects.first?.directory(relativeTo: workspaceURL)
         guard let url = session.dialogs.createFile("nuevo.sql", suggested) else { return }
         do {
-            // El panel de guardar ya resolvió la confirmación de sobrescribir.
-            try Data().write(to: url, options: .atomic)
-            remember(url)
+            let target = try system.create(name: url.lastPathComponent, in: url.deletingLastPathComponent(), directory: false)
+            remember(target)
             session.touch()
-            open(url)
+            open(target)
         } catch { session.errors.report(error) }
     }
 

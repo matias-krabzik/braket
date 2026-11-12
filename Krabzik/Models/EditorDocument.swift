@@ -72,6 +72,18 @@ final class EditorDocument: Identifiable {
         self.previewImage = image
     }
 
+    init(relocating document: EditorDocument, to url: URL) {
+        self.id = url.standardizedFileURL
+        self.cachedText = document.text
+        self.originalData = document.originalData
+        self.previewImage = document.previewImage
+        self.isDirty = document.isDirty
+        self.hasExternalChange = document.hasExternalChange
+        self.line = document.line
+        self.column = document.column
+        self.selectedRange = document.selectedRange
+    }
+
     /// La llama el editor en cada cambio: O(1). El texto se relee cuando alguien lo pida.
     func markTextStale() { textIsStale = true }
 

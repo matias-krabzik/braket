@@ -28,6 +28,27 @@ final class DocumentStore {
         return documents.contains { $0.id == url }
     }
 
+    func affected(by url: URL) -> [EditorDocument] {
+        documents.filter { ExplorerFileSystem.contains($0.url, in: url) }
+    }
+
+    /// Al mover una carpeta, las pestañas siguen al archivo y conservan el texto sin
+    /// guardar. El editor nativo se recrea con la nueva URL en la siguiente renderización.
+    func relocate(from source: URL, to destination: URL) {
+        let source = source.standardizedFileURL, destination = destination.standardizedFileURL
+        documents = documents.map { document in
+            guard ExplorerFileSystem.contains(document.url, in: source) else { return document }
+            document.releaseEditor()
+            let suffix = String(document.url.path.dropFirst(source.path.count))
+            let newURL = URL(fileURLWithPath: destination.path + suffix).standardizedFileURL
+            return EditorDocument(relocating: document, to: newURL)
+        }
+        if let selectedID, ExplorerFileSystem.contains(selectedID, in: source) {
+            let suffix = String(selectedID.path.dropFirst(source.path.count))
+            self.selectedID = URL(fileURLWithPath: destination.path + suffix).standardizedFileURL
+        }
+    }
+
     /// Abre el archivo y lo selecciona. Si ya estaba abierto solo lo selecciona, y si ya
     /// se está leyendo no hace nada.
     ///

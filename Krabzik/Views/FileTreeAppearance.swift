@@ -2,6 +2,13 @@ import AppKit
 
 /// La celda ocupa todo el ancho; la sangría y el control +/− se dibujan explícitamente.
 final class FileTreeOutlineView: NSOutlineView {
+    var handleKey: ((NSEvent) -> Bool)?
+
+    override func keyDown(with event: NSEvent) {
+        if handleKey?(event) == true { return }
+        super.keyDown(with: event)
+    }
+
     override func frameOfOutlineCell(atRow row: Int) -> NSRect { .zero }
 
     override func frameOfCell(atColumn column: Int, row: Int) -> NSRect {

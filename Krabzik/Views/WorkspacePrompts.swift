@@ -6,6 +6,10 @@ enum SaveDecision: Sendable {
     case save, discard, cancel
 }
 
+enum ExplorerConflictDecision {
+    case keepBoth, replace, skip, cancel
+}
+
 /// Los diálogos y paneles de la ventana, en la capa de vistas.
 ///
 /// Mismo reparto que `TrustPrompts`: el controlador declara **qué** pregunta y acá está
@@ -14,6 +18,51 @@ enum SaveDecision: Sendable {
 /// 4,3 horas colgada—. Ver docs/specs/C5-dividir-workspacecontroller.md.
 @MainActor
 enum WorkspacePrompts {
+    static func nameForNewItem(_ title: String, suggested: String) -> String? {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.addButton(withTitle: "Crear")
+        alert.addButton(withTitle: "Cancelar")
+        let field = NSTextField(string: suggested)
+        field.frame = NSRect(x: 0, y: 0, width: 310, height: 24)
+        alert.accessoryView = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        return field.stringValue
+    }
+
+    static func confirmTrash(_ names: [String], openFiles: Int, running: [String]) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = names.count == 1 ? "¿Mover «\(names[0])» a la Papelera?"
+            : "¿Mover \(names.count) elementos a la Papelera?"
+        var details = ["Podés recuperarlos desde la Papelera."]
+        if openFiles > 0 { details.append("Se cerrarán \(openFiles) pestañas abiertas.") }
+        if !running.isEmpty { details.append("Se detendrán estos procesos: \(running.joined(separator: ", ")).") }
+        alert.informativeText = details.joined(separator: "\n")
+        alert.addButton(withTitle: "Mover a la Papelera")
+        alert.addButton(withTitle: "Cancelar")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    static func confirmStopAffectedProcesses(_ names: [String]) -> Bool {
+        confirm(message: "¿Detener procesos antes de mover archivos?",
+                detail: names.joined(separator: ", "), accept: "Detener y continuar")
+    }
+
+    static func resolveConflict(_ name: String) -> ExplorerConflictDecision {
+        let alert = NSAlert()
+        alert.messageText = "«\(name)» ya existe"
+        alert.informativeText = "Elegí qué hacer con el elemento de la carpeta de destino."
+        alert.addButton(withTitle: "Conservar ambos")
+        alert.addButton(withTitle: "Reemplazar")
+        alert.addButton(withTitle: "Omitir")
+        alert.addButton(withTitle: "Cancelar")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: return .keepBoth
+        case .alertSecondButtonReturn: return .replace
+        case .alertThirdButtonReturn: return .skip
+        default: return .cancel
+        }
+    }
     // MARK: - Paneles
 
     static func exportMySQLDiagnostics() async throws {
@@ -62,7 +111,7 @@ enum WorkspacePrompts {
         return panel.runModal() == .OK ? panel.urls : []
     }
 
-    /// El panel de guardar resuelve él mismo la confirmación de sobrescribir.
+    /// El panel elige la ruta; FileCommands valida el proyecto y nunca sobrescribe.
     static func createFile(named name: String, in directory: URL?) -> URL? {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = name
