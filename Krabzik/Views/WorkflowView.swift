@@ -11,8 +11,6 @@ struct WorkflowView: View {
     @State private var selectedNode: UUID?
     @State private var zoom: CGFloat = 1
     @State private var zoomAtGestureStart: CGFloat?
-    @State private var pan: CGSize = .zero
-    @State private var livePan: CGSize = .zero
     @State private var draggedNode: UUID?
     @State private var liveNodeDrag: CGSize = .zero
     @State private var pendingConnection: WorkflowPortSource?
@@ -61,20 +59,12 @@ struct WorkflowView: View {
             VSplitView {
                 GeometryReader { geometry in
                 ZStack(alignment: .topLeading) {
-                    Canvas { context, size in
-                        drawDots(in: &context, size: size)
-                        drawConnections(in: &context, size: size)
-                    }
-                    .contentShape(Rectangle())
-                    .gesture(DragGesture(minimumDistance: 3)
-                        .onChanged { livePan = $0.translation }
-                        .onEnded { pan.width += $0.translation.width
-                            pan.height += $0.translation.height
-                            livePan = .zero })
-                    .onTapGesture {
+                    WorkflowPanSurface(zoom: zoom, interactionRects: interactionRects(size: geometry.size),
+                                       connections: connectionDrawings(size: geometry.size), clearConnection: {
                         pendingConnection = nil
                         connectionPreview = nil
-                    }
+                    }) {
+                    ZStack(alignment: .topLeading) {
                     if let flow {
                         ForEach(flow.nodes) { node in
                             WorkflowNodeCard(node: node, selected: selectedNode == node.id,
@@ -101,7 +91,7 @@ struct WorkflowView: View {
                                         .onHover { if $0 { hoveredNode = node.id } }
                                     }
                                 }
-                                .gesture(DragGesture(minimumDistance: 3)
+                                .gesture(DragGesture(minimumDistance: 3, coordinateSpace: .named("workflowCanvas"))
                                     .onChanged { value in
                                         guard canEdit else { return }
                                         selectedNode = node.id
@@ -131,6 +121,9 @@ struct WorkflowView: View {
                             }
                         }
                     }
+                    }
+                    .coordinateSpace(name: "workflowCanvas")
+                    }
                     VStack {
                         Spacer()
                         HStack(spacing: 4) {
@@ -144,7 +137,6 @@ struct WorkflowView: View {
                         .padding(12)
                     }
                 }
-                .coordinateSpace(name: "workflowCanvas")
                 .background(Theme.background)
                 .simultaneousGesture(MagnificationGesture()
                     .onChanged { value in
@@ -157,9 +149,10 @@ struct WorkflowView: View {
                     .frame(minHeight: 135, idealHeight: 205, maxHeight: .infinity)
             }
         }.onAppear { model.configure(workspaceURL, root: controller.workflowRoot) }
-            .task(id: controller.agent.connected) {
-                if controller.agent.connected { await controller.agent.loadModels() }
-                else { await controller.agent.connect() }
+            .task(id: workspaceURL) {
+                // The connection must not cancel/restart its own task when it
+                // publishes connected. Failures are retried explicitly in Codex.
+                await controller.agent.connect()
             }
             .onChange(of: model.selectedID) { _, _ in
                 selectedNode = nil
@@ -250,9 +243,9 @@ struct WorkflowView: View {
     private func nodeCenter(_ node: WorkflowNode, size: CGSize) -> CGPoint {
         let drag = draggedNode == node.id ? liveNodeDrag : .zero
         return CGPoint(x: (CGFloat(node.x) + (node.kind.isTrigger ? 30 : halfWidth(of: node)) - 550) * zoom
-                        + size.width / 2 + pan.width + livePan.width + drag.width,
+                        + size.width / 2 + drag.width,
                        y: (CGFloat(node.y) + (node.kind.isTrigger ? 30 : 27) - 200) * zoom
-                        + size.height / 2 + pan.height + livePan.height + drag.height)
+                        + size.height / 2 + drag.height)
     }
 
     private func halfWidth(of node: WorkflowNode) -> CGFloat { node.kind == .decision ? 100 : 85 }
@@ -331,47 +324,44 @@ struct WorkflowView: View {
         }
     }
 
-    private func drawDots(in context: inout GraphicsContext, size: CGSize) {
-        let step = 24 * zoom
-        let xOffset = (size.width / 2 + pan.width + livePan.width - 550 * zoom)
-            .truncatingRemainder(dividingBy: step)
-        let yOffset = (size.height / 2 + pan.height + livePan.height - 200 * zoom)
-            .truncatingRemainder(dividingBy: step)
-        for x in stride(from: xOffset, through: size.width, by: step) {
-            for y in stride(from: yOffset, through: size.height, by: step) {
-                context.fill(Path(ellipseIn: CGRect(x: x, y: y, width: 2, height: 2)),
-                             with: .color(Theme.accent.opacity(0.20)))
-            }
+    private func interactionRects(size: CGSize) -> [CGRect] {
+        (flow?.nodes ?? []).map { node in
+            let center = nodeCenter(node, size: size)
+            let width = (node.kind.isTrigger ? 60 : halfWidth(of: node) * 2) * zoom + 48
+            return CGRect(x: center.x - width / 2, y: center.y - 55, width: width, height: 110)
         }
     }
 
-    private func drawConnections(in context: inout GraphicsContext, size: CGSize) {
-        guard let flow else { return }
+    private func connectionDrawings(size: CGSize) -> [WorkflowConnectionDrawing] {
+        guard let flow else { return [] }
+        var drawings: [WorkflowConnectionDrawing] = []
         let traversed = controller.workflows.traversedTransitions
         let hasExecution = !controller.workflows.results.isEmpty
+        let nodesByID = Dictionary(uniqueKeysWithValues: flow.nodes.map { ($0.id, $0) })
         for node in flow.nodes {
             for (destination, isNo, color) in [(node.next, false, node.kind == .decision ? Color.green : Theme.accent),
                                                (node.no, true, Color.red)] {
-                guard let destination, let target = flow.nodes.first(where: { $0.id == destination }) else { continue }
+                guard let destination, let target = nodesByID[destination] else { continue }
                 let taken = traversed.contains(WorkflowTransition(from: node.id, to: destination, isNo: isNo))
-                drawArrow(in: &context, from: outputPoint(node, isNo: isNo, size: size),
+                drawings.append(arrowDrawing(from: outputPoint(node, isNo: isNo, size: size),
                           to: inputPoint(target, size: size), color: color,
                           targetWidth: halfWidth(of: target) * 2 * zoom,
                           opacity: hasExecution ? (taken ? 1 : 0.16) : 0.85,
-                          lineWidth: taken ? 3.5 : 2)
+                          lineWidth: taken ? 3.5 : 2))
             }
         }
-        if let pendingConnection, let source = flow.nodes.first(where: { $0.id == pendingConnection.nodeID }) {
+        if let pendingConnection, let source = nodesByID[pendingConnection.nodeID] {
             let start = outputPoint(source, isNo: pendingConnection.isNo, size: size)
             let end = connectionPreview ?? CGPoint(x: start.x + 65 * zoom, y: start.y)
             let color: Color = source.kind == .decision ? (pendingConnection.isNo ? .red : .green) : Theme.accent
-            drawArrow(in: &context, from: start, to: end, color: color)
+            drawings.append(arrowDrawing(from: start, to: end, color: color))
         }
+        return drawings
     }
 
-    private func drawArrow(in context: inout GraphicsContext, from start: CGPoint, to end: CGPoint,
+    private func arrowDrawing(from start: CGPoint, to end: CGPoint,
                            color: Color, targetWidth: CGFloat = 0,
-                           opacity: Double = 0.85, lineWidth: CGFloat = 2) {
+                           opacity: Double = 0.85, lineWidth: CGFloat = 2) -> WorkflowConnectionDrawing {
         var path = Path()
         path.move(to: start)
         if end.x < start.x + 24 * zoom {
@@ -398,13 +388,12 @@ struct WorkflowView: View {
             path.addCurve(to: end, control1: CGPoint(x: start.x + control, y: start.y),
                           control2: CGPoint(x: end.x - control, y: end.y))
         }
-        context.stroke(path, with: .color(color.opacity(opacity)), lineWidth: lineWidth)
         var tip = Path()
         tip.move(to: CGPoint(x: end.x - 8, y: end.y - 4))
         tip.addLine(to: end)
         tip.addLine(to: CGPoint(x: end.x - 8, y: end.y + 4))
-        context.stroke(tip, with: .color(color.opacity(opacity)), style: StrokeStyle(lineWidth: lineWidth,
-                                                                                  lineCap: .round, lineJoin: .round))
+        path.addPath(tip)
+        return WorkflowConnectionDrawing(path: path, color: color, opacity: opacity, lineWidth: lineWidth)
     }
 
     private func add(_ kind: WorkflowKind, after source: WorkflowPortSource? = nil) {
@@ -467,6 +456,7 @@ private struct WorkflowNodePicker: View {
         case .schedule: "clock.fill"
         case .script: "terminal"
         case .ai: "sparkles"
+        case .files: "doc.badge.arrow.down"
         case .decision: "arrow.triangle.branch"
         case .end: "stop.fill"
         }
@@ -479,6 +469,7 @@ private struct WorkflowNodePicker: View {
         case .schedule: "Disparador por horario; por ahora se prueba manualmente."
         case .script: "Ejecuta un comando o script en tu proyecto."
         case .ai: "Procesa la salida anterior con Codex."
+        case .files: "Guarda los archivos de una lista JSON dentro del proyecto."
         case .decision: "Compara un valor y elige entre Sí y No."
         case .end: "Marca la finalización de una rama."
         }
@@ -623,6 +614,7 @@ private struct WorkflowNodeCard: View {
         case .schedule: return .indigo
         case .script: return Theme.accent
         case .ai: return .indigo
+        case .files: return .teal
         case .decision: return .orange
         case .end: return .purple
         }
@@ -635,6 +627,7 @@ private struct WorkflowNodeCard: View {
         case .schedule: "clock.fill"
         case .script: "terminal"
         case .ai: "sparkles"
+        case .files: "doc.badge.arrow.down"
         case .decision: "arrow.triangle.branch"
         case .end: "stop.fill"
         }
@@ -791,6 +784,7 @@ private struct WorkflowInspector: View {
         switch node.kind {
         case .script: node.command.split(separator: "\n").first.map(String.init) ?? "Sin comando"
         case .ai: node.ai.model.isEmpty ? "Modelo automático" : node.ai.model
+        case .files: "\(node.fileSettings.sourcePath) → \(node.fileSettings.destination.isEmpty ? "Proyecto" : node.fileSettings.destination)"
         case .decision: "\(node.condition.left.source == .previousExitCode ? "Código" : "Salida") · \(node.condition.operation.title)"
         case .end: "Finaliza el flujo"
         case .start: "Inicio manual"
@@ -803,6 +797,7 @@ private struct WorkflowInspector: View {
         switch node.kind {
         case .script: "terminal"
         case .ai: "sparkles"
+        case .files: "doc.badge.arrow.down"
         case .decision: "arrow.triangle.branch"
         case .end: "stop.fill"
         case .start: "play.fill"
@@ -878,12 +873,12 @@ private struct WorkflowInspector: View {
                                  tested: outputJSON != nil)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            if let result, (node.kind == .decision || !result.successful), !result.detail.isEmpty {
+            if let result, (node.kind == .decision || node.kind == .files || !result.successful), !result.detail.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(node.kind == .decision ? "Evaluación" : "Detalle del error")
+                    Text(node.kind == .decision ? "Evaluación" : node.kind == .files ? "Archivos" : "Detalle del error")
                         .font(.system(size: 11, weight: .semibold))
                     Text(result.detail).font(.system(size: 11, design: .monospaced))
-                        .textSelection(.enabled).lineLimit(3)
+                        .textSelection(.enabled).lineLimit(node.kind == .files ? 8 : 3)
                 }.frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 12).padding(.vertical, 8)
                     .background(Theme.bar)
@@ -900,7 +895,8 @@ private struct WorkflowInspector: View {
         guard !node.kind.isTrigger else { return "{}" }
         switch predecessor?.kind {
         case .script: return WorkflowJSON.encode(["stdout": "a12b3c Mejorar editor", "stderr": "", "exitCode": 0])
-        case .ai: return WorkflowJSON.encode(["text": "Notas generadas", "files": []])
+        case .ai: return WorkflowJSON.encode(["text": "Notas generadas", "files": [["name": "notas.md", "content": "# Cambios", "mimeType": "text/markdown"]]])
+        case .files: return WorkflowJSON.encode(["files": [["name": "notas.md", "content": "# Cambios", "mimeType": "text/markdown"]]])
         default: return WorkflowJSON.encode(["project": rootURL.lastPathComponent, "trigger": "manual"])
         }
     }
@@ -910,7 +906,9 @@ private struct WorkflowInspector: View {
         case .start, .event, .schedule:
             return WorkflowJSON.encode(["project": rootURL.lastPathComponent, "trigger": node.kind.rawValue])
         case .script: return WorkflowJSON.encode(["stdout": "a12b3c Mejorar editor", "stderr": "", "exitCode": 0])
-        case .ai: return WorkflowJSON.encode(["text": "Notas generadas", "files": [["name": "docs/notes.md", "content": "# Cambios", "mimeType": "text/markdown"]]])
+        case .ai: return WorkflowJSON.encode(["text": "Notas generadas", "files": [["name": "notas.md", "content": "# Cambios", "mimeType": "text/markdown"]]])
+        case .files: return WorkflowJSON.encode(["fileResults": [["name": "notas.md", "path": "notas.md", "status": "preview"]],
+                                                  "fileSummary": ["total": 1, "processed": 1, "failed": 0, "preview": true]])
         case .decision, .end: return exampleInput
         }
     }
@@ -1009,6 +1007,42 @@ private struct WorkflowInspector: View {
                         WorkflowSettingsCard(title: "Continuación", symbol: "arrow.right") {
                             destinationPicker("Siguiente bloque", selection: $node.next)
                         }
+                    case .files:
+                        WorkflowSettingsCard(title: "Archivos de entrada", symbol: "curlybraces") {
+                            TextField("Campo JSON, por ejemplo files o data.files", text: $node.fileSettings.sourcePath)
+                                .font(.system(size: 11, design: .monospaced)).disabled(!canEdit)
+                            Text("Cada elemento necesita content; puede incluir name, mimeType y encoding (utf8 o base64).")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        WorkflowSettingsCard(title: "Ubicación", symbol: "folder") {
+                            HStack(spacing: 8) {
+                                TextField("Carpeta dentro del proyecto", text: $node.fileSettings.destination)
+                                    .font(.system(size: 11, design: .monospaced)).disabled(!canEdit)
+                                Button("Elegir…", action: chooseFileDestination).disabled(!canEdit)
+                            }
+                            Text("Ruta relativa al proyecto. Vacío: carpeta principal.")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        WorkflowSettingsCard(title: "Nombre si falta", symbol: "doc.text") {
+                            TextField("archivo-{indice}.{extension}", text: $node.fileSettings.namePattern)
+                                .font(.system(size: 11, design: .monospaced)).disabled(!canEdit)
+                            Text("Usa name si viene; si no, {indice} empieza en 1 y {extension} se obtiene de mimeType. Si existe, agrega (1), (2)…")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        WorkflowSettingsCard(title: "Sin archivos", symbol: "tray") {
+                            Picker("Cuando falta la lista o está vacía", selection: $node.fileSettings.emptyBehavior) {
+                                ForEach(WorkflowEmptyFilesBehavior.allCases, id: \.self) { behavior in
+                                    Text(behavior.title).tag(behavior)
+                                }
+                            }.disabled(!canEdit)
+                            Text("Los errores individuales se informan en fileResults; el resto de los archivos continúa.")
+                                .font(.caption2).foregroundStyle(.secondary)
+                            Text("Probar nodo solo muestra rutas y resultados previstos; no escribe archivos.")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        WorkflowSettingsCard(title: "Continuación", symbol: "arrow.right") {
+                            destinationPicker("Siguiente bloque", selection: $node.next)
+                        }
                     case .decision:
                         WorkflowSettingsCard(title: "Condición", symbol: "equal") {
                             HStack(spacing: 10) {
@@ -1095,6 +1129,21 @@ private struct WorkflowInspector: View {
         else if chosen.path.hasPrefix(rootPath + "/") {
             node.settings.workingDirectory = String(chosen.path.dropFirst(rootPath.count + 1))
         } else { node.settings.workingDirectory = chosen.path }
+    }
+
+    private func chooseFileDestination() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Elegir carpeta"
+        panel.directoryURL = rootURL
+        guard panel.runModal() == .OK, let chosen = panel.url?.resolvingSymlinksInPath().standardizedFileURL else { return }
+        let rootPath = rootURL.resolvingSymlinksInPath().standardizedFileURL.path
+        if chosen.path == rootPath { node.fileSettings.destination = "" }
+        else if chosen.path.hasPrefix(rootPath + "/") {
+            node.fileSettings.destination = String(chosen.path.dropFirst(rootPath.count + 1))
+        }
     }
 
     private var previousValueBinding: Binding<WorkflowValueSource> {

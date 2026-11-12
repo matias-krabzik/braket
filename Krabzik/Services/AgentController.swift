@@ -56,6 +56,10 @@ final class AgentController {
     @ObservationIgnored private var sendTask: Task<Void, Never>?
     @ObservationIgnored private var commentaryIDs: Set<String> = []
     @ObservationIgnored private var proposedChanges: [String: [AgentFileChange]] = [:]
+    @ObservationIgnored var executableSearch: @Sendable (String?, [URL]) ->
+        (candidates: [CodexCandidate], rejected: [CodexRejection]) = { override, roots in
+            CodexExecutable.search(override: override, excludedRoots: roots)
+        }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -87,8 +91,16 @@ final class AgentController {
         let token = connectionGeneration
         defer { if token == connectionGeneration { isConnecting = false } }
         do {
-            let search = CodexExecutable.search(override: defaults.string(forKey: "codexExecutable"),
-                                                excludedRoots: excludedRoots)
+            // Signature validation and hashing can take seconds. They must never
+            // occupy MainActor, even though connect() itself updates UI state.
+            let override = defaults.string(forKey: "codexExecutable")
+            let roots = excludedRoots
+            let searchExecutable = executableSearch
+            let search = await Task.detached(priority: .utility) {
+                searchExecutable(override, roots)
+            }.value
+            guard token == connectionGeneration else { return }
+            try Task.checkCancellation()
             guard let candidate = search.candidates.first else {
                 missingExecutable = true
                 let descartes = search.rejected.map { "\($0.path): \($0.reason)" }.joined(separator: "; ")
@@ -115,8 +127,11 @@ final class AgentController {
             ]))
             guard token == connectionGeneration else { return }
             try transport.notify("initialized")
-            connected = true
             try await readAccount()
+            guard token == connectionGeneration else { return }
+            try Task.checkCancellation()
+            connected = true
+            await loadModels()
         } catch {
             guard token == connectionGeneration else { return }
             self.error = error.localizedDescription

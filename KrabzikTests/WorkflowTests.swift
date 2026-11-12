@@ -332,6 +332,54 @@ import XCTest
         XCTAssertThrowsError(try WorkflowAIOutput.deliver("No", settings: settings, root: root))
     }
 
+    func testFileNodePreviewsThenWritesAndNumbersCollisions() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let target = root.appendingPathComponent("releases")
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        try Data("old".utf8).write(to: target.appendingPathComponent("notes.md"))
+        var settings = WorkflowFileSettings()
+        settings.destination = "releases"
+        let input: [String: Any] = ["text": "original", "files": [
+            ["name": "notes.md", "content": "new", "mimeType": "text/markdown"],
+            ["content": Data([0, 1, 255]).base64EncodedString(), "encoding": "base64", "mimeType": "image/png"]
+        ]]
+        let preview = try WorkflowFileProcessor.process(input, settings: settings, root: root, preview: true)
+        XCTAssertEqual(preview.saved, 2)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.appendingPathComponent("notes (1).md").path))
+        XCTAssertEqual(preview.payload["text"] as? String, "original")
+        let written = try WorkflowFileProcessor.process(input, settings: settings, root: root, preview: false)
+        XCTAssertEqual(written.failed, 0)
+        XCTAssertEqual(try Data(contentsOf: target.appendingPathComponent("notes.md")), Data("old".utf8))
+        XCTAssertEqual(try Data(contentsOf: target.appendingPathComponent("notes (1).md")), Data("new".utf8))
+        XCTAssertEqual(try Data(contentsOf: target.appendingPathComponent("archivo-2.png")), Data([0, 1, 255]))
+        let results = try XCTUnwrap(written.payload["fileResults"] as? [[String: Any]])
+        XCTAssertEqual(results[0]["path"] as? String, "releases/notes (1).md")
+        XCTAssertEqual(results[1]["status"] as? String, "saved")
+    }
+
+    func testFileNodeContinuesAfterInvalidFileAndControlsEmptyInput() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let input: [String: Any] = ["data": ["files": [
+            ["name": "../outside.txt", "content": "bad"],
+            ["name": "ok.txt", "content": "good"]
+        ]]]
+        var settings = WorkflowFileSettings()
+        settings.sourcePath = "data.files"
+        let result = try WorkflowFileProcessor.process(input, settings: settings, root: root, preview: false)
+        XCTAssertEqual(result.saved, 1)
+        XCTAssertEqual(result.failed, 1)
+        XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("ok.txt"), encoding: .utf8), "good")
+        settings.emptyBehavior = .fail
+        let empty = try WorkflowFileProcessor.process([:], settings: settings, root: root, preview: true)
+        XCTAssertEqual(empty.failed, 1)
+        settings.destination = "../outside"
+        XCTAssertThrowsError(try WorkflowFileProcessor.process(input, settings: settings, root: root, preview: true))
+    }
+
     func testCodexStepSendsPreviousOutputAndReceivesFinalText() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

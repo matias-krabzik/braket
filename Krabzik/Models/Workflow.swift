@@ -1,7 +1,7 @@
 import Foundation
 
 enum WorkflowKind: String, Codable, CaseIterable {
-    case start, event, schedule, script, ai, decision, end
+    case start, event, schedule, script, ai, files, decision, end
     var isTrigger: Bool { self == .start || self == .event || self == .schedule }
     var title: String {
         switch self {
@@ -10,6 +10,7 @@ enum WorkflowKind: String, Codable, CaseIterable {
         case .schedule: return "Horario"
         case .script: return "Script"
         case .ai: return "Codex"
+        case .files: return "Guardar archivos"
         case .decision: return "Decisión"
         case .end: return "Fin"
         }
@@ -47,6 +48,18 @@ struct WorkflowAISettings: Codable, Equatable {
     var model = "gpt-6-luna"
     var outputMode: WorkflowAIOutputMode = .output
     var outputPath = "docs/releases/notes.md"
+}
+
+enum WorkflowEmptyFilesBehavior: String, Codable, CaseIterable {
+    case `continue`, fail
+    var title: String { self == .continue ? "Continuar sin archivos" : "Marcar error" }
+}
+
+struct WorkflowFileSettings: Codable, Equatable {
+    var sourcePath = "files"
+    var destination = ""
+    var namePattern = "archivo-{indice}.{extension}"
+    var emptyBehavior: WorkflowEmptyFilesBehavior = .continue
 }
 
 enum WorkflowConditionMode: String, Codable {
@@ -168,6 +181,7 @@ struct WorkflowNode: Codable, Identifiable, Equatable {
     var command = ""
     var settings = WorkflowScriptSettings()
     var ai = WorkflowAISettings()
+    var fileSettings = WorkflowFileSettings()
     var condition = WorkflowCondition()
     var x: Double
     var y: Double
@@ -177,7 +191,7 @@ struct WorkflowNode: Codable, Identifiable, Equatable {
 
 extension WorkflowNode {
     private enum CodingKeys: String, CodingKey {
-        case id, kind, title, command, settings, ai, condition, x, y, next, no
+        case id, kind, title, command, settings, ai, fileSettings, condition, x, y, next, no
     }
 
     init(from decoder: Decoder) throws {
@@ -188,6 +202,7 @@ extension WorkflowNode {
         command = try values.decodeIfPresent(String.self, forKey: .command) ?? ""
         settings = try values.decodeIfPresent(WorkflowScriptSettings.self, forKey: .settings) ?? .init()
         ai = try values.decodeIfPresent(WorkflowAISettings.self, forKey: .ai) ?? .init()
+        fileSettings = try values.decodeIfPresent(WorkflowFileSettings.self, forKey: .fileSettings) ?? .init()
         let savedCondition = try values.decodeIfPresent(WorkflowCondition.self, forKey: .condition)
         if kind == .decision, savedCondition == nil || savedCondition?.mode == .previousSuccess {
             condition = .exitCodeIsZero
@@ -280,6 +295,9 @@ struct WorkflowFile: Codable {
                 guard !node.title.isEmpty, node.title.count <= 100, node.command.utf8.count <= 8000,
                       node.ai.prompt.utf8.count <= 16_000, node.ai.model.utf8.count <= 100,
                       node.ai.outputPath.utf8.count <= 2_048,
+                      node.fileSettings.sourcePath.utf8.count <= 256,
+                      node.fileSettings.destination.utf8.count <= 2_048,
+                      node.fileSettings.namePattern.utf8.count <= 256,
                       node.kind != .decision || (node.condition.mode == .compare &&
                           (node.condition.left.source == .previousOutput || node.condition.left.source == .previousExitCode || node.condition.left.source == .jsonField) &&
                           (node.condition.right.source == .literal || node.condition.right.source == .environment) &&

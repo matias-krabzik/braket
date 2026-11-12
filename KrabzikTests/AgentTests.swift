@@ -2,6 +2,28 @@
 import XCTest
 
 final class AgentTests: XCTestCase {
+    @MainActor func testExecutableVerificationDoesNotBlockUIOrSurviveShutdown() async throws {
+        let agent = AgentController()
+        let releaseSearch = DispatchSemaphore(value: 0)
+        agent.executableSearch = { _, _ in
+            XCTAssertFalse(Thread.isMainThread, "La firma y el hash no deben correr en el hilo de la interfaz")
+            _ = releaseSearch.wait(timeout: .now() + 2)
+            let identity = BinaryIdentity(path: "/tmp/codex-test", size: 1, digest: "test")
+            return ([CodexCandidate(url: URL(fileURLWithPath: identity.path), signature: .unsigned, identity: identity)], [])
+        }
+        let connection = Task { await agent.connect() }
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertTrue(agent.isConnecting, "MainActor debe responder mientras la verificación sigue pendiente")
+        await agent.connect() // A concurrent caller must reuse the in-progress attempt.
+        agent.shutdown()
+        releaseSearch.signal()
+        await connection.value
+        XCTAssertFalse(agent.connected)
+        XCTAssertFalse(agent.isConnecting)
+        XCTAssertNil(agent.pendingCandidate, "Una búsqueda anterior a shutdown no debe publicar resultados tardíos")
+        XCTAssertFalse(agent.transport.running)
+    }
+
     @MainActor func testClientVersionComesFromBundle() {
         // La versión se define en scripts/generate_project.py y llega por el Info.plist.
         // Si alguien vuelve a escribirla a mano en el código, esta prueba no lo detecta;

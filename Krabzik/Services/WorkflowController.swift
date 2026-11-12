@@ -320,6 +320,37 @@ final class WorkflowController {
                 outputJSON[id] = WorkflowJSON.encode(payload)
                 current = node.next
                 recordTransition(from: id, to: current, isNo: false)
+            case .files:
+                do {
+                    let processed = try WorkflowFileProcessor.process(payload, settings: node.fileSettings,
+                                                                       root: root, preview: singleStep)
+                    payload = processed.payload
+                    outputJSON[id] = WorkflowJSON.encode(payload)
+                    previousSucceeded = processed.failed == 0
+                    previousExitCode = previousSucceeded ? 0 : 1
+                    previousOutput = processed.detail
+                    let summary = processed.failed > 0 ? "\(processed.failed) con error"
+                        : singleStep ? "Vista previa · \(processed.saved)"
+                        : "\(processed.saved) guardados"
+                    visited[id] = previousSucceeded ? .exited(0) : .exited(1)
+                    results[id] = WorkflowStepResult(summary: summary, detail: processed.detail,
+                                                     successful: previousSucceeded)
+                    log += processed.detail + "\n"
+                } catch {
+                    let message = error.localizedDescription
+                    payload["fileResults"] = []
+                    payload["fileSummary"] = ["total": 0, "processed": 0, "failed": 1,
+                                              "preview": singleStep]
+                    outputJSON[id] = WorkflowJSON.encode(payload)
+                    previousSucceeded = false
+                    previousExitCode = 1
+                    previousOutput = message
+                    visited[id] = .failed(message)
+                    results[id] = WorkflowStepResult(summary: "Error", detail: message, successful: false)
+                    log += "Error: \(message)\n"
+                }
+                current = node.next
+                recordTransition(from: id, to: current, isNo: false)
             case .ai:
                 do {
                     guard !node.ai.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
