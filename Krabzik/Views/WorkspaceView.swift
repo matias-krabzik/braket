@@ -183,6 +183,9 @@ struct WorkspaceView: View {
                 HStack(spacing: 7) {
                     Text(breadcrumb(document.url)).lineLimit(1).truncationMode(.middle)
                     Spacer()
+                    if isMarkdown(document) {
+                        markdownModeControls(document)
+                    }
                 }
                 .font(.system(size: 11)).foregroundStyle(.secondary)
                 .padding(.horizontal, 20).frame(height: 31)
@@ -201,6 +204,8 @@ struct WorkspaceView: View {
                         .padding(20)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .accessibilityLabel("Vista previa de \(document.url.lastPathComponent)")
+                } else if isMarkdown(document) {
+                    markdownContent(document)
                 } else {
                     CodeEditor(document: document, theme: AppSettings.shared.theme).id(document.id)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -211,6 +216,55 @@ struct WorkspaceView: View {
                     Text(controller.workspace?.name ?? "").font(.system(size: 13)).foregroundStyle(.tertiary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+
+    private func isMarkdown(_ document: EditorDocument) -> Bool {
+        ["md", "markdown", "mdx"].contains(document.url.pathExtension.lowercased())
+    }
+
+    private func markdownModeControls(_ document: EditorDocument) -> some View {
+        HStack(spacing: 2) {
+            markdownButton("Edición", icon: "chevron.left.forwardslash.chevron.right", mode: .edit, document: document)
+            markdownButton("Dos paneles", icon: "rectangle.split.2x1", mode: .split, document: document)
+            markdownButton("Vista previa", icon: "doc.richtext", mode: .preview, document: document)
+        }
+        .padding(2)
+        .background(Theme.bar, in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func markdownButton(_ title: String, icon: String, mode: EditorDocument.MarkdownMode,
+                                document: EditorDocument) -> some View {
+        Button { document.markdownMode = mode } label: {
+            Image(systemName: icon).frame(width: 25, height: 20)
+                .background(document.markdownMode == mode ? Theme.accent.opacity(0.18) : .clear,
+                            in: RoundedRectangle(cornerRadius: 4))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(document.markdownMode == mode ? Theme.accent : .secondary)
+        .help(title)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(document.markdownMode == mode ? [.isSelected] : [])
+    }
+
+    @ViewBuilder private func markdownContent(_ document: EditorDocument) -> some View {
+        let roots = controller.workspace?.projects.compactMap { project in
+            controller.workspaceURL.map { project.directory(relativeTo: $0).resolvingSymlinksInPath() }
+        } ?? []
+        switch document.markdownMode {
+        case .edit:
+            CodeEditor(document: document, theme: AppSettings.shared.theme).id(document.id)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .preview:
+            MarkdownPreview(document: document, projectRoots: roots).id(document.id)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .split:
+            HSplitView {
+                CodeEditor(document: document, theme: AppSettings.shared.theme).id(document.id)
+                    .frame(minWidth: 230, maxWidth: .infinity, maxHeight: .infinity)
+                MarkdownPreview(document: document, projectRoots: roots).id(document.id)
+                    .frame(minWidth: 230, maxWidth: .infinity, maxHeight: .infinity)
             }
         }
     }

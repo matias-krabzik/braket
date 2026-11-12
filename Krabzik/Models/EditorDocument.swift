@@ -12,6 +12,10 @@ import Observation
 /// externo. Confinado al main actor.
 @MainActor @Observable
 final class EditorDocument: Identifiable {
+    enum MarkdownMode: String, CaseIterable {
+        case edit, split, preview
+    }
+
     let id: URL
     var url: URL { id }
     var isDirty = false
@@ -20,6 +24,8 @@ final class EditorDocument: Identifiable {
     var previewImage: NSImage?
     var line = 1
     var column = 1
+    var markdownMode: MarkdownMode = .edit
+    var previewRevision = 0
     /// El texto del documento. **No se mantiene actualizado en cada tecla**: leer
     /// `NSTextView.string` materializa un `String` nuevo del `NSTextStorage`, así que
     /// hacerlo por pulsación cuesta O(n) sobre un archivo que puede tener 5 MB. El editor
@@ -37,6 +43,7 @@ final class EditorDocument: Identifiable {
         set {
             cachedText = newValue
             textIsStale = false
+            previewRevision += 1
         }
     }
 
@@ -81,11 +88,15 @@ final class EditorDocument: Identifiable {
         self.hasExternalChange = document.hasExternalChange
         self.line = document.line
         self.column = document.column
+        self.markdownMode = document.markdownMode
         self.selectedRange = document.selectedRange
     }
 
     /// La llama el editor en cada cambio: O(1). El texto se relee cuando alguien lo pida.
-    func markTextStale() { textIsStale = true }
+    func markTextStale() {
+        textIsStale = true
+        previewRevision += 1
+    }
 
     /// Suelta la vista nativa del documento. Se llama al cerrar el documento o el proyecto.
     /// Lee el texto antes de soltarla: después ya no hay de dónde releerlo.
