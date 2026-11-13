@@ -170,8 +170,8 @@ enum WorkspacePrompts {
     }
 
     static func confirmStopProcesses() -> Bool {
-        confirm(message: "¿Detener los procesos?",
-                detail: "Los procesos de este proyecto siguen en ejecución.",
+        confirm(message: "¿Detener las ejecuciones?",
+                detail: "Se detendrán las ejecuciones en curso.",
                 accept: "Detener")
     }
 

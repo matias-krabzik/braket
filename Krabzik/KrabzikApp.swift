@@ -119,7 +119,7 @@ struct KrabzikApp: App {
         checkingTermination = true
         let lastState = controller.captureSessionState()
         Task {
-            let allowed = await controller.prepareToLeave()
+            let allowed = await controller.prepareToQuit()
             if allowed {
                 controller.saveSessionState(lastState)
                 controller.runner.terminateImmediately()
@@ -133,13 +133,6 @@ struct KrabzikApp: App {
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         guard !checkingTermination else { return false }
-        if let controller {
-            guard !controller.isSwitchingWorkspace else { return false }
-            if controller.workspace != nil {
-                controller.requestCloseWorkspace()
-                return false
-            }
-        }
         NSApp.terminate(nil)
         return false
     }

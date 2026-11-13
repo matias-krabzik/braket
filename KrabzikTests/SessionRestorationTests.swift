@@ -32,11 +32,11 @@ final class SessionRestorationTests: XCTestCase {
                             selectedProjectID: nil, sidebarVisible: true, processesVisible: true)
     }
 
-    func testSettingsPersistAndDefaultToGraphiteWithRestorationDisabled() throws {
+    func testSettingsPersistAndDefaultToGraphiteWithRestorationEnabled() throws {
         let (_, defaults) = try environment()
         let settings = AppSettings(defaults: defaults)
         XCTAssertEqual(settings.theme, .graphite)
-        XCTAssertFalse(settings.restoreLastState)
+        XCTAssertTrue(settings.restoreLastState)
         XCTAssertEqual(settings.markdownPreviewZoom, 1)
         settings.theme = .midnight
         settings.restoreLastState = true

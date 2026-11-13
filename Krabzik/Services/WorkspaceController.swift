@@ -274,6 +274,20 @@ final class WorkspaceController {
         return true
     }
 
+    /// Cerrar la app conserva proyectos y pestañas. Solo consulta al usuario si
+    /// debe interrumpir una ejecución; guarda los cambios del editor antes de salir.
+    func prepareToQuit() async -> Bool {
+        let running = runner.hasActiveProcesses || workflows.isRunning || agent.isRunning || database.hasActiveWork ||
+            documents.contains { $0.sqlExecution.isRunning }
+        if running && !session.dialogs.confirmStopProcesses() { return false }
+        for document in docs.dirty {
+            guard await files.save(document) else { return false }
+        }
+        workflows.stop()
+        agent.shutdown()
+        return await database.prepareToLeave(confirmActivity: false)
+    }
+
     // MARK: - Lo que necesita más de un colaborador a la vez
 
     /// Mostrar el panel de procesos es de la ventana; decidir si el comando puede

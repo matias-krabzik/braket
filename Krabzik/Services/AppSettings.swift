@@ -44,7 +44,7 @@ final class AppSettings {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         theme = AppTheme(rawValue: defaults.string(forKey: "appearanceTheme") ?? "") ?? .graphite
-        restoreLastState = defaults.bool(forKey: "restoreLastState")
+        restoreLastState = defaults.object(forKey: "restoreLastState") as? Bool ?? true
         let savedZoom = defaults.object(forKey: "markdownPreviewZoom") as? Double ?? 1
         markdownPreviewZoom = savedZoom.isFinite ? min(2, max(0.7, savedZoom)) : 1
     }

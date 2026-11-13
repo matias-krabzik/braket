@@ -28,6 +28,38 @@ final class ProjectClosingTests: XCTestCase {
         return predicate()
     }
 
+    func testQuitKeepsProjectOpenWithoutPromptAndSavesEdits() async throws {
+        let (controller, url, _) = try await environment()
+        let file = url.deletingLastPathComponent().appendingPathComponent("query.sql")
+        try Data("SELECT 1;".utf8).write(to: file)
+        try await controller.docs.open(file)
+        let document = try XCTUnwrap(controller.selectedDocument)
+        document.text = "SELECT 2;"
+        document.isDirty = true
+        controller.session.dialogs.confirmStopProcesses = { XCTFail("No hay una ejecución activa"); return false }
+
+        let allowed = await controller.prepareToQuit()
+        XCTAssertTrue(allowed)
+        XCTAssertEqual(controller.workspaceURL, url)
+        XCTAssertEqual(controller.documents.map(\.url), [file.standardizedFileURL])
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "SELECT 2;")
+    }
+
+    func testQuitWarnsAndCanBeCancelledWhenProcessRuns() async throws {
+        let (controller, url, project) = try await environment(command: "/bin/sleep 30")
+        controller.runner.start(project, workspaceURL: url)
+        let running = await waitUntil { controller.runner.hasActiveProcesses }
+        XCTAssertTrue(running)
+        var prompts = 0
+        controller.session.dialogs.confirmStopProcesses = { prompts += 1; return false }
+
+        let allowed = await controller.prepareToQuit()
+        XCTAssertFalse(allowed)
+        XCTAssertEqual(prompts, 1)
+        XCTAssertEqual(controller.workspaceURL, url)
+        XCTAssertTrue(controller.runner.hasActiveProcesses)
+    }
+
     func testNoProcessClosesOnlyAfterConfirmation() async throws {
         let (controller, url, _) = try await environment()
         let closing = ProjectClosing(controller: controller, url: url)

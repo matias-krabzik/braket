@@ -130,9 +130,11 @@ final class DatabaseController {
         }
     }
 
-    func prepareToLeave() async -> Bool {
+    var hasActiveWork: Bool { states.values.contains { $0.busy || $0.inTransaction } }
+
+    func prepareToLeave(confirmActivity: Bool = true) async -> Bool {
         let hasActivity = states.values.contains { $0.busy || $0.inTransaction }
-        if hasActivity {
+        if hasActivity && confirmActivity {
             let alert = NSAlert()
             alert.messageText = "¿Cerrar las conexiones MySQL?"
             alert.informativeText = "Se cancelarán las consultas en curso y se revertirán las transacciones pendientes."
