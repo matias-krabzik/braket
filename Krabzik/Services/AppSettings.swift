@@ -36,11 +36,16 @@ final class AppSettings {
             if !restoreLastState { defaults.removeObject(forKey: SessionRestoration.key) }
         }
     }
+    var markdownPreviewZoom: Double {
+        didSet { defaults.set(markdownPreviewZoom, forKey: "markdownPreviewZoom") }
+    }
     @ObservationIgnored private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         theme = AppTheme(rawValue: defaults.string(forKey: "appearanceTheme") ?? "") ?? .graphite
         restoreLastState = defaults.bool(forKey: "restoreLastState")
+        let savedZoom = defaults.object(forKey: "markdownPreviewZoom") as? Double ?? 1
+        markdownPreviewZoom = savedZoom.isFinite ? min(2, max(0.7, savedZoom)) : 1
     }
 }

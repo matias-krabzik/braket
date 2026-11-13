@@ -4,7 +4,7 @@ IDE nativo para macOS 14 o posterior, escrito en Swift con SwiftUI, AppKit y Tex
 
 ## Abrir y compilar
 
-Abrí `Braket.xcodeproj`, seleccioná **Braket** y ejecutá con ⌘R. Xcode resuelve las dependencias Swift Package Manager en la primera compilación; requiere acceso a Internet. La compilación local usa un certificado Apple Development. Para distribuir a terceros se necesita Developer ID Application y notarización, como se explica en [docs/updates.md](docs/updates.md). La postura de seguridad completa está en [docs/security.md](docs/security.md).
+Abrí `Braket.xcodeproj`, seleccioná **Braket** y ejecutá con ⌘R. Xcode resuelve las dependencias Swift Package Manager en la primera compilación; requiere acceso a Internet. `scripts/build.sh` genera la Release local con firma ad hoc y sin runtime reforzado para poder cargar Sparkle; la publicación para terceros usa Developer ID Application, runtime reforzado y notarización, como se explica en [docs/updates.md](docs/updates.md). La postura de seguridad completa está en [docs/security.md](docs/security.md).
 
 La versión del producto se define en un solo lugar, `scripts/generate_project.py`; este documento no la
 repite para que no pueda quedar desincronizada. La sección **Entorno verificado**, más abajo, dice contra
@@ -99,6 +99,7 @@ Esta versión usa TCP, autenticación `caching_sha2_password` o `mysql_native_pa
 - Detección de Laravel, PHP, Angular, Astro y Node; comando editable desde el menú contextual.
 - Explorador por demanda, actualizado con eventos del sistema de archivos.
 - Pestañas, resaltado básico, números de línea, deshacer, buscar y guardar con ⌘S.
+- Los archivos Markdown tienen edición, vista previa y dos paneles. Los botones de zoom están abajo a la derecha de cada preview; el porcentaje se comparte entre archivos y se conserva al reiniciar.
 - Inicio conjunto o individual de procesos, registros y detención de sus procesos hijos.
 - Protección frente a cambios externos y avisos al cerrar archivos sin guardar.
 
@@ -171,7 +172,7 @@ Datos de la última comprobación, no promesas permanentes.
 | Xcode 27.1 / Swift 6.4, Swift 6 language mode | 2026-11-10 | compila sin avisos propios |
 | `scripts/verify.sh` completo, sin MySQL local | 2026-11-10 | 144 pruebas, 8 saltadas (6 de MySQL real, 2 de Codex con suscripción), 0 fallos |
 | Suite completa con MySQL 8.4 en contenedor desechable | 2026-11-09 | 44 pruebas, 1 saltada (Codex con suscripción), 0 fallos |
-| Release instalada en `/Applications` | 2026-11-10 | binario universal (`x86_64 arm64`), firma ad hoc válida con hardened runtime, arranca con una sola instancia |
+| Release instalada en `/Applications` | 2026-11-12 | binario universal (`x86_64 arm64`), firma ad hoc válida, arranca con una sola instancia |
 | swiftlint 0.65.1 / swiftformat 0.64.6 | 2026-11-10 | `--strict` sin errores y **cero avisos** |
 
 No se garantiza compatibilidad con servidores derivados de MySQL ni con versiones de Xcode anteriores.

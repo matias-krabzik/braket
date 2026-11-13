@@ -37,11 +37,14 @@ final class SessionRestorationTests: XCTestCase {
         let settings = AppSettings(defaults: defaults)
         XCTAssertEqual(settings.theme, .graphite)
         XCTAssertFalse(settings.restoreLastState)
+        XCTAssertEqual(settings.markdownPreviewZoom, 1)
         settings.theme = .midnight
         settings.restoreLastState = true
+        settings.markdownPreviewZoom = 1.4
         let reloaded = AppSettings(defaults: defaults)
         XCTAssertEqual(reloaded.theme, .midnight)
         XCTAssertTrue(reloaded.restoreLastState)
+        XCTAssertEqual(reloaded.markdownPreviewZoom, 1.4)
     }
 
     func testRestoresProjectTabOrderAndSelectionWithoutRunningApprovedCommands() async throws {

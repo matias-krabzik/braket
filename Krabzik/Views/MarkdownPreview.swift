@@ -6,21 +6,25 @@ import SwiftUI
 struct MarkdownPreview: View {
     let document: EditorDocument
     let projectRoots: [URL]
+    @Bindable private var settings = AppSettings.shared
     @State private var blocks: [MarkdownBlocks.Block] = []
+    private var zoom: CGFloat { CGFloat(settings.markdownPreviewZoom) }
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 13) {
+            LazyVStack(alignment: .leading, spacing: 13 * zoom) {
                 ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                     blockView(block)
                 }
             }
-            .frame(maxWidth: 820, alignment: .leading)
+            .frame(maxWidth: 820 * zoom, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(.horizontal, 28)
             .padding(.vertical, 24)
+            .padding(.bottom, 44)
         }
         .background(Theme.background)
+        .overlay(alignment: .bottomTrailing) { zoomControls.padding(12) }
         .task(id: document.previewRevision) {
             try? await Task.sleep(for: .milliseconds(220))
             guard !Task.isCancelled else { return }
@@ -33,17 +37,39 @@ struct MarkdownPreview: View {
         }
     }
 
+    private var zoomControls: some View {
+        HStack(spacing: 4) {
+            Button {
+                settings.markdownPreviewZoom = max(0.7, (settings.markdownPreviewZoom * 10 - 1).rounded() / 10)
+            } label: { Image(systemName: "minus") }
+                .disabled(settings.markdownPreviewZoom <= 0.7)
+                .help("Reducir zoom de Markdown")
+                .accessibilityLabel("Reducir zoom de Markdown")
+            Text("\(Int((settings.markdownPreviewZoom * 100).rounded())) %")
+                .monospacedDigit().frame(width: 48)
+                .accessibilityLabel("Zoom de Markdown")
+            Button {
+                settings.markdownPreviewZoom = min(2, (settings.markdownPreviewZoom * 10 + 1).rounded() / 10)
+            } label: { Image(systemName: "plus") }
+                .disabled(settings.markdownPreviewZoom >= 2)
+                .help("Ampliar zoom de Markdown")
+                .accessibilityLabel("Ampliar zoom de Markdown")
+        }
+        .font(.system(size: 11)).buttonStyle(.borderless)
+        .padding(7).background(Theme.bar, in: RoundedRectangle(cornerRadius: 7))
+    }
+
     @ViewBuilder private func blockView(_ block: MarkdownBlocks.Block) -> some View {
         switch block {
         case .heading(let level, let content):
             inline(content)
-                .font(.system(size: max(15, 30 - CGFloat(level - 1) * 3), weight: .semibold))
+                .font(.system(size: max(15, 30 - CGFloat(level - 1) * 3) * zoom, weight: .semibold))
                 .textSelection(.enabled)
                 .padding(.top, level == 1 ? 8 : 4)
         case .paragraph(let content):
-            inline(content).font(.system(size: 13)).lineSpacing(5).textSelection(.enabled)
+            inline(content).font(.system(size: 13 * zoom)).lineSpacing(5 * zoom).textSelection(.enabled)
         case .quote(let content):
-            inline(content).font(.system(size: 13)).lineSpacing(5)
+            inline(content).font(.system(size: 13 * zoom)).lineSpacing(5 * zoom)
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
                 .padding(.leading, 13).padding(.vertical, 4)
@@ -51,16 +77,16 @@ struct MarkdownPreview: View {
                 .overlay(alignment: .leading) { Rectangle().fill(Theme.accent.opacity(0.55)).frame(width: 3) }
         case .listItem(let level, let marker, let content):
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(marker).frame(width: 23, alignment: .trailing).foregroundStyle(Theme.accent)
+                Text(marker).frame(width: 23 * zoom, alignment: .trailing).foregroundStyle(Theme.accent)
                 inline(content).textSelection(.enabled)
             }
-            .font(.system(size: 13)).padding(.leading, CGFloat(level) * 18)
+            .font(.system(size: 13 * zoom)).padding(.leading, CGFloat(level) * 18 * zoom)
         case .code(let language, let content):
             VStack(alignment: .leading, spacing: 8) {
                 if !language.isEmpty {
-                    Text(language).font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                    Text(language).font(.system(size: 10 * zoom, weight: .medium)).foregroundStyle(.secondary)
                 }
-                Text(content).font(.system(size: 12, design: .monospaced))
+                Text(content).font(.system(size: 12 * zoom, design: .monospaced))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -75,7 +101,7 @@ struct MarkdownPreview: View {
                     GridRow {
                         ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
                             inline(cell)
-                                .font(.system(size: 12, weight: rowIndex == 0 ? .semibold : .regular))
+                                .font(.system(size: 12 * zoom, weight: rowIndex == 0 ? .semibold : .regular))
                                 .textSelection(.enabled)
                         }
                     }
@@ -85,7 +111,7 @@ struct MarkdownPreview: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.bar, in: RoundedRectangle(cornerRadius: 8))
         case .image(let alt, let path):
-            MarkdownLocalImage(url: localImageURL(path), alt: alt.isEmpty ? path : alt)
+            MarkdownLocalImage(url: localImageURL(path), alt: alt.isEmpty ? path : alt, zoom: zoom)
         }
     }
 
@@ -111,6 +137,7 @@ struct MarkdownPreview: View {
 private struct MarkdownLocalImage: View {
     let url: URL?
     let alt: String
+    let zoom: CGFloat
     @State private var image: NSImage?
 
     var body: some View {
@@ -118,11 +145,12 @@ private struct MarkdownLocalImage: View {
             if let image {
                 VStack(alignment: .leading, spacing: 5) {
                     Image(nsImage: image).resizable().scaledToFit()
+                        .frame(maxWidth: 820 * zoom)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    Text(alt).font(.caption).foregroundStyle(.secondary)
+                    Text(alt).font(.system(size: 11 * zoom)).foregroundStyle(.secondary)
                 }
             } else {
-                Label(alt, systemImage: "photo").font(.system(size: 12)).foregroundStyle(.secondary)
+                Label(alt, systemImage: "photo").font(.system(size: 12 * zoom)).foregroundStyle(.secondary)
             }
         }
         .task(id: url) {
