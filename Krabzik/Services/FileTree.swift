@@ -126,8 +126,11 @@ struct FileTree: NSViewRepresentable {
                 if let node = previous[directory], node.project == project { return node }
                 return FileNode(url: directory, isDirectory: true, project: project)
             }
+            roots += controller.files.standaloneScripts.map { file in
+                previous[file] ?? FileNode(url: file, isDirectory: false)
+            }
             outline?.reloadData()
-            for root in roots {
+            for root in roots where root.isDirectory {
                 if root.children == nil { load(root) }
                 else { restoreExpansion(root) }
             }
@@ -314,6 +317,9 @@ struct FileTree: NSViewRepresentable {
                 add("Mostrar en Finder", to: menu, action: #selector(reveal(_:)), represented: node)
                 menu.addItem(.separator())
                 add("Quitar del proyecto", to: menu, action: #selector(removeRoot(_:)), represented: project)
+            } else if selection.count == 1, !node.isDirectory, roots.contains(where: { $0 === node }) {
+                add("Mostrar en Finder", to: menu, action: #selector(reveal(_:)), represented: node)
+                add("Quitar del proyecto", to: menu, action: #selector(removeScript(_:)), represented: node)
             } else if selection.allSatisfy({ canChange($0) }) {
                 if selection.count == 1 {
                     add("Renombrar", to: menu, action: #selector(renameAction(_:)), represented: node)
@@ -340,6 +346,10 @@ struct FileTree: NSViewRepresentable {
             if let node = item.representedObject as? FileNode { create(in: node, directory: true) }
         }
         @objc func editCommand(_ item: NSMenuItem) { controller.commandProject = item.representedObject as? CodeProject }
+        @objc func removeScript(_ item: NSMenuItem) {
+            if let node = item.representedObject as? FileNode { controller.files.removeScript(node.url) }
+        }
+
         @objc func removeRoot(_ item: NSMenuItem) {
             if let project = item.representedObject as? CodeProject { controller.projects.remove(project.id) } }
 

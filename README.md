@@ -72,24 +72,28 @@ La integración se verificó con Codex CLI `0.167.0-alpha.3.2`, una cuenta ChatG
 
 Si falla una conexión, Braket registra los intentos en `~/Library/Logs/Braket/mysql.jsonl` (hasta 512 KiB más
 una copia anterior). En **Configuración → General → Exportar diagnóstico MySQL…** se genera un archivo de texto
-que podés llevar a otra computadora para consultar la causa. También está disponible desde el menú contextual
-de una conexión y, cuando falla **Probar**, en la misma hoja. Registra hora, duración, etapa y códigos de error
+que podés llevar a otra computadora para consultar la causa. También está disponible cuando falla **Probar**, en la misma hoja. Registra hora, duración, etapa y códigos de error
 de red/TLS, sin contraseña, usuario, servidor, IP, base de datos ni texto SQL.
 
-1. Abrí o creá un proyecto. Puede contener únicamente conexiones y scripts.
-2. En **Bases de datos**, pulsá **+**, completá servidor, puerto, usuario y contraseña. La base es opcional. **Probar** verifica el acceso; **Guardar** conserva la configuración.
-3. En **TLS**, elegí el modo para Standard (TCP/IP): **If available** intenta cifrar sin verificar el certificado y usa texto plano si el servidor no ofrece TLS; **Require** exige cifrado sin verificar el certificado; **Require and Verify CA** valida el certificado sin comprobar el nombre; **Require and Verify Identity** valida certificado y nombre (predeterminado); **No** desactiva TLS. Los modos sin verificación o con posible texto plano muestran una advertencia antes de guardar.
-4. Abrí o creá un `.sql` desde **SQL +**. Los scripts independientes quedan asociados al proyecto.
-5. Elegí la conexión y pulsá **▶** o **⌘↩**. Si hay texto seleccionado se ejecuta esa selección; de lo contrario, el archivo completo. Los cambios sin guardar también se pueden ejecutar.
-6. Los resultados aparecen abajo, con un selector cuando hay varias respuestas. El botón **■** cancela la consulta y cierra su sesión MySQL. El menú contextual de la conexión permite editarla o desconectarla.
+1. En **Configuración → Conexiones**, agregá los perfiles MySQL. Son globales y se comparten entre proyectos.
+2. Completá servidor, puerto, usuario y contraseña. La base es opcional. **Probar** verifica el acceso; **Guardar** conserva el perfil.
+3. Elegí la política SSL. Podés exigir cifrado con verificación de identidad (predeterminado), verificar solo la CA, exigir SSL sin verificar el certificado, usar SSL si está disponible o desactivarlo. Las opciones menos estrictas explican su alcance en el formulario.
+4. El explorador muestra un único árbol de archivos y carpetas. Los scripts SQL se abren desde allí; el menú **+** permite agregar carpetas, importar consultas o crear un script.
+5. Cada script tiene su propio selector de conexión encima del editor. La elección se recuerda por ruta de archivo en esta Mac y no cambia las otras pestañas. **Conectar** abre una sesión sin ejecutar SQL; **Ejecutar** o **⌘↩** usa la selección o el archivo completo.
+6. Podés mantener varias conexiones abiertas y ejecutar scripts en sesiones distintas. Cambiar el selector no cierra otras conexiones. No se puede cambiar el destino de un script mientras ejecuta.
+7. Los resultados conservan el nombre de la conexión que los produjo. **Cancelar** detiene la consulta y cierra su sesión. Desde **Conexiones** podés editar, conectar o desconectar cada perfil.
 
-Las contraseñas se guardan en el **Llavero de macOS**, vinculadas al identificador, servidor, puerto, usuario y modo TLS. No se incluyen en `.kzk`. Abrir un proyecto no inicia conexiones ni ejecuta SQL.
+Las conexiones antiguas de proyectos confiables se importan una sola vez al catálogo global.
+Las contraseñas siguen en el **Llavero de macOS**, vinculadas al identificador, servidor, puerto, usuario y modo TLS.
+Los perfiles y las selecciones por archivo se guardan en preferencias locales; las contraseñas no se incluyen en ellas ni en el `.kzk`.
+Abrir un proyecto no inicia conexiones ni ejecuta SQL. Quitar una conexión no asigna automáticamente otra a sus scripts.
+Las sesiones inactivas permanecen abiertas al cambiar de proyecto; las consultas o transacciones pendientes conservan sus confirmaciones de cierre.
 
 Los scripts se ejecutan secuencialmente en una sesión persistente por conexión. Se conservan tablas temporales, variables y transacciones entre ejecuciones. Se admiten comentarios, cadenas con separadores y `DELIMITER` para procedimientos. Los errores muestran la línea, conservan los resultados previos y detienen las sentencias siguientes. Las sentencias ya confirmadas por MySQL permanecen aplicadas; el IDE no envuelve el script en una transacción. Usá `BEGIN`, `COMMIT` y `ROLLBACK` cuando corresponda. Cerrar una sesión revierte su transacción pendiente, con aviso en la interfaz.
 
 Para mantener acotada la memoria se muestran hasta 1.000 filas por resultado y 16 KiB por celda, con un presupuesto aproximado de 4 MB por sentencia y 8 MB por ejecución para los valores retenidos. El resto se recibe y descarta sin modificar la consulta. Se indica cuando la vista está limitada. Máximo 200 sentencias/resultados por ejecución. `NULL`, texto vacío y datos binarios se distinguen; la tabla conserva sus columnas aunque no haya filas.
 
-Esta versión usa TCP, autenticación `caching_sha2_password` o `mysql_native_password` y, opcionalmente, TLS con certificados de confianza. No incluye túneles SSH, sockets Unix, certificados cliente, editor visual de tablas ni comandos del cliente de consola como `SOURCE`. La integración se comprobó contra MySQL 8.4.11; no se garantiza compatibilidad con todos los servidores derivados.
+Esta versión usa TCP, autenticación `caching_sha2_password` o `mysql_native_password` y, opcionalmente, TLS con certificados de confianza. No incluye túneles SSH, sockets Unix, editor visual de tablas ni comandos del cliente de consola como `SOURCE`. La integración se comprobó contra MySQL 8.4.11; no se garantiza compatibilidad con todos los servidores derivados.
 
 ## Código y procesos
 

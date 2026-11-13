@@ -177,4 +177,9 @@ final class DatabaseState {
     var currentDatabase = ""
     var inTransaction = false
     var busy = false
+
+    func destination(for connection: DatabaseConnection) -> String {
+        let database = status == .connected ? currentDatabase : connection.database
+        return "\(connection.host):\(connection.port)" + (database.isEmpty ? "" : " / " + database)
+    }
 }

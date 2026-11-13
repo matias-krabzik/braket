@@ -6,7 +6,7 @@ import Observation
 /// para no releerla: acotar su vida es el punto de docs/specs/S4-no-retener-password.md.
 @MainActor @Observable
 final class DatabaseController {
-    var selectedConnectionID: UUID?
+    var showingConnections = false
     var editingConnection: DatabaseConnection?
     var states: [UUID: DatabaseState] = [:]
     var resultsVisible = true
@@ -20,13 +20,7 @@ final class DatabaseController {
         return state
     }
 
-    func install(_ connections: [DatabaseConnection]) {
-        states = Dictionary(uniqueKeysWithValues: connections.map { ($0.id, DatabaseState()) })
-        selectedConnectionID = connections.first?.id
-    }
-
     func connect(_ connection: DatabaseConnection) {
-        selectedConnectionID = connection.id
         let state = state(connection.id)
         guard state.status == .disconnected, !state.busy else { return }
         state.status = .connecting
@@ -76,7 +70,7 @@ final class DatabaseController {
         execution.error = nil
         execution.cancelNote = nil
         execution.connectionName = connection.name
-        execution.destination = connection.destination
+        execution.destination = state.destination(for: connection)
         execution.isRunning = true
         execution.isCancelling = false
         state.busy = true
@@ -132,8 +126,9 @@ final class DatabaseController {
 
     var hasActiveWork: Bool { states.values.contains { $0.busy || $0.inTransaction } }
 
-    func prepareToLeave(confirmActivity: Bool = true) async -> Bool {
+    func prepareToLeave(confirmActivity: Bool = true, closeIdleConnections: Bool = true) async -> Bool {
         let hasActivity = states.values.contains { $0.busy || $0.inTransaction }
+        if !closeIdleConnections && !hasActivity { return true }
         if hasActivity && confirmActivity {
             let alert = NSAlert()
             alert.messageText = "¿Cerrar las conexiones MySQL?"

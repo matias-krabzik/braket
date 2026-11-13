@@ -44,7 +44,7 @@ final class ProjectClosing {
                 return }
                 controller.agent.shutdown()
             }
-            guard await controller.files.resolveDirty(), await controller.database.prepareToLeave() else {
+            guard await controller.files.resolveDirty(), await controller.database.prepareToLeave(closeIdleConnections: false) else {
                 phase = .cancelled
                 return
             }

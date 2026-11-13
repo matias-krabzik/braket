@@ -1,21 +1,14 @@
 import SwiftUI
 
-enum WorkspaceSidebarTab: String, Codable, CaseIterable {
-    case code, database
-    var title: String { self == .code ? "Código" : "Base de datos" }
-}
-
 struct WorkspaceSidebar: View {
     @Bindable var controller: WorkspaceController
     let workspace: Workspace
     let url: URL
     @State private var codeFilter = ""
-    @State private var databaseFilter = ""
     @State private var search = SidebarFileSearch()
     @State private var searching = false
     @State private var searchError: String?
 
-    private var code: Bool { controller.sidebarTab == .code }
     private var query: String { codeFilter.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
@@ -23,42 +16,46 @@ struct WorkspaceSidebar: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text(workspace.name).font(.system(size: Theme.zoom(13), weight: .semibold))
                     .lineLimit(1).truncationMode(.middle).help(workspace.name)
-                Picker("Explorador", selection: $controller.sidebarTab) {
-                    ForEach(WorkspaceSidebarTab.allCases, id: \.self) { tab in
-                        Text(tab.title).tag(tab)
-                    }
-                }
-                .pickerStyle(.segmented).labelsHidden().controlSize(.regular)
                 HStack(spacing: 8) {
                     HStack(spacing: 6) {
                         Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                        TextField(code ? "Filtrar archivos" : "Filtrar conexiones y SQL",
-                                  text: code ? $codeFilter : $databaseFilter)
+                        TextField("Filtrar archivos", text: $codeFilter)
                             .textFieldStyle(.plain).font(.system(size: Theme.zoom(11)))
-                        if !(code ? codeFilter : databaseFilter).isEmpty {
+                        if !codeFilter.isEmpty {
                             Button {
-                                if code { codeFilter = "" } else { databaseFilter = "" }
+                                codeFilter = ""
                             } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
                                 .buttonStyle(.plain).accessibilityLabel("Limpiar filtro")
                         }
                     }
                     .padding(7).background(Theme.background, in: RoundedRectangle(cornerRadius: 6))
-                    if code {
-                        Button(action: controller.projects.addFolders) { Image(systemName: "folder.badge.plus") }
-                            .buttonStyle(.plain).help("Agregar subproyecto").accessibilityLabel("Agregar subproyecto")
-                            .disabled(controller.isReadOnly || controller.isSwitchingWorkspace)
-                    }
+                    Menu {
+                        Button("Agregar carpeta…", action: controller.projects.addFolders)
+                        Button("Agregar archivo SQL…", action: controller.files.importScripts)
+                        Button("Nuevo archivo SQL…") { controller.files.create() }
+                    } label: { Image(systemName: "plus") }
+                        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                        .help("Agregar archivos y carpetas").accessibilityLabel("Agregar archivos y carpetas")
+                        .disabled(controller.isReadOnly || controller.isSwitchingWorkspace)
                 }
             }
             .padding(12)
             Divider()
-            ZStack {
-                // Mantener el árbol montado preserva las expansiones y el scroll al cambiar de pestaña.
-                codeContent.opacity(code ? 1 : 0).allowsHitTesting(code).accessibilityHidden(!code)
-                DatabaseSidebar(controller: controller, filter: databaseFilter)
-                    .opacity(code ? 0 : 1).allowsHitTesting(!code).accessibilityHidden(code)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            codeContent.frame(maxWidth: .infinity, maxHeight: .infinity)
+            Divider()
+            Button { controller.database.showingConnections = true } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "slider.horizontal.3")
+                    Text("Conexiones")
+                    Spacer()
+                    let count = controller.database.states.values.filter { $0.status == .connected }.count
+                    if count > 0 {
+                        Text("\(count) abiertas").foregroundStyle(.green)
+                    }
+                    Image(systemName: "chevron.right").font(.caption2)
+                }.font(.system(size: Theme.zoom(11))).padding(12).contentShape(Rectangle())
+            }.buttonStyle(.plain).help("Configurar conexiones globales")
+
         }
         .background(Theme.sidebar)
         .task(id: query + "|" + String(controller.session.revision)) { await filterFiles() }
@@ -70,9 +67,9 @@ struct WorkspaceSidebar: View {
                 .opacity(query.isEmpty ? 1 : 0).allowsHitTesting(query.isEmpty).accessibilityHidden(!query.isEmpty)
             if !query.isEmpty {
                 results
-            } else if workspace.projects.isEmpty {
+            } else if workspace.projects.isEmpty && controller.files.standaloneScripts.isEmpty {
                 VStack(spacing: 12) {
-                    Text("Todavía no hay subproyectos.").foregroundStyle(.secondary)
+                    Text("Agregá archivos y carpetas a tu proyecto.").foregroundStyle(.secondary)
                     Button("Agregar carpeta…", action: controller.projects.addFolders).disabled(controller.isReadOnly)
                     Spacer()
                 }.font(.callout).padding(.top, 24)
@@ -87,8 +84,18 @@ struct WorkspaceSidebar: View {
                     ProgressView().controlSize(.small).padding()
                 } else if let searchError {
                     Text(searchError).foregroundStyle(.secondary).padding()
-                } else if search.matches.isEmpty {
+                } else if search.matches.isEmpty && !controller.files.standaloneScripts.contains(where: {
+                    $0.lastPathComponent.localizedStandardContains(query)
+                }) {
                     Text("No se encontraron archivos.").foregroundStyle(.secondary).padding()
+                }
+                ForEach(controller.files.standaloneScripts.filter {
+                    $0.lastPathComponent.localizedStandardContains(query)
+                }, id: \.self) { script in
+                    Button { controller.files.open(script) } label: {
+                        Label(script.lastPathComponent, systemImage: "doc.text")
+                            .frame(maxWidth: .infinity, alignment: .leading).padding(12).contentShape(Rectangle())
+                    }.buttonStyle(.plain).help(script.path)
                 }
                 ForEach(controller.mountedProjects) { project in
                     let root = project.directory(relativeTo: url).resolvingSymlinksInPath().standardizedFileURL

@@ -248,7 +248,7 @@ final class WorkspaceNavigationTests: XCTestCase {
         XCTAssertEqual(try Workspace.read(from: url).name, "Conservar")
     }
 
-    func testReturningHomeClearsEditorAndDatabaseSelectionButKeepsHistory() async throws {
+    func testReturningHomeClearsEditorButKeepsGlobalConnectionsAndHistory() async throws {
         let (directory, defaults) = try environment()
         let url = try project("Proyecto", in: directory)
         let controller = WorkspaceController(defaults: defaults)
@@ -260,7 +260,8 @@ final class WorkspaceNavigationTests: XCTestCase {
         try await controller.docs.open(archivo)
         XCTAssertEqual(controller.documents.count, 1)
         controller.selectedProjectID = UUID()
-        controller.database.install([DatabaseConnection()])
+        let connection = DatabaseConnection()
+        controller.connections.install([connection])
 
         await controller.closeWorkspace()
 
@@ -269,8 +270,8 @@ final class WorkspaceNavigationTests: XCTestCase {
         XCTAssertTrue(controller.documents.isEmpty)
         XCTAssertNil(controller.selectedDocumentID)
         XCTAssertNil(controller.selectedProjectID)
-        XCTAssertNil(controller.database.selectedConnectionID)
-        XCTAssertTrue(controller.database.states.isEmpty)
+        XCTAssertEqual(controller.connections.profiles, [connection])
+        XCTAssertNotNil(controller.database.states[connection.id])
         XCTAssertFalse(controller.isSwitchingWorkspace)
         XCTAssertEqual(controller.recentProjects, [url])
         await controller.openWorkspace(url)

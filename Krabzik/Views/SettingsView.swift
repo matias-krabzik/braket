@@ -16,6 +16,8 @@ struct SettingsView: View {
                 }
             }
             .tabItem { Label("Proyecto", systemImage: "folder") }
+            ConnectionsSettingsView(controller: controller)
+                .tabItem { Label("Conexiones", systemImage: "externaldrive") }
             UpdatesSettingsView().tabItem { Label("Actualizaciones", systemImage: "arrow.triangle.2.circlepath") }
         }
         .padding(12)

@@ -201,6 +201,35 @@ final class DatabaseTests: XCTestCase {
         return await sink.values
     }
 
+    func testMySQLSimultaneousConnectionsKeepSeparateDatabasesAndSessionVariables() async throws {
+        let first = try configuration()
+        var other = first
+        other.id = UUID()
+        other.database = "information_schema"
+        let second = other
+        let client = MySQLClient()
+        let run: @Sendable (String, DatabaseConnection) async throws -> [SQLResult] = { sql, config in
+            let sink = ResultSink()
+            _ = try await client.execute(sql, startingLine: 1, configuration: config, password: "",
+                                         operation: UUID()) { await sink.append($0) }
+            return await sink.values
+        }
+        do {
+            async let firstRows = run("SET @braket_session = 'first'; SELECT DATABASE(), @braket_session;", first)
+            async let secondRows = run("SET @braket_session = 'second'; SELECT DATABASE(), @braket_session;", second)
+            let results = try await (firstRows, secondRows)
+            XCTAssertEqual(results.0.last?.rows.first ?? [], ["krabzik_qa", "first"])
+            XCTAssertEqual(results.1.last?.rows.first ?? [], ["information_schema", "second"])
+            await client.disconnect(second.id)
+            let retained = try await execute("SELECT @braket_session;", client: client, config: first)
+            XCTAssertEqual(retained.last?.rows.first ?? [], ["first"])
+        } catch {
+            await client.shutdown()
+            throw error
+        }
+        await client.shutdown()
+    }
+
     func testMySQLTypesEmptyResultsAffectedRowsAndSession() async throws {
         let config = try configuration(), client = MySQLClient()
         do {
@@ -457,5 +486,84 @@ final class DatabaseTests: XCTestCase {
             try? await group.shutdownGracefully()
             throw error
         }
+    }
+}
+
+@MainActor
+final class GlobalConnectionTests: XCTestCase {
+    private func environment() -> (UserDefaults, WorkspaceSession, DatabaseController) {
+        let name = "GlobalConnectionTests." + UUID().uuidString
+        let defaults = UserDefaults(suiteName: name) ?? .standard
+        addTeardownBlock { defaults.removePersistentDomain(forName: name) }
+        let session = WorkspaceSession(trustStore: TrustStore(defaults: defaults), errors: ErrorCenter())
+        return (defaults, session, DatabaseController())
+    }
+
+    func testScriptsKeepIndependentSelectionsAcrossReopeningAndProjectChanges() throws {
+        let (defaults, session, database) = environment()
+        let first = DatabaseConnection(name: "Desarrollo")
+        let second = DatabaseConnection(name: "Reportes")
+        defaults.set(try JSONEncoder().encode([first, second]), forKey: ConnectionStore.profilesKey)
+        let store = ConnectionStore(session: session, database: database, defaults: defaults)
+        let one = try EditorDocument(url: URL(fileURLWithPath: "/tmp/one.sql"), data: Data("SELECT 1".utf8))
+        let two = try EditorDocument(url: URL(fileURLWithPath: "/tmp/two.sql"), data: Data("SELECT 2".utf8))
+        XCTAssertNil(store.selected(for: one))
+        store.select(first.id, for: one)
+        store.select(second.id, for: two)
+        XCTAssertEqual(store.selected(for: one)?.id, first.id)
+        XCTAssertEqual(store.selected(for: two)?.id, second.id)
+        let restored = ConnectionStore(session: session, database: database, defaults: defaults)
+        XCTAssertEqual(restored.selected(for: one)?.id, first.id)
+        session.open(Workspace(name: "Otro"), at: URL(fileURLWithPath: "/tmp/Other.kzk"), trust: .trusted)
+        restored.install([])
+        XCTAssertEqual(restored.profiles.count, 2)
+        XCTAssertEqual(restored.selected(for: two)?.id, second.id)
+        one.sqlExecution.isRunning = true
+        restored.select(second.id, for: one)
+        XCTAssertEqual(restored.selected(for: one)?.id, first.id)
+        one.sqlExecution.isRunning = false
+        restored.select(nil, for: one)
+        XCTAssertNil(restored.selected(for: one))
+    }
+
+    func testTrustedLegacyProfilesMigrateOnceWithoutChangingCredentialIdentity() throws {
+        let (defaults, session, database) = environment()
+        let connection = DatabaseConnection(name: "Importada")
+        let project = Workspace(name: "Proyecto", connections: [connection])
+        let url = URL(fileURLWithPath: "/tmp/legacy.kzk")
+        let store = ConnectionStore(session: session, database: database, defaults: defaults)
+        session.open(project, at: url, trust: .untrusted)
+        store.install(project.connections)
+        XCTAssertTrue(store.profiles.isEmpty)
+        session.open(project, at: url, trust: .trusted)
+        store.install(project.connections)
+        store.install(project.connections)
+        XCTAssertEqual(store.profiles, [connection])
+        let restored = ConnectionStore(session: session, database: database, defaults: defaults)
+        XCTAssertEqual(restored.profiles, [connection])
+        database.state(connection.id).status = .connected
+        restored.install([])
+        XCTAssertEqual(database.state(connection.id).status, .connected)
+    }
+
+    func testMissingConnectionDoesNotFallBackToAnotherProfile() throws {
+        let (defaults, session, database) = environment()
+        let connection = DatabaseConnection()
+        defaults.set(try JSONEncoder().encode([connection]), forKey: ConnectionStore.profilesKey)
+        defaults.set(["/tmp/removed.sql": UUID().uuidString], forKey: ConnectionStore.selectionsKey)
+        let store = ConnectionStore(session: session, database: database, defaults: defaults)
+        let document = try EditorDocument(url: URL(fileURLWithPath: "/tmp/removed.sql"), data: Data("SELECT 1".utf8))
+        XCTAssertNil(store.selected(for: document))
+    }
+
+    func testIdleGlobalSessionsSurviveProjectSwitching() async {
+        let (_, _, database) = environment()
+        let first = UUID(), second = UUID()
+        database.state(first).status = .connected
+        database.state(second).status = .connected
+        let result = await database.prepareToLeave(closeIdleConnections: false)
+        XCTAssertTrue(result)
+        XCTAssertEqual(database.state(first).status, .connected)
+        XCTAssertEqual(database.state(second).status, .connected)
     }
 }

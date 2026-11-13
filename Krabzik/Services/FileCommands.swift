@@ -27,6 +27,17 @@ final class FileCommands {
         return ScriptLibrary.url(for: path, workspaceURL: workspaceURL, trust: session.trust)
     }
 
+    var standaloneScripts: [URL] {
+        guard let workspace = session.workspace, let url = session.url else { return [] }
+        return ScriptLibrary.standaloneURLs(in: workspace, at: url, trust: session.trust)
+    }
+
+    func removeScript(_ url: URL) {
+        guard !session.isReadOnly, var workspace = session.workspace else { return }
+        workspace.scripts.removeAll { scriptURL($0)?.standardizedFileURL == url.standardizedFileURL }
+        session.write(workspace)
+    }
+
     func importScripts() {
         guard session.workspace != nil else { return }
         for url in session.dialogs.chooseScripts() {
@@ -57,11 +68,12 @@ final class FileCommands {
 
     func create(in directory: URL? = nil) {
         guard !session.isReadOnly, let workspaceURL = session.url else { return }
-        let system = ExplorerFileSystem(roots: session.mountedProjects.map { $0.directory(relativeTo: workspaceURL) })
         let suggested = directory
             ?? docs.selected?.url.deletingLastPathComponent()
             ?? session.mountedProjects.first?.directory(relativeTo: workspaceURL)
         guard let url = session.dialogs.createFile("nuevo.sql", suggested) else { return }
+        let roots = session.mountedProjects.map { $0.directory(relativeTo: workspaceURL) }
+        let system = ExplorerFileSystem(roots: roots + [url.deletingLastPathComponent()])
         do {
             let target = try system.create(name: url.lastPathComponent, in: url.deletingLastPathComponent(), directory: false)
             remember(target)

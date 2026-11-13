@@ -64,10 +64,10 @@ struct KrabzikApp: App {
                 Button("Abrir script…", action: controller.files.importScripts).disabled(controller.workspace == nil)
                 Button("Ejecutar selección o script", action: controller.executeSQL)
                     .keyboardShortcut(.return, modifiers: [.command])
-                    .disabled(controller.selectedDocument?.language != "SQL" || controller.connections.selected == nil || controller
+                    .disabled(controller.selectedDocument?.language != "SQL" || controller.selectedDocument
+                        .flatMap { controller.connections.selected(for: $0) } == nil || controller
                         .selectedDocument?.sqlExecution.isRunning == true)
-                Button("Nueva conexión…") { controller.database.editingConnection = DatabaseConnection() }
-                    .disabled(controller.workspace == nil)
+                Button("Administrar conexiones…") { controller.database.showingConnections = true }
             }
             CommandGroup(after: .textEditing) {
                 Button("Buscar en el archivo") {

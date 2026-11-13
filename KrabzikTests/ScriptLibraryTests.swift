@@ -13,6 +13,15 @@ final class ScriptLibraryTests: XCTestCase {
         return value
     }
 
+    func testStandaloneScriptsAppearOnceAndRespectTrustAndMountedFolders() {
+        let project = CodeProject(name: "Código", path: "src", kind: .files, command: "")
+        let value = workspace(scripts: ["src/in-tree.sql", "query.sql", "./query.sql", "/external/query.sql"], projects: [project])
+        XCTAssertEqual(ScriptLibrary.standaloneURLs(in: value, at: workspaceURL, trust: .trusted).map(\.path),
+                       ["/proyectos/tienda/query.sql", "/external/query.sql"])
+        XCTAssertEqual(ScriptLibrary.standaloneURLs(in: value, at: workspaceURL, trust: .untrusted).map(\.path),
+                       ["/proyectos/tienda/query.sql"])
+    }
+
     func testRelativePathResolvesAgainstTheProjectFolder() {
         let url = ScriptLibrary.url(for: "sql/consultas.sql", workspaceURL: workspaceURL, trust: .trusted)
         XCTAssertEqual(url?.path, "/proyectos/tienda/sql/consultas.sql")

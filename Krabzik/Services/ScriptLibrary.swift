@@ -24,6 +24,15 @@ enum ScriptLibrary {
         return base.appendingPathComponent(path)
     }
 
+    static func standaloneURLs(in workspace: Workspace, at workspaceURL: URL, trust: TrustStore.Trust) -> [URL] {
+        let roots = workspace.projects.map { $0.directory(relativeTo: workspaceURL).standardizedFileURL }
+        var seen: Set<URL> = []
+        return workspace.scripts.compactMap { url(for: $0, workspaceURL: workspaceURL, trust: trust)?.standardizedFileURL }
+            .filter { file in
+                !roots.contains { file.path.hasPrefix($0.path + "/") } && seen.insert(file).inserted
+            }
+    }
+
     /// Agrega el script a la lista del proyecto, si corresponde.
     ///
     /// No se agrega si no es `.sql`, si ya está, o si vive dentro de un subproyecto: ahí

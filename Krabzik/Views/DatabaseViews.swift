@@ -1,137 +1,122 @@
 import AppKit
 import SwiftUI
 
-struct DatabaseSidebar: View {
-    @Bindable var controller: WorkspaceController
-    var filter = ""
+struct ConnectionsSettingsView: View {
+    let controller: WorkspaceController
+    var showsDone = false
+    @Environment(\.dismiss) private var dismiss
+    @State private var editing: DatabaseConnection?
+    @State private var removing: DatabaseConnection?
 
-    private var query: String { filter.trimmingCharacters(in: .whitespacesAndNewlines) }
-    private var connections: [DatabaseConnection] {
-        (controller.workspace?.connections ?? []).filter {
-            query.isEmpty || ($0.name + " " + $0.destination).localizedStandardContains(query)
-        }
-    }
-    private var scripts: [String] {
-        (controller.workspace?.scripts ?? []).filter { query.isEmpty || $0.localizedStandardContains(query) }
+    private var connectedCount: Int {
+        controller.connections.profiles.filter { controller.database.states[$0.id]?.status == .connected }.count
     }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 5) {
-                HStack {
-                    Text("CONEXIONES").font(.system(size: Theme.zoom(11), weight: .medium)).foregroundStyle(.secondary)
-                    Spacer()
-                    Button { controller.database.editingConnection = DatabaseConnection() } label: {
-                        Image(systemName: "plus").font(.system(size: Theme.zoom(11))) }
-                        .buttonStyle(.plain).help("Agregar conexión MySQL").accessibilityLabel("Agregar conexión MySQL")
-                }.padding(.horizontal, 15).padding(.top, 13).padding(.bottom, 5)
-                ForEach(connections) { connection in
-                    if let state = controller.database.states[connection.id] {
-                        DatabaseRow(connection: connection, state: state,
-                                    selected: controller.database.selectedConnectionID == connection.id,
-                                    connect: { controller.database.connect(connection) })
-                        .contextMenu {
-                            Button(state.status == .connected ? "Desconectar" : "Conectar") {
-                                if state.status == .connected { Task { _ = await controller.database.disconnect(connection) } }
-                                else { controller.database.connect(connection) }
-                            }.disabled(state.busy || state.status == .connecting)
-                            Button("Editar…") { controller.database.editingConnection = connection }
-                                .disabled(state.busy || state.status == .connecting)
-                            Button("Exportar diagnóstico MySQL…") {
-                                Task {
-                                    do { try await WorkspacePrompts.exportMySQLDiagnostics() }
-                                    catch { controller.errors.report(error) }
-                                }
-                            }
-                            Divider()
-                            Button("Quitar conexión") { controller.connections.remove(connection) }
-                                .disabled(state.busy || state.status == .connecting)
-                        }
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Conexiones").font(.title2.weight(.semibold))
+                    Text("Compartidas entre todos tus proyectos")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button { editing = DatabaseConnection() } label: {
+                    Label("Nueva conexión", systemImage: "plus")
+                }
+            }.padding(20)
+            HStack(spacing: 6) {
+                Circle().fill(connectedCount > 0 ? Color.green : .secondary).frame(width: 6, height: 6)
+                Text("\(connectedCount) abiertas · \(controller.connections.profiles.count) guardadas")
+                Spacer()
+                Text("MySQL · TCP/IP")
+            }.font(.caption).foregroundStyle(.secondary).padding(.horizontal, 20).padding(.bottom, 16)
+            Divider()
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    if controller.connections.profiles.isEmpty {
+                        ContentUnavailableView("Tus bases de datos, en un solo lugar", systemImage: "externaldrive",
+                                               description: Text("Agregá una conexión y elegila desde cualquier script SQL."))
+                    }
+                    ForEach(controller.connections.profiles) { connection in
+                        connectionCard(connection)
+                    }
+                }.padding(20)
+            }
+            Divider()
+            HStack {
+                Text("Cada script elige su conexión. Abrir otra no cierra las demás.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                if showsDone { Button("Listo") { dismiss() }.keyboardShortcut(.cancelAction) }
+            }.padding(20)
+        }
+        .background(Theme.background)
+        .sheet(item: $editing) { ConnectionSheet(connection: $0, controller: controller) }
+        .confirmationDialog("¿Quitar la conexión guardada?", isPresented: Binding(get: { removing != nil },
+                                                                                  set: { if !$0 { removing = nil } }),
+                            titleVisibility: .visible) {
+                if let removing {
+                    Button("Quitar " + removing.name, role: .destructive) {
+                        controller.connections.remove(removing)
+                        self.removing = nil
                     }
                 }
-                if connections.isEmpty {
-                    Text(query.isEmpty ? "Todavía no hay conexiones." : "No hay conexiones que coincidan.")
-                        .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 15).padding(.vertical, 8)
-                }
-                Divider().padding(.horizontal, 15).padding(.top, 16)
-                HStack {
-                    Text("CONSULTAS SQL").font(.system(size: Theme.zoom(11), weight: .medium)).foregroundStyle(.secondary)
-                    Spacer()
-                    Menu {
-                        Button("Nuevo script…") {
-                            controller.files.create(in: controller.workspaceURL?.deletingLastPathComponent())
-                        }.disabled(controller.isReadOnly)
-                        Button("Abrir script…", action: controller.files.importScripts)
-                    } label: { Image(systemName: "plus").font(.system(size: Theme.zoom(11))) }
-                        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                        .help("Agregar script SQL")
-                }.padding(.horizontal, 15).padding(.top, 12).padding(.bottom, 4)
-                scriptRows
-                if scripts.isEmpty {
-                    Text(query.isEmpty ? "Agregá una consulta desde el botón +." : "No hay consultas que coincidan.")
-                        .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 15).padding(.vertical, 8)
-                }
-            }.padding(.bottom, 12)
+        } message: {
+            Text("Se quitará de todos los proyectos. Los scripts que la usan quedarán sin conexión asignada.")
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.sidebar)
     }
 
-    @ViewBuilder private var scriptRows: some View {
-        ForEach(scripts, id: \.self) { path in
-            if let url = controller.files.scriptURL(path) {
-                Button { controller.files.open(url) } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "doc").foregroundStyle(.secondary)
-                        Text(url.lastPathComponent).lineLimit(1)
-                        Spacer()
-                    }.font(.system(size: Theme.zoom(12))).padding(.horizontal, 17).frame(height: 28)
-                        .contentShape(Rectangle())
-                }.buttonStyle(.plain).help(url.path)
-            } else {
-                HStack(spacing: 8) {
-                    Image(systemName: "doc").foregroundStyle(.tertiary)
-                    Text((path as NSString).lastPathComponent).lineLimit(1).foregroundStyle(.tertiary)
-                    Spacer()
-                    }
-                    .font(.system(size: Theme.zoom(12))).padding(.horizontal, 17).frame(height: 28)
-                    .help("Fuera de la carpeta del proyecto: no disponible en solo lectura.")
+    private func connectionCard(_ connection: DatabaseConnection) -> some View {
+        let state = controller.database.state(connection.id)
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Image(systemName: "externaldrive").font(.title2).foregroundStyle(Theme.accent)
+                    .frame(width: 38, height: 38).background(Theme.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 9))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(connection.name).font(.headline)
+                    Text(state.destination(for: connection)).font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle).help(state.destination(for: connection))
                 }
+                Spacer()
+                Label(state.connectionLabel, systemImage: state.status == .connected ? "circle.fill" : "circle")
+                    .font(.caption).foregroundStyle(state.status == .connected ? Color.green : .secondary)
+            }
+            HStack {
+                Text(connection.username + " · " + connection.tls.label)
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Spacer()
+                Button("Editar") { editing = connection }
+                Button(state.status == .connected ? "Desconectar" : "Conectar") {
+                    if state.status == .connected { Task { _ = await controller.database.disconnect(connection) } }
+                    else { controller.database.connect(connection) }
+                }
+                Menu {
+                    Button("Quitar conexión…", role: .destructive) { removing = connection }
+                } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).fixedSize()
+            }.disabled(state.busy || state.status == .connecting)
+            if state.inTransaction {
+                Label("Transacción abierta", systemImage: "exclamationmark.circle")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+            if let error = state.error {
+                Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled)
+            }
         }
+        .padding(16)
+        .background(Theme.sidebar, in: RoundedRectangle(cornerRadius: 12))
+        .overlay { RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1) }
     }
 }
 
-private struct DatabaseRow: View {
-    let connection: DatabaseConnection
-    let state: DatabaseState
-    let selected: Bool
-    let connect: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Button(action: connect) {
-                HStack(spacing: 8) {
-                    Image(systemName: "externaldrive").foregroundStyle(.secondary)
-                    Text(connection.name).lineLimit(1)
-                    Spacer()
-                    if state.status == .connecting { ProgressView().controlSize(.mini) }
-                    else { Circle().fill(state.status == .connected ? Color.green.opacity(0.75) : .secondary.opacity(0.4)).frame(width: 6,
-                                                                                                                                 height: 6)
-                                                                                                                                 }
-                }
-                .font(.system(size: Theme.zoom(12))).padding(.horizontal, 10).frame(height: 30)
-                .background(selected ? Theme.accent.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 5))
-                .contentShape(Rectangle())
-            }.buttonStyle(.plain).help(connection.destination)
-            if let error = state.error {
-                Text(error).font(.system(size: Theme.zoom(10))).foregroundStyle(.red.opacity(0.85))
-                    .lineLimit(3).textSelection(.enabled).padding(.horizontal, 10)
-            }
+extension DatabaseState {
+    var connectionLabel: String {
+        if busy { return "En uso" }
+        switch status {
+        case .connected: return "Conectada"
+        case .connecting: return "Conectando…"
+        case .disconnected: return "Desconectada"
         }
-        .padding(.vertical, 3)
-        .background(Color(nsColor: FileIcons.groupTint(hex: connection.tintHex, strength: connection.tintStrength) ?? .clear),
-                    in: RoundedRectangle(cornerRadius: 7))
-        .padding(.horizontal, 7)
     }
 }
 
@@ -298,44 +283,62 @@ struct SQLToolbar: View {
     let document: EditorDocument
     @Bindable var controller: WorkspaceController
 
-    /// Se puede ejecutar si hay una conexión elegida y no está ocupada ni conectándose.
-    /// Estaba escrito como una condición de tres líneas dentro del `.disabled`, donde
-    /// había que leerla al revés.
+    private var connection: DatabaseConnection? { controller.connections.selected(for: document) }
     private var canExecute: Bool {
-        guard let connection = controller.connections.selected else { return false }
+        guard let connection, !controller.isReadOnly else { return false }
         let state = controller.database.states[connection.id]
         return state?.busy != true && state?.status != .connecting
     }
 
     var body: some View {
-        HStack(spacing: 12) {
-            Picker("Conexión",
-                   selection: Binding(get: { controller.database.selectedConnectionID },
-                                      set: { controller.database.selectedConnectionID = $0 })) {
-                Text("Conexión").tag(nil as UUID?)
-                ForEach(controller.workspace?.connections ?? []) { connection in
-                    Text(connection.name).tag(Optional(connection.id))
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                Image(systemName: "externaldrive").foregroundStyle(Theme.accent)
+                Picker("Conexión del script", selection: Binding(get: { connection?.id },
+                                                                 set: { controller.connections.select($0, for: document) })) {
+                        Text("Elegir conexión…").tag(nil as UUID?)
+                        ForEach(controller.connections.profiles) { profile in
+                            Text(profile.name).tag(Optional(profile.id))
+                        }
+                    }.labelsHidden().pickerStyle(.menu).frame(maxWidth: 240)
+                    .disabled(document.sqlExecution.isRunning)
+                Button { controller.database.showingConnections = true } label: {
+                    Image(systemName: "slider.horizontal.3")
+                }.help("Administrar conexiones globales").accessibilityLabel("Administrar conexiones")
+                Spacer(minLength: 4)
+                if let connection {
+                    let state = controller.database.state(connection.id)
+                    Button(state.status == .connected ? "Desconectar" : "Conectar") {
+                        if state.status == .connected { Task { _ = await controller.database.disconnect(connection) } }
+                        else { controller.database.connect(connection) }
+                    }.disabled(state.busy || state.status == .connecting || document.sqlExecution.isRunning || controller.isReadOnly)
                 }
-            }.labelsHidden().pickerStyle(.menu).fixedSize()
-                .disabled(document.sqlExecution.isRunning)
-            if let connection = controller.connections.selected {
-                let state = controller.database.states[connection.id]
-                let database = state?.status == .connected ? state?.currentDatabase ?? "" : connection.database
-                Text("\(connection.host):\(connection.port)" + (database.isEmpty ? "" : " / \(database)"))
-                    .font(.system(size: Theme.zoom(10))).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                if state?.inTransaction == true { Text("Transacción").font(.system(size: Theme.zoom(10))).foregroundStyle(.orange) }
+                if document.sqlExecution.isRunning {
+                    Button { controller.database.cancel(document.sqlExecution) } label: {
+                        Label("Cancelar", systemImage: "stop.fill")
+                    }.disabled(document.sqlExecution.isCancelling)
+                } else {
+                    Button(action: controller.executeSQL) { Label("Ejecutar", systemImage: "play.fill") }
+                        .disabled(!canExecute).help("Ejecutar selección o script (⌘↩)")
+                        .accessibilityLabel("Ejecutar SQL")
+                }
             }
-            Spacer(minLength: 4)
-            if document.sqlExecution.isRunning {
-                Button { controller.database.cancel(document.sqlExecution) } label: { Image(systemName: "stop.fill") }
-                    .disabled(document.sqlExecution.isCancelling).help("Cancelar consulta").accessibilityLabel("Cancelar consulta")
-            } else {
-                Button(action: controller.executeSQL) { Image(systemName: "play.fill") }
-                    .disabled(!canExecute)
-                    .help("Ejecutar selección o script (⌘↩)").accessibilityLabel("Ejecutar SQL")
-            }
+            HStack(spacing: 8) {
+                if let connection {
+                    let state = controller.database.state(connection.id)
+                    Circle().fill(state.status == .connected ? Color.green : .secondary).frame(width: 6, height: 6)
+                    Text(state.connectionLabel)
+                    Text("·")
+                    Text(state.destination(for: connection)).lineLimit(1).truncationMode(.middle).help(state.destination(for: connection))
+                    if state.inTransaction { Text("· Transacción abierta").foregroundStyle(.orange) }
+                } else {
+                    Text("Elegí una conexión para ejecutar este archivo.")
+                }
+                Spacer(minLength: 0)
+                Text("Por archivo").foregroundStyle(.tertiary)
+            }.font(.system(size: Theme.zoom(11))).foregroundStyle(.secondary)
         }
-        .buttonStyle(.plain).padding(.horizontal, 18).frame(height: 33)
+        .padding(.horizontal, 18).padding(.vertical, 10)
         .background(Theme.bar)
     }
 }

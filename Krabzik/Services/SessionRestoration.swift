@@ -11,7 +11,6 @@ struct SavedWorkspaceState: Codable, Equatable {
     let selectedProjectID: UUID?
     let sidebarVisible: Bool
     let processesVisible: Bool
-    var sidebarTab: WorkspaceSidebarTab?
 }
 
 @MainActor
@@ -57,7 +56,7 @@ extension WorkspaceController {
         guard let workspaceURL else { return nil }
         return SavedWorkspaceState(workspaceURL: workspaceURL, openFiles: documents.map(\.url),
                                    selectedFile: selectedDocumentID, selectedProjectID: selectedProjectID,
-                                   sidebarVisible: sidebarVisible, processesVisible: processesVisible, sidebarTab: sidebarTab)
+                                   sidebarVisible: sidebarVisible, processesVisible: processesVisible)
     }
 
     func saveSessionState(_ state: SavedWorkspaceState?) {
@@ -96,7 +95,6 @@ extension WorkspaceController {
         if let selected = state.selectedProjectID, workspace?.projects.contains(where: { $0.id == selected }) == true {
             selectedProjectID = selected
         }
-        sidebarTab = state.sidebarTab ?? .code
         sidebarVisible = state.sidebarVisible
         processesVisible = state.processesVisible
         if unavailable > 0 {

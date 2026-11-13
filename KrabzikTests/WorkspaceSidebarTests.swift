@@ -35,30 +35,44 @@ final class WorkspaceSidebarTests: XCTestCase {
         XCTAssertEqual(try SidebarFileSearch.find("file", roots: [("api", root), ("copy", root)]).matches.count, 3)
     }
 
-    func testTabSelectionFollowsProjectAndRestoredSession() async throws {
+    func testLegacyDatabaseTabSessionRestoresInUnifiedExplorer() async throws {
         let root = try directory()
         let suite = UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         addTeardownBlock { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
         let controller = WorkspaceController(defaults: defaults)
-        let a = root.appendingPathComponent("A.kzk"), b = root.appendingPathComponent("B.kzk")
-        try Workspace(name: "A").write(to: a)
-        try Workspace(name: "B").write(to: b)
-        controller.trust.markTrusted(a)
-        controller.trust.markTrusted(b)
-        await controller.openWorkspace(a)
-        controller.sidebarTab = .database
-        await controller.openWorkspace(b)
-        XCTAssertEqual(controller.sidebarTab, .code)
-        await controller.openWorkspace(a)
-        XCTAssertEqual(controller.sidebarTab, .database)
+        let project = root.appendingPathComponent("A.kzk")
+        let script = root.appendingPathComponent("query.sql")
+        try Workspace(name: "A").write(to: project)
+        try Data("SELECT 1".utf8).write(to: script)
+        controller.trust.markTrusted(project)
+        await controller.openWorkspace(project)
+        try await controller.docs.open(script)
         let saved = try XCTUnwrap(controller.captureSessionState())
+        let data = try JSONEncoder().encode(saved)
+        var old = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        old["sidebarTab"] = "database"
+        let legacy = try JSONDecoder().decode(SavedWorkspaceState.self, from: JSONSerialization.data(withJSONObject: old))
         let restored = WorkspaceController(defaults: defaults)
-        await restored.restoreSession(saved)
-        XCTAssertEqual(restored.sidebarTab, .database)
-        var old = saved
-        old.sidebarTab = nil
-        await restored.restoreTabs(old)
-        XCTAssertEqual(restored.sidebarTab, .code)
+        await restored.restoreSession(legacy)
+        XCTAssertEqual(restored.workspaceURL, project)
+        XCTAssertEqual(restored.selectedDocument?.url, script)
+    }
+
+    func testStandaloneScriptIsAnExplorerRootWithoutLoadingItAsDirectory() throws {
+        let root = try directory()
+        let suite = UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        addTeardownBlock { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let controller = WorkspaceController(defaults: defaults)
+        let url = root.appendingPathComponent("A.kzk")
+        var workspace = Workspace(name: "A")
+        workspace.scripts = ["query.sql"]
+        controller.session.open(workspace, at: url, trust: .trusted)
+        let coordinator = FileTree.Coordinator(controller: controller)
+        coordinator.update(workspace, at: url, revision: 1)
+        XCTAssertEqual(coordinator.roots.map(\.url), [root.appendingPathComponent("query.sql")])
+        XCTAssertFalse(try XCTUnwrap(coordinator.roots.first).isDirectory)
+        XCTAssertFalse(try XCTUnwrap(coordinator.roots.first).loading)
     }
 }

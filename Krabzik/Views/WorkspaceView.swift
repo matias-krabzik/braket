@@ -94,6 +94,10 @@ struct WorkspaceView: View {
         .sheet(item: $controller.commandProject) { project in
             CommandSheet(project: project) { controller.projects.update($0) }
         }
+        .sheet(isPresented: Binding(get: { controller.database.showingConnections },
+                                    set: { controller.database.showingConnections = $0 })) {
+            ConnectionsSettingsView(controller: controller, showsDone: true).frame(width: 680, height: 560)
+        }
         .sheet(item: Binding(get: { controller.database.editingConnection },
                              set: { controller.database.editingConnection = $0 })) { connection in
             ConnectionSheet(connection: connection, controller: controller)

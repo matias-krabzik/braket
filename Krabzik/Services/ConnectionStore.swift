@@ -1,42 +1,68 @@
 import Foundation
+import Observation
 
-/// Las conexiones MySQL declaradas en el proyecto, y su contraseña en el llavero.
-///
-/// Las dos cosas van juntas porque guardar una conexión es una operación de dos destinos
-/// que tiene que quedar consistente: la contraseña va al llavero y el perfil al
-/// `.kzk`. Si la escritura del archivo falla, acá se restaura la contraseña anterior,
-/// y si el endpoint cambió se borra la credencial que quedó huérfana. Repartido entre dos
-/// tipos, ese orden se pierde.
-///
-/// Confinado al main actor. Ver docs/specs/C5-dividir-workspacecontroller.md.
-@MainActor
+/// Catálogo global de perfiles. Las contraseñas permanecen en el llavero.
+@MainActor @Observable
 final class ConnectionStore {
+    static let profilesKey = "mysql.globalConnections.v1"
+    static let selectionsKey = "mysql.scriptConnections.v1"
     private let session: WorkspaceSession
     private let database: DatabaseController
+    private let defaults: UserDefaults
+    private(set) var profiles: [DatabaseConnection]
+    private var selections: [String: String]
+    private var migrated: Set<String>
 
-    init(session: WorkspaceSession, database: DatabaseController) {
+    init(session: WorkspaceSession, database: DatabaseController, defaults: UserDefaults = .standard) {
         self.session = session
         self.database = database
+        self.defaults = defaults
+        profiles = defaults.data(forKey: Self.profilesKey)
+            .flatMap { try? JSONDecoder().decode([DatabaseConnection].self, from: $0) } ?? []
+        selections = defaults.dictionary(forKey: Self.selectionsKey) as? [String: String] ?? [:]
+        migrated = Set(defaults.stringArray(forKey: "mysql.migratedProfiles.v1") ?? [])
+        for connection in profiles { _ = database.state(connection.id) }
     }
 
-    /// La conexión seleccionada en el panel, si sigue estando en el proyecto.
-    var selected: DatabaseConnection? {
-        session.workspace?.connections.first { $0.id == database.selectedConnectionID }
+    /// Cada archivo conserva una selección independiente, compartida entre proyectos.
+    func selected(for document: EditorDocument) -> DatabaseConnection? {
+        guard let id = selections[document.url.standardizedFileURL.path] else { return nil }
+        return profiles.first { $0.id.uuidString == id }
     }
 
-    /// Reemplaza las conexiones vivas al abrir o cerrar un proyecto. Cierra la hoja de
-    /// edición: la conexión que estaba abierta ahí es de otro proyecto.
+    func select(_ id: UUID?, for document: EditorDocument) {
+        guard !document.sqlExecution.isRunning,
+              id == nil || profiles.contains(where: { $0.id == id }) else { return }
+        selections[document.url.standardizedFileURL.path] = id?.uuidString
+        defaults.set(selections, forKey: Self.selectionsKey)
+    }
+
+    /// Importa una sola vez los perfiles de proyectos confiables, sin sobrescribir el catálogo.
     func install(_ connections: [DatabaseConnection]) {
         database.editingConnection = nil
-        database.install(connections)
+        guard !session.isReadOnly, let url = session.url else { return }
+        for original in connections {
+            let key = url.standardizedFileURL.path + "|" + original.id.uuidString
+            guard !migrated.contains(key) else { continue }
+            do {
+                var connection = try original.validated()
+                if let existing = profiles.first(where: { $0.id == original.id }), existing != original {
+                    connection.id = UUID()
+                    let password = try CredentialStore.read(for: original)
+                    if !password.isEmpty { try CredentialStore.save(password, for: connection) }
+                }
+                if !profiles.contains(where: { $0.id == connection.id }) {
+                    var updated = profiles
+                    updated.append(connection)
+                    try persist(updated)
+                    _ = database.state(connection.id)
+                }
+                migrated.insert(key)
+                defaults.set(Array(migrated), forKey: "mysql.migratedProfiles.v1")
+            } catch { session.errors.report(error) }
+        }
     }
 
-    /// Si la credencial guardada del perfil anterior ya no sirve para el nuevo.
-    ///
-    /// La cuenta del llavero incluye host, puerto, usuario y modo de TLS (ver
-    /// `CredentialStore`), así que cambiar cualquiera de los cuatro deja la contraseña
-    /// vieja huérfana. El host se compara sin distinguir mayúsculas porque los nombres de
-    /// dominio no las distinguen, y el llavero guarda el host ya en minúsculas.
     static func endpointChanged(from previous: DatabaseConnection, to connection: DatabaseConnection) -> Bool {
         previous.host.lowercased() != connection.host.lowercased()
             || previous.port != connection.port
@@ -44,57 +70,49 @@ final class ConnectionStore {
             || previous.tls != connection.tls
     }
 
-    /// Guarda el perfil y su contraseña. Desconecta primero la versión anterior: cambiar
-    /// el endpoint de una conexión en uso dejaría una sesión apuntando a otro servidor.
     func save(_ connection: DatabaseConnection, password: String) async throws {
-        guard var updated = session.workspace, session.url != nil else { return }
         let connection = try connection.validated()
-        let previous = updated.connections.first { $0.id == connection.id }
+        let previous = profiles.first { $0.id == connection.id }
         if let previous {
             guard await database.disconnect(previous) else {
                 throw DatabaseFailure("La conexión está ocupada o se canceló el cambio.")
             }
         }
         let oldPassword = try CredentialStore.read(for: connection)
-        if let index = updated.connections.firstIndex(where: { $0.id == connection.id }) {
-            updated.connections[index] = connection
-        } else {
-            updated.connections.append(connection)
-        }
+        var updated = profiles
+        if let index = updated.firstIndex(where: { $0.id == connection.id }) { updated[index] = connection }
+        else { updated.append(connection) }
         try CredentialStore.save(password, for: connection)
-        do { try session.save(updated) }
+        do { try persist(updated) }
         catch {
             try? CredentialStore.save(oldPassword, for: connection)
             throw error
         }
         if let previous, Self.endpointChanged(from: previous, to: connection) { forget(previous) }
-        await database.client.disconnect(connection.id)
         database.states[connection.id] = DatabaseState()
-        database.selectedConnectionID = connection.id
     }
 
     func remove(_ connection: DatabaseConnection) {
         Task {
-            guard await database.disconnect(connection), var updated = session.workspace else { return }
-            updated.connections.removeAll { $0.id == connection.id }
-            guard session.write(updated) else { return }
-            do { try CredentialStore.remove(for: connection) } catch { session.errors.report(error) }
+            guard await database.disconnect(connection) else { return }
+            do { try persist(profiles.filter { $0.id != connection.id }) }
+            catch { session.errors.report(error)
+                return }
+            forget(connection)
             database.states.removeValue(forKey: connection.id)
-            if database.selectedConnectionID == connection.id {
-                database.selectedConnectionID = updated.connections.first?.id
-            }
+            selections = selections.filter { $0.value != connection.id.uuidString }
+            defaults.set(selections, forKey: Self.selectionsKey)
         }
     }
 
-    /// Borra del llavero una credencial que ya no le sirve a nadie.
-    ///
-    /// No aborta nada si falla: el perfil ya se guardó. Pero queda registrado, porque es
-    /// una contraseña que el usuario cree que ya no está.
+    private func persist(_ updated: [DatabaseConnection]) throws {
+        let data = try JSONEncoder().encode(updated)
+        defaults.set(data, forKey: Self.profilesKey)
+        profiles = updated
+    }
+
     private func forget(_ connection: DatabaseConnection) {
-        do {
-            try CredentialStore.remove(for: connection)
-        } catch {
-            Log.security.error("quedó una credencial huérfana en el llavero: \(error.localizedDescription, privacy: .private)")
-        }
+        do { try CredentialStore.remove(for: connection) }
+        catch { session.errors.report(error) }
     }
 }
