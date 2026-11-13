@@ -54,8 +54,8 @@ struct FileTree: NSViewRepresentable {
         outline.outlineTableColumn = column
         outline.headerView = nil
         outline.allowsMultipleSelection = true
-        outline.rowHeight = 29
-        outline.indentationPerLevel = 18
+        outline.rowHeight = SidebarTreeStyle.rowHeight
+        outline.indentationPerLevel = SidebarTreeStyle.indent
         outline.intercellSpacing = NSSize(width: 0, height: 0)
         outline.style = .sourceList
         outline.backgroundColor = .clear

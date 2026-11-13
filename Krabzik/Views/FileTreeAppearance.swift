@@ -41,7 +41,7 @@ final class FileTreeOutlineView: NSOutlineView {
 }
 
 final class FileTreeCell: NSTableCellView {
-    private let disclosure = NSButton()
+    private let disclosure = SidebarDisclosureButton()
     private var toggle: (() -> Void)?
     private var nodeName = ""
 
@@ -51,10 +51,6 @@ final class FileTreeCell: NSTableCellView {
         nodeName = node.name
         disclosure.target = self
         disclosure.action = #selector(toggleFolder)
-        disclosure.isBordered = false
-        disclosure.imagePosition = .imageOnly
-        disclosure.contentTintColor = .secondaryLabelColor
-        disclosure.setButtonType(.momentaryChange)
         disclosure.translatesAutoresizingMaskIntoConstraints = false
         disclosure.isHidden = !node.isDirectory
         addSubview(disclosure)
@@ -97,12 +93,12 @@ final class FileTreeCell: NSTableCellView {
         stack.spacing = 7
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
-        let indent = CGFloat(depth) * 18
+        let indent = CGFloat(depth) * SidebarTreeStyle.indent
         NSLayoutConstraint.activate([
             disclosure.leadingAnchor.constraint(equalTo: leadingAnchor, constant: indent + 8),
             disclosure.centerYAnchor.constraint(equalTo: centerYAnchor),
             disclosure.widthAnchor.constraint(equalToConstant: 16), disclosure.heightAnchor.constraint(equalToConstant: 18),
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: indent + 30),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: indent + SidebarTreeStyle.iconLeading),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
             stack.centerYAnchor.constraint(equalTo: centerYAnchor),
             iconBackground.widthAnchor.constraint(equalToConstant: 24), iconBackground.heightAnchor.constraint(equalToConstant: 24),
@@ -118,10 +114,7 @@ final class FileTreeCell: NSTableCellView {
     required init?(coder: NSCoder) { super.init(coder: coder) }
 
     func updateDisclosure(_ expanded: Bool) {
-        disclosure.image = NSImage(systemSymbolName: expanded ? "minus.square" : "plus.square", accessibilityDescription: nil)
-        let action = expanded ? "Contraer " : "Expandir "
-        disclosure.setAccessibilityLabel(action + nodeName)
-        disclosure.toolTip = action + nodeName
+        disclosure.update(expanded: expanded, name: nodeName)
     }
 
     @objc private func toggleFolder() { toggle?() }
@@ -169,34 +162,23 @@ final class FileTreeRow: NSTableRowView {
         guard let outline, let node else { return }
         var chain = [node]
         while let parent = outline.parent(forItem: chain[0]) as? FileNode { chain.insert(parent, at: 0) }
-        guard chain.count > 1 else { return }
-        NSColor.labelColor.withAlphaComponent(0.19).setStroke()
-        let path = NSBezierPath()
-        path.lineWidth = 0.8
-        path.lineCapStyle = .round
-        path.lineJoinStyle = .round
-        path.setLineDash([1, 3], count: 2, phase: 0)
-        for level in 0..<(chain.count - 1) {
-            let parent = chain[level], child = chain[level + 1]
-            let last = parent.children?.last === child
-            let immediate = level == chain.count - 2
-            let x = CGFloat(level) * 18 + 16.5
-            let top: CGFloat = isFlipped ? 0 : bounds.maxY
-            let bottom: CGFloat = isFlipped ? bounds.maxY : 0
-            let bend: CGFloat = isFlipped ? -4 : 4
-            if !last {
-                path.move(to: NSPoint(x: x, y: top))
-                path.line(to: NSPoint(x: x, y: bottom))
-            }
-            if immediate {
-                path.move(to: NSPoint(x: x, y: last ? top : bounds.midY + bend))
-                path.line(to: NSPoint(x: x, y: bounds.midY + bend))
-                path.curve(to: NSPoint(x: x + 4, y: bounds.midY),
-                           controlPoint1: NSPoint(x: x, y: bounds.midY),
-                           controlPoint2: NSPoint(x: x, y: bounds.midY))
-                path.line(to: NSPoint(x: x + (node.isDirectory ? 9 : 27), y: bounds.midY))
-            }
+        let ancestors = zip(chain, chain.dropFirst()).map { parent, child in parent.children?.last === child }
+        let guides = SidebarTreeStyle.guides(ancestors: ancestors,
+                                             expanded: outline.isItemExpanded(node) && !(node.children?.isEmpty ?? true),
+                                             height: bounds.height)
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        context.saveGState()
+        if !isFlipped {
+            context.translateBy(x: 0, y: bounds.height)
+            context.scaleBy(x: 1, y: -1)
         }
-        path.stroke()
+        context.setStrokeColor(NSColor.labelColor.withAlphaComponent(0.19).cgColor)
+        context.setLineWidth(0.8)
+        context.setLineCap(.round)
+        context.setLineJoin(.round)
+        context.setLineDash(phase: 0, lengths: [1, 3])
+        context.addPath(guides)
+        context.strokePath()
+        context.restoreGState()
     }
 }

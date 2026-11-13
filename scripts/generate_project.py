@@ -26,8 +26,8 @@ import sys
 #   - el clientInfo que la app envía a Codex, que lo lee del bundle en runtime
 # El README no repite el número a propósito: así no hay nada que pueda quedar
 # desincronizado. Ver docs/specs/C10-version-unica.md.
-MARKETING_VERSION = '0.5.12'
-BUILD_NUMBER = '53'
+MARKETING_VERSION = '0.5.13'
+BUILD_NUMBER = '54'
 
 root = Path(__file__).resolve().parent.parent
 PBXPROJ = root / 'Braket.xcodeproj/project.pbxproj'
