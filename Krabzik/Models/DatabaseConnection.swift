@@ -17,19 +17,26 @@ struct DatabaseConnection: Identifiable, Codable, Equatable, Sendable {
     var tintHex: String?
     var tintStrength: Double?
 
-    /// Cómo se cifra la conexión. `disabled` solo se acepta contra un extremo de
-    /// loopback, y eso se comprueba sobre la dirección resuelta, no sobre el nombre
-    /// (ver docs/specs/S3-tls-solo-loopback.md).
+    // Opcionales para conservar la lectura de proyectos anteriores.
+    var connectTimeoutSeconds: Int?
+    var tlsCAPath: String?
+    var tlsServerName: String?
+    var tlsClientCertificatePath: String?
+    var tlsClientKeyPath: String?
+
+    var effectiveConnectTimeout: Int { connectTimeoutSeconds ?? 10 }
+
+    /// Política de cifrado y verificación elegida explícitamente para este perfil.
     enum TLSMode: String, Codable, CaseIterable, Sendable {
         case preferred, required, verifyCA, verified, disabled
 
         var label: String {
             switch self {
-            case .preferred: "If available"
-            case .required: "Require"
-            case .verifyCA: "Require and Verify CA"
-            case .verified: "Require and Verify Identity"
-            case .disabled: "No"
+            case .preferred: "Usar SSL si está disponible"
+            case .required: "Exigir SSL (sin verificar certificado)"
+            case .verifyCA: "Exigir SSL y verificar CA"
+            case .verified: "Exigir SSL y verificar identidad"
+            case .disabled: "Sin SSL"
             }
         }
 
@@ -77,7 +84,25 @@ struct DatabaseConnection: Identifiable, Codable, Equatable, Sendable {
               (tintStrength ?? 0.12).isFinite, (0.04...0.20).contains(tintStrength ?? 0.12) else {
             throw DatabaseFailure("El tinte de la conexión no es válido.")
         }
+        guard (1...300).contains(value.effectiveConnectTimeout) else {
+            throw DatabaseFailure("El tiempo de conexión debe estar entre 1 y 300 segundos.")
+        }
+        value.tlsCAPath = Self.clean(tlsCAPath)
+        value.tlsServerName = Self.clean(tlsServerName)
+        value.tlsClientCertificatePath = Self.clean(tlsClientCertificatePath)
+        value.tlsClientKeyPath = Self.clean(tlsClientKeyPath)
+        let advanced = [value.tlsCAPath, value.tlsServerName, value.tlsClientCertificatePath, value.tlsClientKeyPath]
+        guard !advanced.compactMap({ $0 }).contains(where: { $0.contains("\0") || $0.contains("\n") || $0.contains("\r") }) else {
+            throw DatabaseFailure("Los parámetros avanzados contienen caracteres no válidos.")
+        }
+        guard (value.tlsClientCertificatePath == nil) == (value.tlsClientKeyPath == nil) else {
+            throw DatabaseFailure("Indicá el certificado de cliente y su clave privada juntos.")
+        }
         return value
+    }
+    private static func clean(_ text: String?) -> String? {
+        guard let text = text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+        return text
     }
 }
 

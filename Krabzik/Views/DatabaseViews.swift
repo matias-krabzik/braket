@@ -158,7 +158,7 @@ struct ConnectionSheet: View {
                 row("Usuario") { TextField("root", text: $connection.username) }
                 row("Contraseña") { SecureField("", text: $password) }
                 row("Base de datos") { TextField("Opcional", text: $connection.database) }
-                row("TLS") {
+                row("Usar SSL") {
                     Picker("TLS", selection: $connection.tls) {
                         ForEach(DatabaseConnection.TLSMode.allCases, id: \.self) { mode in Text(mode.label).tag(mode) }
                     }.labelsHidden()
@@ -183,6 +183,20 @@ struct ConnectionSheet: View {
                     }
                 }
             }.textFieldStyle(.roundedBorder).disabled(busy)
+            DisclosureGroup("Parámetros avanzados") {
+                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+                    row("Timeout (segundos)") {
+                        TextField("10", value: $connection.connectTimeoutSeconds, format: .number.grouping(.never))
+                    }
+                    row("CA del servidor (PEM)") { TextField("/ruta/ca.pem", text: optionalText(\.tlsCAPath)) }
+                    row("Nombre TLS / SNI") { TextField("Nombre del certificado", text: optionalText(\.tlsServerName)) }
+                    row("Certificado cliente") { TextField("/ruta/cliente.pem", text: optionalText(\.tlsClientCertificatePath)) }
+                    row("Clave cliente (PEM)") { TextField("/ruta/cliente-key.pem", text: optionalText(\.tlsClientKeyPath)) }
+                }.textFieldStyle(.roundedBorder)
+                Text("Timeout: 1–300 s para TCP y para autenticación. CA: solo en modos con verificación. "
+                     + "Certificado y clave cliente: archivos PEM, clave sin contraseña. Se guardan las rutas, no su contenido.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }.disabled(busy)
             SidebarTintEditor(hex: $connection.tintHex, strength: $connection.tintStrength,
                               detail: "Identificá esta conexión por color: producción, beta, desarrollo, etc.")
                 .disabled(busy)
@@ -212,7 +226,7 @@ struct ConnectionSheet: View {
                 Button("Guardar") { save() }.keyboardShortcut(.defaultAction).disabled(busy)
             }
         }
-        .padding(24).frame(width: 470)
+        .padding(24).frame(width: 580)
         .task {
             do { password = try CredentialStore.read(for: connection) }
             catch { message = error.localizedDescription }
@@ -239,6 +253,11 @@ struct ConnectionSheet: View {
             Text(label).font(.system(size: Theme.zoom(12))).foregroundStyle(.secondary)
             content()
         }
+    }
+
+    private func optionalText(_ keyPath: WritableKeyPath<DatabaseConnection, String?>) -> Binding<String> {
+        Binding(get: { connection[keyPath: keyPath] ?? "" },
+                set: { connection[keyPath: keyPath] = $0.isEmpty ? nil : $0 })
     }
 
     private func test() {

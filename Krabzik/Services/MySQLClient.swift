@@ -82,7 +82,7 @@ actor MySQLClient {
         let attempt = UUID(), started = ContinuousClock.now
         await diagnostics.record(.started, attempt: attempt, configuration: config)
         do {
-            let connection = try await establish(config, password: password, attempt: attempt)
+            let connection = try await establish(config.validated(), password: password, attempt: attempt)
             let tlsActive = (try? await connection.channel.pipeline.handler(type: NIOSSLClientHandler.self).get()) != nil
             await diagnostics.record(.ready, attempt: attempt, configuration: config,
                                      elapsedMilliseconds: Self.milliseconds(since: started), tlsActive: tlsActive)
@@ -116,12 +116,22 @@ actor MySQLClient {
             case .verified: break
             case .disabled: break
             }
+            if let path = config.tlsCAPath, config.tls == .verifyCA || config.tls == .verified {
+                configuration.trustRoots = .file(path)
+            }
+            if let certificate = config.tlsClientCertificatePath, let key = config.tlsClientKeyPath {
+                configuration.certificateChain = try NIOSSLCertificate.fromPEMFile(certificate).map { .certificate($0) }
+                configuration.privateKey = .privateKey(try NIOSSLPrivateKey(file: key, format: .pem))
+            }
             tls = configuration
         }
         let connection = try await MySQLConnection.connect(to: address, username: config.username, database: config.database,
                                                            password: password.isEmpty ? nil : password,
                                                            tlsConfiguration: tls, tlsRequired: config.tls.requiresTLS,
-                                                           serverHostname: config.tls == .verified ? config.host : nil, logger: logger,
+                                                           serverHostname: config
+                                                           .tlsServerName ?? (config.tls == .verified ? config.host : nil),
+                                                           logger: logger,
+                                                           connectTimeout: .seconds(Int64(config.effectiveConnectTimeout)),
                                                            on: loop).get()
         if config.tls.requiresTLS {
             do { _ = try await connection.channel.pipeline.handler(type: NIOSSLClientHandler.self).map { _ in true }.get() }

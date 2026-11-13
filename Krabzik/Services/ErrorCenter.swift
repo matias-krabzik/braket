@@ -51,7 +51,8 @@ extension AppError {
             if detail.contains("CERTIFICATE_VERIFY_FAILED") {
                 return "No se pudo verificar el certificado TLS de MySQL. "
                     + "Revisá el nombre del servidor, la vigencia y la confianza en su CA. "
-                    + "La VPN no reemplaza la validación del certificado."
+                    + "En Editar conexión podés indicar la CA en Parámetros avanzados, "
+                    + "elegir Exigir SSL (sin verificar certificado) o Usar SSL si está disponible."
             }
             if detail.contains("EOF during handshake") || cause == .zeroReturn || cause == .syscallError {
                 return "La conexión se cerró durante la negociación TLS. Revisá el TLS del servidor y la conexión por VPN."

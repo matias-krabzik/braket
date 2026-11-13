@@ -10,6 +10,36 @@ private actor ResultSink {
 }
 
 final class DatabaseTests: XCTestCase {
+    func testAdvancedConnectionSettingsRoundTripAndLegacyDefaults() throws {
+        var value = DatabaseConnection()
+        let legacy = try JSONEncoder().encode(value)
+        XCTAssertEqual(try JSONDecoder().decode(DatabaseConnection.self, from: legacy).effectiveConnectTimeout, 10)
+        value.connectTimeoutSeconds = 45
+        value.tlsCAPath = "/tmp/ca.pem"
+        value.tlsServerName = "db.example.com"
+        value.tlsClientCertificatePath = "/tmp/client.pem"
+        value.tlsClientKeyPath = "/tmp/client-key.pem"
+        let data = try JSONEncoder().encode(value)
+        XCTAssertEqual(try JSONDecoder().decode(DatabaseConnection.self, from: data), value)
+        XCTAssertEqual(try value.validated().effectiveConnectTimeout, 45)
+    }
+
+    func testAdvancedConnectionValidation() throws {
+        var value = DatabaseConnection()
+        value.connectTimeoutSeconds = 0
+        XCTAssertThrowsError(try value.validated())
+        value.connectTimeoutSeconds = 301
+        XCTAssertThrowsError(try value.validated())
+        value.connectTimeoutSeconds = 30
+        value.tlsClientCertificatePath = "/tmp/client.pem"
+        XCTAssertThrowsError(try value.validated())
+        value.tlsClientKeyPath = "/tmp/key.pem"
+        value.tlsServerName = " bad\nname "
+        XCTAssertThrowsError(try value.validated())
+        value.tlsServerName = " db.example.com "
+        XCTAssertEqual(try value.validated().tlsServerName, "db.example.com")
+    }
+
     private func split(_ sql: String) throws -> [SQLStatement] {
         var cursor = SQLScript(sql)
         var statements: [SQLStatement] = []
