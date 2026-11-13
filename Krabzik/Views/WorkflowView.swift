@@ -44,14 +44,7 @@ struct WorkflowView: View {
                 Button(model.isRunning ? "Detener" : selectedTriggerKind == .event || selectedTriggerKind == .schedule
                     ? "Probar" : "Ejecutar") {
                     if model.isRunning { model.stop() }
-                    else { model.save()
-                        if model.error.isEmpty {
-                            model.run(workspace: workspaceURL, root: controller.workflowRoot,
-                                      runner: controller.runner, trusted: !controller.isReadOnly,
-                                      approvals: controller.session.trustStore, agent: controller.agent,
-                                      trigger: selectedTriggerKind ?? .start)
-                        }
-                    }
+                    else { runWorkflow(from: selectedTriggerKind ?? .start) }
                 }.disabled(controller.isReadOnly || (!model.isRunning &&
                     flow?.nodes.contains { $0.kind == (selectedTriggerKind ?? .start) } != true))
             }.controlSize(.small).padding(.horizontal, 12).frame(height: 36).background(Theme.bar)
@@ -233,7 +226,24 @@ struct WorkflowView: View {
         showingInspector = true
     }
 
+    private func runWorkflow(from trigger: WorkflowKind) {
+        let model = controller.workflows
+        guard !controller.isReadOnly, !model.isRunning,
+              flow?.nodes.contains(where: { $0.kind == trigger }) == true else { return }
+        model.save()
+        guard model.error.isEmpty else { return }
+        model.run(workspace: workspaceURL, root: controller.workflowRoot,
+                  runner: controller.runner, trusted: true,
+                  approvals: controller.session.trustStore, agent: controller.agent,
+                  trigger: trigger)
+    }
+
     @ViewBuilder private func nodeMenuActions(_ node: WorkflowNode, in flow: Workflow) -> some View {
+        if node.kind == .start {
+            Button("Ejecutar", systemImage: "play.fill") { runWorkflow(from: .start) }
+                .disabled(!canEdit)
+            Divider()
+        }
         Button("Ver detalle", systemImage: "slider.horizontal.3") { openInspector(node.id) }
         Divider()
         Button("Quitar bloque", systemImage: "trash", role: .destructive) { remove(node.id) }
