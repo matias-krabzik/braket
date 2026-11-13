@@ -163,11 +163,11 @@ struct WorkspaceView: View {
     /// ejecutar nada, y poder confiar en el proyecto desde ahí.
     private var readOnlyBanner: some View {
         HStack(spacing: 10) {
-            Image(systemName: "lock").font(.system(size: 11))
+            Image(systemName: "lock").font(.system(size: Theme.zoom(11)))
             Text("Proyecto no confiable · solo lectura")
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(size: Theme.zoom(11), weight: .medium))
             Text("No se ejecutan procesos ni se habilita Codex.")
-                .font(.system(size: 11)).foregroundStyle(.secondary)
+                .font(.system(size: Theme.zoom(11))).foregroundStyle(.secondary)
             Spacer()
             Button("Confiar") { controller.session.trustCurrent() }
                 .controlSize(.small)
@@ -187,7 +187,7 @@ struct WorkspaceView: View {
                         markdownModeControls(document)
                     }
                 }
-                .font(.system(size: 11)).foregroundStyle(.secondary)
+                .font(.system(size: Theme.zoom(11))).foregroundStyle(.secondary)
                 .padding(.horizontal, 20).frame(height: 31)
                 .background(Theme.background)
                 if document.hasExternalChange {
@@ -195,7 +195,7 @@ struct WorkspaceView: View {
                         Text("El archivo cambió en disco.").foregroundStyle(.orange)
                         Spacer()
                         Button("Recargar") { controller.files.reload(document) }
-                    }.font(.system(size: 11)).padding(.horizontal, 18).padding(.vertical, 6)
+                    }.font(.system(size: Theme.zoom(11))).padding(.horizontal, 18).padding(.vertical, 6)
                 }
                 if document.language == "SQL" { SQLToolbar(document: document, controller: controller) }
                 if let image = document.previewImage {
@@ -207,13 +207,13 @@ struct WorkspaceView: View {
                 } else if isMarkdown(document) {
                     markdownContent(document)
                 } else {
-                    CodeEditor(document: document, theme: AppSettings.shared.theme).id(document.id)
+                    CodeEditor(document: document, theme: AppSettings.shared.theme, uiScale: controller.settings.uiScale).id(document.id)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             } else {
                 VStack(spacing: 14) {
-                    Image(systemName: "curlybraces").font(.system(size: 43, weight: .ultraLight)).foregroundStyle(.quaternary)
-                    Text(controller.workspace?.name ?? "").font(.system(size: 13)).foregroundStyle(.tertiary)
+                    Image(systemName: "curlybraces").font(.system(size: Theme.zoom(43), weight: .ultraLight)).foregroundStyle(.quaternary)
+                    Text(controller.workspace?.name ?? "").font(.system(size: Theme.zoom(13))).foregroundStyle(.tertiary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -254,14 +254,14 @@ struct WorkspaceView: View {
         } ?? []
         switch document.markdownMode {
         case .edit:
-            CodeEditor(document: document, theme: AppSettings.shared.theme).id(document.id)
+            CodeEditor(document: document, theme: AppSettings.shared.theme, uiScale: controller.settings.uiScale).id(document.id)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .preview:
             MarkdownPreview(document: document, projectRoots: roots).id(document.id)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .split:
             HSplitView {
-                CodeEditor(document: document, theme: AppSettings.shared.theme).id(document.id)
+                CodeEditor(document: document, theme: AppSettings.shared.theme, uiScale: controller.settings.uiScale).id(document.id)
                     .frame(minWidth: 230, maxWidth: .infinity, maxHeight: .infinity)
                 MarkdownPreview(document: document, projectRoots: roots).id(document.id)
                     .frame(minWidth: 230, maxWidth: .infinity, maxHeight: .infinity)
@@ -300,7 +300,7 @@ private struct EditorStatusBar: View {
                 }
             } else { Spacer() }
         }
-        .font(.system(size: 10)).foregroundStyle(.secondary)
+        .font(.system(size: Theme.zoom(10))).foregroundStyle(.secondary)
         .padding(.horizontal, 16).frame(height: 25)
         .background(Theme.bar)
         .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
@@ -331,7 +331,7 @@ private struct WorkspaceEditorTab: View {
                         .opacity(selected ? 1 : 0.75)
                         .accessibilityHidden(true)
                     Text(title)
-                        .font(.system(size: 12, weight: selected ? .medium : .regular))
+                        .font(.system(size: Theme.zoom(12), weight: selected ? .medium : .regular))
                         .lineLimit(1).truncationMode(.middle)
                         .foregroundStyle(selected ? .primary : .secondary)
                 }
@@ -343,7 +343,7 @@ private struct WorkspaceEditorTab: View {
             .accessibilityAddTraits(selected ? .isSelected : [])
             Button(action: close) {
                 Image(systemName: showsDirtyIndicator ? "circle.fill" : "xmark")
-                    .font(.system(size: showsDirtyIndicator ? 6 : 9, weight: .medium))
+                    .font(.system(size: Theme.zoom(showsDirtyIndicator ? 6 : 9), weight: .medium))
                     .foregroundStyle(.secondary)
                     .opacity(showsClose ? 1 : 0)
                     .frame(width: 24, height: 24)
@@ -377,7 +377,7 @@ private struct CommandSheet: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Comando").foregroundStyle(.secondary)
                 TextField("npm run dev", text: $project.command)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(.system(size: Theme.zoom(12), design: .monospaced))
                     .textFieldStyle(.roundedBorder)
             }
             HStack {

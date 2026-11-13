@@ -34,7 +34,7 @@ struct WorkflowView: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "point.3.connected.trianglepath.dotted").foregroundStyle(Theme.accent)
-                Text(flow?.name ?? "Automatización").font(.system(size: 12, weight: .semibold))
+                Text(flow?.name ?? "Automatización").font(.system(size: Theme.zoom(12), weight: .semibold))
                 Spacer()
                 Button { pickerSource = nil
                     showingNodePicker = true
@@ -73,7 +73,7 @@ struct WorkflowView: View {
                                             nodeMenuActions(node, in: flow)
                                         } label: {
                                             Image(systemName: "ellipsis")
-                                                .font(.system(size: 11, weight: .semibold))
+                                                .font(.system(size: Theme.zoom(11), weight: .semibold))
                                                 .frame(width: 22, height: 22)
                                                 .background(Theme.bar, in: Circle())
                                         }
@@ -124,7 +124,7 @@ struct WorkflowView: View {
                             Text("\(Int(zoom * 100)) %").monospacedDigit().frame(width: 48)
                             Button { zoom = min(1.6, zoom + 0.1) } label: { Image(systemName: "plus") }
                         }
-                        .font(.system(size: 11)).buttonStyle(.borderless)
+                        .font(.system(size: Theme.zoom(11))).buttonStyle(.borderless)
                         .padding(7).background(Theme.bar, in: RoundedRectangle(cornerRadius: 7))
                         .frame(maxWidth: .infinity, alignment: .trailing)
                         .padding(12)
@@ -286,7 +286,7 @@ struct WorkflowView: View {
         let source = WorkflowPortSource(nodeID: node.id, isNo: isNo)
         let color: Color = node.kind == .decision ? (isNo ? .red : .green) : Theme.accent
         return Image(systemName: pendingConnection == source ? "arrow.right" : "plus")
-            .font(.system(size: 11, weight: .bold))
+            .font(.system(size: Theme.zoom(11), weight: .bold))
             .foregroundStyle(color)
             .frame(width: 20 * zoom, height: 20 * zoom)
             .background(Theme.background, in: Circle())
@@ -489,9 +489,9 @@ private struct WorkflowNodePicker: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Agregar bloque").font(.system(size: 17, weight: .semibold))
+                    Text("Agregar bloque").font(.system(size: Theme.zoom(17), weight: .semibold))
                     Text("Elegí qué hará el próximo paso del flujo.")
-                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                        .font(.system(size: Theme.zoom(12))).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button("Cancelar", action: close)
@@ -504,12 +504,12 @@ private struct WorkflowNodePicker: View {
                         Button { select(kind) } label: {
                             HStack(alignment: .top, spacing: 12) {
                                 Image(systemName: symbol(kind))
-                                    .font(.system(size: 19, weight: .medium))
+                                    .font(.system(size: Theme.zoom(19), weight: .medium))
                                     .foregroundStyle(Theme.accent)
                                     .frame(width: 28, height: 28)
                                 VStack(alignment: .leading, spacing: 5) {
-                                    Text(kind.title).font(.system(size: 13, weight: .semibold))
-                                    Text(description(kind)).font(.system(size: 11))
+                                    Text(kind.title).font(.system(size: Theme.zoom(13), weight: .semibold))
+                                    Text(description(kind)).font(.system(size: Theme.zoom(11)))
                                         .foregroundStyle(.secondary)
                                         .multilineTextAlignment(.leading)
                                         .fixedSize(horizontal: false, vertical: true)
@@ -546,7 +546,7 @@ private struct WorkflowExecutionPanel: View {
         VStack(spacing: 0) {
             HStack {
                 Image(systemName: "text.alignleft").foregroundStyle(Theme.accent)
-                Text("Ejecución").font(.system(size: 11, weight: .semibold))
+                Text("Ejecución").font(.system(size: Theme.zoom(11), weight: .semibold))
                 if model.isRunning { ProgressView().controlSize(.mini) }
                 Spacer()
                 if focusedStep != nil {
@@ -572,7 +572,7 @@ private struct WorkflowExecutionPanel: View {
                                             Text(result.summary).foregroundStyle(.secondary).lineLimit(1)
                                         }
                                     }
-                                    .font(.system(size: 11))
+                                    .font(.system(size: Theme.zoom(11)))
                                     .padding(.horizontal, 9).padding(.vertical, 6)
                                     .background(focusedStep == id ? Theme.accent.opacity(0.15) : .clear,
                                                 in: RoundedRectangle(cornerRadius: 5))
@@ -591,14 +591,14 @@ private struct WorkflowExecutionPanel: View {
                                 .foregroundStyle(.red)
                         }
                         if let focusedResult {
-                            Text(focusedResult.summary).font(.system(size: 11, weight: .semibold))
+                            Text(focusedResult.summary).font(.system(size: Theme.zoom(11), weight: .semibold))
                             Text(focusedResult.detail).textSelection(.enabled)
                         } else {
                             Text(model.log.isEmpty ? "Todavía no se ejecutó este flujo." : model.log)
                                 .textSelection(.enabled)
                         }
                     }
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: Theme.zoom(11), design: .monospaced))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(12)
                 }
@@ -652,14 +652,14 @@ private struct WorkflowNodeCard: View {
         Group {
             if node.kind.isTrigger {
                 Image(systemName: symbol)
-                    .font(.system(size: 23, weight: .semibold))
+                    .font(.system(size: Theme.zoom(23), weight: .semibold))
                     .foregroundStyle(color)
                     .frame(width: 60, height: 60)
                     .background(color.opacity(active ? 0.24 : 0.10), in: Circle())
                     .overlay(Circle().stroke(color.opacity(selected ? 0.95 : 0.5), lineWidth: selected ? 2 : 1))
                     .overlay(alignment: .bottom) {
                         Text(node.title)
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(.system(size: Theme.zoom(10), weight: .semibold))
                             .lineLimit(1)
                             .fixedSize()
                             .offset(y: 20)
@@ -668,11 +668,11 @@ private struct WorkflowNodeCard: View {
             } else if node.kind == .end {
                 HStack(spacing: 9) {
                     Image(systemName: status == nil ? "stop.fill" : status == .exited(0) ? "checkmark" : "xmark")
-                        .font(.system(size: 15, weight: .bold))
+                        .font(.system(size: Theme.zoom(15), weight: .bold))
                         .foregroundStyle(.white)
                         .frame(width: 29, height: 29)
                         .background(finishColor, in: Circle())
-                    Text(node.title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
+                    Text(node.title).font(.system(size: Theme.zoom(11), weight: .semibold)).lineLimit(1)
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 10).frame(width: 170, height: 54)
@@ -687,7 +687,7 @@ private struct WorkflowNodeCard: View {
                         DecisionBranchIcon()
                     } else {
                         Image(systemName: symbol)
-                            .font(.system(size: 18, weight: .semibold))
+                            .font(.system(size: Theme.zoom(18), weight: .semibold))
                             .foregroundStyle(color)
                             .frame(width: 25, height: 25)
                     }
@@ -698,7 +698,7 @@ private struct WorkflowNodeCard: View {
                             .foregroundStyle(status == .exited(0) ? .green : .red)
                     }
                 }
-                .font(.system(size: 11, weight: .medium)).padding(.horizontal, 10)
+                .font(.system(size: Theme.zoom(11), weight: .medium)).padding(.horizontal, 10)
                 .frame(width: node.kind == .decision ? 200 : 170, height: 54)
                 .background(color.opacity(active ? 0.24 : 0.10), in: RoundedRectangle(cornerRadius: 7))
                 .overlay(RoundedRectangle(cornerRadius: 7)
@@ -708,7 +708,7 @@ private struct WorkflowNodeCard: View {
         .overlay(alignment: .bottom) {
             if let result {
                 Text(result.summary)
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .font(.system(size: Theme.zoom(10), weight: .semibold, design: .rounded))
                     .foregroundStyle(result.successful ? Color.green : Color.red)
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .background(Theme.background, in: Capsule())
@@ -717,7 +717,7 @@ private struct WorkflowNodeCard: View {
                     .allowsHitTesting(false)
             } else if active {
                 Text("Ejecutando…")
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .font(.system(size: Theme.zoom(10), weight: .semibold, design: .rounded))
                     .foregroundStyle(Theme.accent)
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .background(Theme.background, in: Capsule())
@@ -820,14 +820,14 @@ private struct WorkflowInspector: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 9) {
                 Image(systemName: symbol)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: Theme.zoom(15), weight: .semibold))
                     .foregroundStyle(Theme.accent)
                     .frame(width: 32, height: 32)
                     .background(Theme.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 7))
-                Text(node.kind.title).font(.system(size: 12, weight: .semibold))
+                Text(node.kind.title).font(.system(size: Theme.zoom(12), weight: .semibold))
                 TextField("Nombre del bloque", text: $node.title)
-                    .font(.system(size: 12)).frame(maxWidth: 250).disabled(!canEdit)
-                Text(summary).font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: Theme.zoom(12))).frame(maxWidth: 250).disabled(!canEdit)
+                Text(summary).font(.system(size: Theme.zoom(10), design: .monospaced))
                     .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                     .frame(maxWidth: 250, alignment: .leading)
                 Spacer(minLength: 0)
@@ -839,7 +839,7 @@ private struct WorkflowInspector: View {
             Divider()
             if let result {
                 Label(resultLabel, systemImage: result.successful ? "checkmark.circle.fill" : "xmark.circle.fill")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: Theme.zoom(11), weight: .semibold))
                     .foregroundStyle(resultColor)
                     .padding(.horizontal, 12).padding(.vertical, 8)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -848,13 +848,13 @@ private struct WorkflowInspector: View {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.mini)
                     Text("Ejecutando este nodo…")
-                }.font(.system(size: 11)).padding(.horizontal, 12).padding(.vertical, 8)
+                }.font(.system(size: Theme.zoom(11))).padding(.horizontal, 12).padding(.vertical, 8)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Divider()
             }
             if !error.isEmpty {
                 Label(error, systemImage: "exclamationmark.triangle")
-                    .font(.system(size: 11)).foregroundStyle(.red)
+                    .font(.system(size: Theme.zoom(11))).foregroundStyle(.red)
                     .padding(.horizontal, 12).padding(.vertical, 8)
             }
             HStack(spacing: 0) {
@@ -867,7 +867,7 @@ private struct WorkflowInspector: View {
                 Divider()
                 ScrollView(.vertical) {
                     VStack(alignment: .leading, spacing: 0) {
-                        Text("PARÁMETROS").font(.system(size: 11, weight: .semibold))
+                        Text("PARÁMETROS").font(.system(size: Theme.zoom(11), weight: .semibold))
                             .padding(.horizontal, 12).padding(.vertical, 10)
                         Divider()
                         settings
@@ -886,8 +886,8 @@ private struct WorkflowInspector: View {
             if let result, (node.kind == .decision || node.kind == .files || !result.successful), !result.detail.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(node.kind == .decision ? "Evaluación" : node.kind == .files ? "Archivos" : "Detalle del error")
-                        .font(.system(size: 11, weight: .semibold))
-                    Text(result.detail).font(.system(size: 11, design: .monospaced))
+                        .font(.system(size: Theme.zoom(11), weight: .semibold))
+                    Text(result.detail).font(.system(size: Theme.zoom(11), design: .monospaced))
                         .textSelection(.enabled).lineLimit(node.kind == .files ? 8 : 3)
                 }.frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 12).padding(.vertical, 8)
@@ -933,13 +933,13 @@ private struct WorkflowInspector: View {
                             Text("La salida anterior está en $BRAKET_INPUT; su código en $BRAKET_PREVIOUS_EXIT_CODE.")
                                 .font(.caption2).foregroundStyle(.secondary)
                             TextEditor(text: $node.command)
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(.system(size: Theme.zoom(11), design: .monospaced))
                                 .frame(height: 70).disabled(!canEdit)
                         }
                         WorkflowSettingsCard(title: "Ubicación", symbol: "folder") {
                             HStack(spacing: 8) {
                                 TextField("Carpeta del proyecto", text: $node.settings.workingDirectory)
-                                    .font(.system(size: 11, design: .monospaced))
+                                    .font(.system(size: Theme.zoom(11), design: .monospaced))
                                     .disabled(!canEdit)
                                 Button("Elegir…", action: chooseWorkingDirectory).disabled(!canEdit)
                             }
@@ -958,10 +958,10 @@ private struct WorkflowInspector: View {
                             ForEach($node.settings.environment) { $variable in
                                 HStack(spacing: 8) {
                                     TextField("NOMBRE", text: $variable.name)
-                                        .font(.system(size: 11, design: .monospaced))
+                                        .font(.system(size: Theme.zoom(11), design: .monospaced))
                                         .frame(maxWidth: 180)
                                     TextField("Valor", text: $variable.value)
-                                        .font(.system(size: 11, design: .monospaced))
+                                        .font(.system(size: Theme.zoom(11), design: .monospaced))
                                     if canEdit {
                                         Button {
                                             node.settings.environment.removeAll { $0.id == variable.id }
@@ -991,7 +991,7 @@ private struct WorkflowInspector: View {
                         }
                         WorkflowSettingsCard(title: "Prompt", symbol: "text.bubble") {
                             TextEditor(text: $node.ai.prompt)
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(.system(size: Theme.zoom(11), design: .monospaced))
                                 .frame(height: 95).disabled(!canEdit)
                         }
                         WorkflowSettingsCard(title: "Modelo", symbol: "sparkles") {
@@ -1020,14 +1020,14 @@ private struct WorkflowInspector: View {
                     case .files:
                         WorkflowSettingsCard(title: "Archivos de entrada", symbol: "curlybraces") {
                             TextField("Campo JSON, por ejemplo files o data.files", text: $node.fileSettings.sourcePath)
-                                .font(.system(size: 11, design: .monospaced)).disabled(!canEdit)
+                                .font(.system(size: Theme.zoom(11), design: .monospaced)).disabled(!canEdit)
                             Text("Cada elemento necesita content; puede incluir name, mimeType y encoding (utf8 o base64).")
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
                         WorkflowSettingsCard(title: "Ubicación", symbol: "folder") {
                             HStack(spacing: 8) {
                                 TextField("Carpeta dentro del proyecto", text: $node.fileSettings.destination)
-                                    .font(.system(size: 11, design: .monospaced)).disabled(!canEdit)
+                                    .font(.system(size: Theme.zoom(11), design: .monospaced)).disabled(!canEdit)
                                 Button("Elegir…", action: chooseFileDestination).disabled(!canEdit)
                             }
                             Text("Ruta relativa al proyecto. Vacío: carpeta principal.")
@@ -1035,7 +1035,7 @@ private struct WorkflowInspector: View {
                         }
                         WorkflowSettingsCard(title: "Nombre si falta", symbol: "doc.text") {
                             TextField("archivo-{indice}.{extension}", text: $node.fileSettings.namePattern)
-                                .font(.system(size: 11, design: .monospaced)).disabled(!canEdit)
+                                .font(.system(size: Theme.zoom(11), design: .monospaced)).disabled(!canEdit)
                             Text("Usa name si viene; si no, {indice} empieza en 1 y {extension} se obtiene de mimeType. Si existe, agrega (1), (2)…")
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
@@ -1073,7 +1073,7 @@ private struct WorkflowInspector: View {
                             }
                             if node.condition.left.source == .jsonField {
                                 TextField("Campo, por ejemplo stdout o data.count", text: $node.condition.left.value)
-                                    .font(.system(size: 11, design: .monospaced)).disabled(!canEdit)
+                                    .font(.system(size: Theme.zoom(11), design: .monospaced)).disabled(!canEdit)
                             }
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Comparación").font(.caption).foregroundStyle(.secondary)
@@ -1089,7 +1089,7 @@ private struct WorkflowInspector: View {
                                 }.labelsHidden().frame(maxWidth: .infinity).disabled(!canEdit)
                                 TextField(node.condition.right.source == .environment ? "Nombre de variable" : "Valor",
                                           text: $node.condition.right.value)
-                                    .font(.system(size: 11, design: .monospaced)).disabled(!canEdit)
+                                    .font(.system(size: Theme.zoom(11), design: .monospaced)).disabled(!canEdit)
                             }
                             if node.condition.left.source == .previousOutput,
                                node.condition.valueType == .text {
@@ -1200,9 +1200,9 @@ private struct WorkflowSettingsCard<Content: View>: View {
             Button { expanded.toggle() } label: {
                 HStack(spacing: 8) {
                     Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 9, weight: .semibold)).frame(width: 12)
+                        .font(.system(size: Theme.zoom(9), weight: .semibold)).frame(width: 12)
                     Image(systemName: symbol).foregroundStyle(Theme.accent).frame(width: 16)
-                    Text(title).font(.system(size: 11, weight: .semibold))
+                    Text(title).font(.system(size: Theme.zoom(11), weight: .semibold))
                     Spacer()
                 }.contentShape(Rectangle())
             }.buttonStyle(.plain).padding(10)
@@ -1232,10 +1232,10 @@ private struct WorkflowJSONPane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
-                Text(title).font(.system(size: 11, weight: .semibold))
+                Text(title).font(.system(size: Theme.zoom(11), weight: .semibold))
                 if let source { Text("· \(source)").lineLimit(1).foregroundStyle(.secondary) }
                 Spacer()
-            }.font(.system(size: 10)).padding(12)
+            }.font(.system(size: Theme.zoom(10))).padding(12)
             Divider()
             HStack {
                 Picker("Vista", selection: $viewMode) {
@@ -1254,18 +1254,18 @@ private struct WorkflowJSONPane: View {
             }
             if tested && !hasBranchData {
                 Label("Esta rama no recibió datos en esta prueba.", systemImage: "arrow.triangle.branch")
-                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                    .font(.system(size: Theme.zoom(11))).foregroundStyle(.secondary)
                     .padding(12).frame(maxWidth: .infinity, alignment: .leading)
                 Spacer(minLength: 0)
             } else if viewMode == 0, let editableJSON {
                 TextEditor(text: editableJSON)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: Theme.zoom(11), design: .monospaced))
                     .padding(.horizontal, 8)
             } else { GeometryReader { geometry in
                 ScrollView([.vertical, .horizontal]) {
                     Group {
                         if viewMode == 0 {
-                            Text(displayJSON).font(.system(size: 11, design: .monospaced))
+                            Text(displayJSON).font(.system(size: Theme.zoom(11), design: .monospaced))
                                 .textSelection(.enabled)
                         } else {
                             WorkflowJSONTree(name: "{}", value: WorkflowJSON.decode(displayJSON))
@@ -1324,7 +1324,7 @@ private struct WorkflowJSONTree: View {
                     Text(leaf).foregroundStyle(.secondary).textSelection(.enabled)
                 }.lineLimit(2)
             }
-        }.font(.system(size: 11, design: .monospaced))
+        }.font(.system(size: Theme.zoom(11), design: .monospaced))
     }
 
     private var leaf: String {

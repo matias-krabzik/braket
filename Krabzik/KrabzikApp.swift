@@ -9,7 +9,8 @@ struct KrabzikApp: App {
     var body: some Scene {
         Window("Braket", id: "workspace") {
             WorkspaceView(controller: controller)
-                .background(WindowBridge(delegate: delegate, projectURL: controller.workspaceURL, theme: controller.settings.theme))
+                .background(WindowBridge(delegate: delegate, projectURL: controller.workspaceURL,
+                                         theme: controller.settings.theme, scale: controller.settings.uiScale))
                 .onAppear {
                     delegate.controller = controller
                     _ = AppUpdater.shared
@@ -42,6 +43,16 @@ struct KrabzikApp: App {
                 Button("Mostrar panel inferior") { controller.processesVisible.toggle() }.keyboardShortcut("j")
                 Button("Mostrar Codex") { controller.agent.visible.toggle() }.keyboardShortcut("a", modifiers: [.command, .option])
                     .disabled(controller.workspace == nil || controller.isReadOnly)
+            }
+            CommandGroup(after: .toolbar) {
+                Button("Aumentar zoom") { controller.settings.zoomIn() }.keyboardShortcut("+", modifiers: .command)
+                    .disabled(controller.settings.uiScale >= AppSettings.uiScaleRange.upperBound)
+                Button("Aumentar zoom con =") { controller.settings.zoomIn() }.keyboardShortcut("=", modifiers: .command)
+                    .disabled(controller.settings.uiScale >= AppSettings.uiScaleRange.upperBound)
+                Button("Reducir zoom") { controller.settings.zoomOut() }.keyboardShortcut("-", modifiers: .command)
+                    .disabled(controller.settings.uiScale <= AppSettings.uiScaleRange.lowerBound)
+                Button("Restablecer zoom") { controller.settings.resetZoom() }.keyboardShortcut("0", modifiers: .command)
+                    .disabled(controller.settings.uiScale == 1)
             }
             CommandMenu("Proyecto") {
                 Button("Iniciar", action: controller.startAll).keyboardShortcut("r").disabled(controller.runnableProjects.isEmpty)
@@ -142,6 +153,7 @@ private struct WindowBridge: NSViewRepresentable {
     let delegate: AppDelegate
     let projectURL: URL?
     let theme: AppTheme
+    let scale: Double
 
     func makeNSView(context: Context) -> WindowView { WindowView() }
 
@@ -150,12 +162,14 @@ private struct WindowBridge: NSViewRepresentable {
         view.window?.backgroundColor = EditorPalette.background
         view.appDelegate = delegate
         view.projectURL = projectURL
+        view.scale = scale
         view.scheduleLayout()
     }
 
     final class WindowView: NSView {
         weak var appDelegate: AppDelegate?
         var projectURL: URL?
+        var scale = 1.0
         private weak var configuredWindow: NSWindow?
         private var appliedProjectIsOpen = false
 
@@ -182,7 +196,10 @@ private struct WindowBridge: NSViewRepresentable {
 
             // Only resize between welcome and workspace; preserve the frame when switching projects.
             let projectIsOpen = projectURL != nil
-            guard isNewWindow || appliedProjectIsOpen != projectIsOpen else { return }
+            guard isNewWindow || appliedProjectIsOpen != projectIsOpen else {
+                fitWindowToZoom(window, on: screen)
+                return
+            }
             configuredWindow = window
             appliedProjectIsOpen = projectIsOpen
             guard !window.styleMask.contains(.fullScreen) else { return }
@@ -191,12 +208,13 @@ private struct WindowBridge: NSViewRepresentable {
             let available = screen.visibleFrame
             let chromeWidth = window.frame.width - window.contentLayoutRect.width
             let chromeHeight = window.frame.height - window.contentLayoutRect.height
-            let compact = NSSize(width: 760 + chromeWidth, height: 420 + chromeHeight)
+            let compact = NSSize(width: 760 * scale + chromeWidth, height: 420 * scale + chromeHeight)
             let size: NSSize
             if projectURL != nil {
                 // Use one scale for both axes to retain the screen's aspect ratio.
                 let display = screen.frame.size
-                let minimumScale = max((900 + chromeWidth) / display.width, (580 + chromeHeight) / display.height)
+                let minimumScale = max((900 * scale + chromeWidth) / display.width,
+                                       (580 * scale + chromeHeight) / display.height)
                 let maximumScale = min(available.width / display.width, available.height / display.height)
                 let scale = min(max(0.75, minimumScale), maximumScale)
                 size = NSSize(width: display.width * scale, height: display.height * scale)
@@ -206,6 +224,22 @@ private struct WindowBridge: NSViewRepresentable {
             let frame = NSRect(x: available.midX - size.width / 2, y: available.midY - size.height / 2,
                                width: size.width, height: size.height)
             window.setFrame(frame, display: true, animate: window.isVisible && !isNewWindow)
+            fitWindowToZoom(window, on: screen)
+        }
+
+        private func fitWindowToZoom(_ window: NSWindow, on screen: NSScreen) {
+            guard !window.styleMask.contains(.fullScreen) else { return }
+            let available = screen.visibleFrame
+            let chromeWidth = window.frame.width - window.contentLayoutRect.width
+            let chromeHeight = window.frame.height - window.contentLayoutRect.height
+            let minimumWidth = (projectURL == nil ? 760 : 900) * scale + chromeWidth
+            let minimumHeight = (projectURL == nil ? 420 : 580) * scale + chromeHeight
+            let width = min(max(window.frame.width, minimumWidth), available.width)
+            let height = min(max(window.frame.height, minimumHeight), available.height)
+            guard width > window.frame.width + 0.5 || height > window.frame.height + 0.5 else { return }
+            let x = min(max(window.frame.midX - width / 2, available.minX), available.maxX - width)
+            let y = min(max(window.frame.midY - height / 2, available.minY), available.maxY - height)
+            window.setFrame(NSRect(x: x, y: y, width: width, height: height), display: true)
         }
     }
 }

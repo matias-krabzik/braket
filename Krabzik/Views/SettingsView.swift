@@ -35,6 +35,16 @@ struct SettingsView: View {
                 }
                 Text(settings.theme.detail)
                     .font(.callout).foregroundStyle(.secondary)
+                HStack {
+                    Slider(value: $settings.uiScale, in: AppSettings.uiScaleRange, step: 0.1) {
+                        Text("Zoom de interfaz")
+                    }
+                    Text("\(Int((settings.uiScale * 100).rounded())) %")
+                        .monospacedDigit()
+                        .frame(width: 52, alignment: .trailing)
+                    Button("Restablecer") { settings.resetZoom() }
+                        .disabled(settings.uiScale == 1)
+                }
             }
             Section("Al iniciar") {
                 Toggle("Abrir último estado", isOn: $settings.restoreLastState)

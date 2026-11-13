@@ -23,7 +23,7 @@ struct WelcomeView: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Braket")
-                .font(.system(size: 23, weight: .semibold, design: .rounded))
+                .font(.system(size: Theme.zoom(23), weight: .semibold, design: .rounded))
                 .padding(.horizontal, 8)
                 .padding(.bottom, 28)
             VStack(spacing: 10) {
@@ -35,8 +35,8 @@ struct WelcomeView: View {
             Spacer(minLength: 32)
             SettingsLink {
                 HStack(spacing: 12) {
-                    Image(systemName: "gearshape").font(.system(size: 16)).frame(width: 20)
-                    Text("Configuración").font(.system(size: 13, weight: .medium))
+                    Image(systemName: "gearshape").font(.system(size: Theme.zoom(16))).frame(width: 20)
+                    Text("Configuración").font(.system(size: Theme.zoom(13), weight: .medium))
                     Spacer()
                 }
                 .padding(.horizontal, 8).frame(height: 40)
@@ -51,7 +51,7 @@ struct WelcomeView: View {
         .padding(.horizontal, 16)
         .padding(.top, 32)
         .padding(.bottom, 20)
-        .frame(width: 240)
+        .frame(width: Theme.zoom(240))
         .frame(maxHeight: .infinity)
         .background(AppSettings.shared.theme == .light ? Theme.sidebar.opacity(0.65) : Color.black.opacity(0.035))
     }
@@ -59,11 +59,11 @@ struct WelcomeView: View {
     private var recentProjects: some View {
         VStack(alignment: .leading, spacing: 20) {
             HStack {
-                Text("Proyectos recientes").font(.system(size: 22, weight: .semibold))
+                Text("Proyectos recientes").font(.system(size: Theme.zoom(22), weight: .semibold))
                 Spacer()
                 if !controller.recentProjects.isEmpty {
                     Text("\(controller.recentProjects.count)")
-                        .font(.system(size: 11, weight: .medium)).monospacedDigit()
+                        .font(.system(size: Theme.zoom(11), weight: .medium)).monospacedDigit()
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 8).padding(.vertical, 4)
                         .background(Theme.sidebar, in: Capsule())
@@ -72,13 +72,13 @@ struct WelcomeView: View {
             if controller.recentProjects.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: "clock.arrow.circlepath")
-                        .font(.system(size: 30, weight: .light))
+                        .font(.system(size: Theme.zoom(30), weight: .light))
                         .foregroundStyle(Theme.accent.opacity(0.7))
                         .padding(.bottom, 4)
                     Text("Todavía no hay proyectos recientes")
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: Theme.zoom(13), weight: .medium))
                     Text("Los proyectos que abras aparecerán acá\npara que puedas retomarlos fácilmente.")
-                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                        .font(.system(size: Theme.zoom(12))).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center).lineSpacing(4)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -146,11 +146,11 @@ private struct WelcomeAction: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                Image(systemName: icon).font(.system(size: 14)).frame(width: 18)
+                Image(systemName: icon).font(.system(size: Theme.zoom(14))).frame(width: 18)
                     .foregroundStyle(Theme.accent)
-                Text(title).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                Text(title).font(.system(size: Theme.zoom(13), weight: .medium)).lineLimit(1)
                 Spacer(minLength: 0)
-                Text(shortcut).font(.system(size: 11)).foregroundStyle(.secondary)
+                Text(shortcut).font(.system(size: Theme.zoom(11))).foregroundStyle(.secondary)
                     .accessibilityHidden(true)
             }
             .padding(.horizontal, 12).frame(height: 42)
@@ -182,9 +182,9 @@ private struct RecentProjectRow: View {
                     ProjectIcon(name: name, style: model?.iconStyle ?? ProjectIconStyle(), size: 34)
                     VStack(alignment: .leading, spacing: 6) {
                         Text(name)
-                            .font(.system(size: 15, weight: .medium)).lineLimit(1).truncationMode(.middle)
+                            .font(.system(size: Theme.zoom(15), weight: .medium)).lineLimit(1).truncationMode(.middle)
                         Text((url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath)
-                            .font(.system(size: 12)).foregroundStyle(.secondary)
+                            .font(.system(size: Theme.zoom(12))).foregroundStyle(.secondary)
                             .lineLimit(1).truncationMode(.middle)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -198,7 +198,7 @@ private struct RecentProjectRow: View {
             .accessibilityValue(url.path)
             Button(action: forget) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: Theme.zoom(11), weight: .medium))
                     .foregroundStyle(.secondary)
                     .frame(width: 28, height: 28)
                     .contentShape(Rectangle())

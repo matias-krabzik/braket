@@ -55,7 +55,7 @@ struct MarkdownPreview: View {
                 .help("Ampliar zoom de Markdown")
                 .accessibilityLabel("Ampliar zoom de Markdown")
         }
-        .font(.system(size: 11)).buttonStyle(.borderless)
+        .font(.system(size: Theme.zoom(11))).buttonStyle(.borderless)
         .padding(7).background(Theme.bar, in: RoundedRectangle(cornerRadius: 7))
     }
 
@@ -63,13 +63,13 @@ struct MarkdownPreview: View {
         switch block {
         case .heading(let level, let content):
             inline(content)
-                .font(.system(size: max(15, 30 - CGFloat(level - 1) * 3) * zoom, weight: .semibold))
+                .font(.system(size: Theme.zoom(max(15, 30 - CGFloat(level - 1) * 3) * zoom), weight: .semibold))
                 .textSelection(.enabled)
                 .padding(.top, level == 1 ? 8 : 4)
         case .paragraph(let content):
-            inline(content).font(.system(size: 13 * zoom)).lineSpacing(5 * zoom).textSelection(.enabled)
+            inline(content).font(.system(size: Theme.zoom(13 * zoom))).lineSpacing(5 * zoom).textSelection(.enabled)
         case .quote(let content):
-            inline(content).font(.system(size: 13 * zoom)).lineSpacing(5 * zoom)
+            inline(content).font(.system(size: Theme.zoom(13 * zoom))).lineSpacing(5 * zoom)
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
                 .padding(.leading, 13).padding(.vertical, 4)
@@ -80,13 +80,13 @@ struct MarkdownPreview: View {
                 Text(marker).frame(width: 23 * zoom, alignment: .trailing).foregroundStyle(Theme.accent)
                 inline(content).textSelection(.enabled)
             }
-            .font(.system(size: 13 * zoom)).padding(.leading, CGFloat(level) * 18 * zoom)
+            .font(.system(size: Theme.zoom(13 * zoom))).padding(.leading, CGFloat(level) * 18 * zoom)
         case .code(let language, let content):
             VStack(alignment: .leading, spacing: 8) {
                 if !language.isEmpty {
-                    Text(language).font(.system(size: 10 * zoom, weight: .medium)).foregroundStyle(.secondary)
+                    Text(language).font(.system(size: Theme.zoom(10 * zoom), weight: .medium)).foregroundStyle(.secondary)
                 }
-                Text(content).font(.system(size: 12 * zoom, design: .monospaced))
+                Text(content).font(.system(size: Theme.zoom(12 * zoom), design: .monospaced))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -101,7 +101,7 @@ struct MarkdownPreview: View {
                     GridRow {
                         ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
                             inline(cell)
-                                .font(.system(size: 12 * zoom, weight: rowIndex == 0 ? .semibold : .regular))
+                                .font(.system(size: Theme.zoom(12 * zoom), weight: rowIndex == 0 ? .semibold : .regular))
                                 .textSelection(.enabled)
                         }
                     }
@@ -147,10 +147,10 @@ private struct MarkdownLocalImage: View {
                     Image(nsImage: image).resizable().scaledToFit()
                         .frame(maxWidth: 820 * zoom)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    Text(alt).font(.system(size: 11 * zoom)).foregroundStyle(.secondary)
+                    Text(alt).font(.system(size: Theme.zoom(11 * zoom))).foregroundStyle(.secondary)
                 }
             } else {
-                Label(alt, systemImage: "photo").font(.system(size: 12 * zoom)).foregroundStyle(.secondary)
+                Label(alt, systemImage: "photo").font(.system(size: Theme.zoom(12 * zoom))).foregroundStyle(.secondary)
             }
         }
         .task(id: url) {

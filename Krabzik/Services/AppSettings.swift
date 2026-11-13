@@ -26,6 +26,7 @@ enum AppTheme: String, CaseIterable, Identifiable, Codable {
 @MainActor @Observable
 final class AppSettings {
     static let shared = AppSettings()
+    static let uiScaleRange = 0.8...1.5
 
     var theme: AppTheme {
         didSet { defaults.set(theme.rawValue, forKey: "appearanceTheme") }
@@ -39,6 +40,9 @@ final class AppSettings {
     var markdownPreviewZoom: Double {
         didSet { defaults.set(markdownPreviewZoom, forKey: "markdownPreviewZoom") }
     }
+    var uiScale: Double {
+        didSet { defaults.set(uiScale, forKey: "uiScale") }
+    }
     @ObservationIgnored private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -47,5 +51,12 @@ final class AppSettings {
         restoreLastState = defaults.object(forKey: "restoreLastState") as? Bool ?? true
         let savedZoom = defaults.object(forKey: "markdownPreviewZoom") as? Double ?? 1
         markdownPreviewZoom = savedZoom.isFinite ? min(2, max(0.7, savedZoom)) : 1
+        let savedScale = defaults.object(forKey: "uiScale") as? Double ?? 1
+        uiScale = savedScale.isFinite ? min(Self.uiScaleRange.upperBound,
+                                            max(Self.uiScaleRange.lowerBound, savedScale)) : 1
     }
+
+    func zoomIn() { uiScale = min(Self.uiScaleRange.upperBound, (uiScale * 10).rounded() / 10 + 0.1) }
+    func zoomOut() { uiScale = max(Self.uiScaleRange.lowerBound, (uiScale * 10).rounded() / 10 - 0.1) }
+    func resetZoom() { uiScale = 1 }
 }

@@ -6,9 +6,9 @@ struct ProcessPanel: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Procesos").font(.system(size: 11, weight: .medium))
+                Text("Procesos").font(.system(size: Theme.zoom(11), weight: .medium))
                 Spacer()
-                Button { controller.processesVisible = false } label: { Image(systemName: "chevron.down").font(.system(size: 10)) }
+                Button { controller.processesVisible = false } label: { Image(systemName: "chevron.down").font(.system(size: Theme.zoom(10))) }
                     .buttonStyle(.plain).help("Ocultar procesos")
             }
             .foregroundStyle(.secondary)
@@ -33,11 +33,12 @@ struct ProcessPanel: View {
                 if controller.workflowVisible {
                     ScrollView {
                         Text(controller.workflows.log.isEmpty ? "Todavía no se ejecutó este flujo." : controller.workflows.log)
-                            .font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
+                            .font(.system(size: Theme.zoom(11), design: .monospaced)).textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading).padding(12)
                     }
                 } else if let project = controller.selectedProject, let run = controller.runner.runs[project.id] {
-                    ConsoleView(run: run, theme: AppSettings.shared.theme).id(project.id)
+                    ConsoleView(run: run, theme: AppSettings.shared.theme,
+                                uiScale: AppSettings.shared.uiScale).id(project.id)
                 } else { Theme.background }
             }
         }
@@ -67,14 +68,14 @@ private struct ProcessRow: View {
             Button(action: select) {
                 HStack(spacing: 8) {
                     Circle().fill(color).frame(width: 6, height: 6)
-                    Text(project.name).font(.system(size: 12)).lineLimit(1)
+                    Text(project.name).font(.system(size: Theme.zoom(12))).lineLimit(1)
                     Spacer(minLength: 4)
                 }.contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             Button(action: toggle) {
                 Image(systemName: run.status.active ? "stop.fill" : "play.fill")
-                    .font(.system(size: 10)).frame(width: 20, height: 20)
+                    .font(.system(size: Theme.zoom(10))).frame(width: 20, height: 20)
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)

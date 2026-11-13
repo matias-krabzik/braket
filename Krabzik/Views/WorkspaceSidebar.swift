@@ -21,7 +21,7 @@ struct WorkspaceSidebar: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
-                Text(workspace.name).font(.system(size: 13, weight: .semibold))
+                Text(workspace.name).font(.system(size: Theme.zoom(13), weight: .semibold))
                     .lineLimit(1).truncationMode(.middle).help(workspace.name)
                 Picker("Explorador", selection: $controller.sidebarTab) {
                     ForEach(WorkspaceSidebarTab.allCases, id: \.self) { tab in
@@ -34,7 +34,7 @@ struct WorkspaceSidebar: View {
                         Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                         TextField(code ? "Filtrar archivos" : "Filtrar conexiones y SQL",
                                   text: code ? $codeFilter : $databaseFilter)
-                            .textFieldStyle(.plain).font(.system(size: 11))
+                            .textFieldStyle(.plain).font(.system(size: Theme.zoom(11)))
                         if !(code ? codeFilter : databaseFilter).isEmpty {
                             Button {
                                 if code { codeFilter = "" } else { databaseFilter = "" }
@@ -105,7 +105,7 @@ struct WorkspaceSidebar: View {
                                                                              height: 18)
                                         VStack(alignment: .leading, spacing: 3) {
                                             Text(match.url.lastPathComponent).lineLimit(1)
-                                            Text(match.path).font(.system(size: 10)).foregroundStyle(.secondary)
+                                            Text(match.path).font(.system(size: Theme.zoom(10))).foregroundStyle(.secondary)
                                                 .lineLimit(1).truncationMode(.middle)
                                         }
                                         Spacer(minLength: 0)
@@ -119,7 +119,7 @@ struct WorkspaceSidebar: View {
                     }
                 }
                 if search.truncated { Text("Hay más archivos. Refiná el filtro.").foregroundStyle(.secondary).padding() }
-            }.font(.system(size: 12))
+            }.font(.system(size: Theme.zoom(12)))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.sidebar)

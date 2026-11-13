@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 
 @MainActor enum Theme {
+    static func zoom(_ size: CGFloat) -> CGFloat { size * CGFloat(AppSettings.shared.uiScale) }
     static var colorScheme: ColorScheme { AppSettings.shared.theme == .light ? .light : .dark }
     static var surfaceInk: Color { AppSettings.shared.theme == .light ? .black : .white }
     static var background: Color { Color(nsColor: EditorPalette.background) }

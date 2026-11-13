@@ -19,10 +19,10 @@ struct DatabaseSidebar: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 5) {
                 HStack {
-                    Text("CONEXIONES").font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+                    Text("CONEXIONES").font(.system(size: Theme.zoom(11), weight: .medium)).foregroundStyle(.secondary)
                     Spacer()
                     Button { controller.database.editingConnection = DatabaseConnection() } label: {
-                        Image(systemName: "plus").font(.system(size: 11)) }
+                        Image(systemName: "plus").font(.system(size: Theme.zoom(11))) }
                         .buttonStyle(.plain).help("Agregar conexión MySQL").accessibilityLabel("Agregar conexión MySQL")
                 }.padding(.horizontal, 15).padding(.top, 13).padding(.bottom, 5)
                 ForEach(connections) { connection in
@@ -55,14 +55,14 @@ struct DatabaseSidebar: View {
                 }
                 Divider().padding(.horizontal, 15).padding(.top, 16)
                 HStack {
-                    Text("CONSULTAS SQL").font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+                    Text("CONSULTAS SQL").font(.system(size: Theme.zoom(11), weight: .medium)).foregroundStyle(.secondary)
                     Spacer()
                     Menu {
                         Button("Nuevo script…") {
                             controller.files.create(in: controller.workspaceURL?.deletingLastPathComponent())
                         }.disabled(controller.isReadOnly)
                         Button("Abrir script…", action: controller.files.importScripts)
-                    } label: { Image(systemName: "plus").font(.system(size: 11)) }
+                    } label: { Image(systemName: "plus").font(.system(size: Theme.zoom(11))) }
                         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                         .help("Agregar script SQL")
                 }.padding(.horizontal, 15).padding(.top, 12).padding(.bottom, 4)
@@ -85,7 +85,7 @@ struct DatabaseSidebar: View {
                         Image(systemName: "doc").foregroundStyle(.secondary)
                         Text(url.lastPathComponent).lineLimit(1)
                         Spacer()
-                    }.font(.system(size: 12)).padding(.horizontal, 17).frame(height: 28)
+                    }.font(.system(size: Theme.zoom(12))).padding(.horizontal, 17).frame(height: 28)
                         .contentShape(Rectangle())
                 }.buttonStyle(.plain).help(url.path)
             } else {
@@ -94,7 +94,7 @@ struct DatabaseSidebar: View {
                     Text((path as NSString).lastPathComponent).lineLimit(1).foregroundStyle(.tertiary)
                     Spacer()
                     }
-                    .font(.system(size: 12)).padding(.horizontal, 17).frame(height: 28)
+                    .font(.system(size: Theme.zoom(12))).padding(.horizontal, 17).frame(height: 28)
                     .help("Fuera de la carpeta del proyecto: no disponible en solo lectura.")
                 }
         }
@@ -119,12 +119,12 @@ private struct DatabaseRow: View {
                                                                                                                                  height: 6)
                                                                                                                                  }
                 }
-                .font(.system(size: 12)).padding(.horizontal, 10).frame(height: 30)
+                .font(.system(size: Theme.zoom(12))).padding(.horizontal, 10).frame(height: 30)
                 .background(selected ? Theme.accent.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 5))
                 .contentShape(Rectangle())
             }.buttonStyle(.plain).help(connection.destination)
             if let error = state.error {
-                Text(error).font(.system(size: 10)).foregroundStyle(.red.opacity(0.85))
+                Text(error).font(.system(size: Theme.zoom(10))).foregroundStyle(.red.opacity(0.85))
                     .lineLimit(3).textSelection(.enabled).padding(.horizontal, 10)
             }
         }
@@ -169,7 +169,7 @@ struct ConnectionSheet: View {
                         Text(insecureRemote
                              ? "Sin cifrado: usuario, contraseña y consultas viajan en texto plano fuera de esta Mac."
                              : "Sin cifrado. Aceptable solo porque el servidor es local.")
-                            .font(.system(size: 10))
+                            .font(.system(size: Theme.zoom(10)))
                             .foregroundStyle(insecureRemote ? Color.orange : .secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -178,7 +178,7 @@ struct ConnectionSheet: View {
                     GridRow {
                         Text("")
                         Text(tlsExplanation)
-                            .font(.system(size: 10)).foregroundStyle(.orange)
+                            .font(.system(size: Theme.zoom(10))).foregroundStyle(.orange)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -193,7 +193,7 @@ struct ConnectionSheet: View {
                                 in: RoundedRectangle(cornerRadius: 7))
             }
             if let message {
-                Text(message).font(.system(size: 11)).foregroundStyle(succeeded ? Color.green : .red)
+                Text(message).font(.system(size: Theme.zoom(11))).foregroundStyle(succeeded ? Color.green : .red)
                     .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                 if !succeeded {
                     Button("Exportar diagnóstico MySQL…") {
@@ -236,7 +236,7 @@ struct ConnectionSheet: View {
 
     private func row<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
         GridRow {
-            Text(label).font(.system(size: 12)).foregroundStyle(.secondary)
+            Text(label).font(.system(size: Theme.zoom(12))).foregroundStyle(.secondary)
             content()
         }
     }
@@ -303,8 +303,8 @@ struct SQLToolbar: View {
                 let state = controller.database.states[connection.id]
                 let database = state?.status == .connected ? state?.currentDatabase ?? "" : connection.database
                 Text("\(connection.host):\(connection.port)" + (database.isEmpty ? "" : " / \(database)"))
-                    .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                if state?.inTransaction == true { Text("Transacción").font(.system(size: 10)).foregroundStyle(.orange) }
+                    .font(.system(size: Theme.zoom(10))).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                if state?.inTransaction == true { Text("Transacción").font(.system(size: Theme.zoom(10))).foregroundStyle(.orange) }
             }
             Spacer(minLength: 4)
             if document.sqlExecution.isRunning {
@@ -328,7 +328,7 @@ struct SQLResultsPanel: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                Text("Resultados").font(.system(size: 11, weight: .medium))
+                Text("Resultados").font(.system(size: Theme.zoom(11), weight: .medium))
                 if execution.isRunning { ProgressView().controlSize(.mini) }
                 if execution.results.count > 1 {
                     Picker("Resultado", selection: $execution.selectedResultID) {
@@ -338,8 +338,8 @@ struct SQLResultsPanel: View {
                     }.labelsHidden().fixedSize()
                 }
                 Spacer()
-                Text(execution.connectionName).font(.system(size: 10)).foregroundStyle(.secondary).help(execution.destination)
-                Button(action: hide) { Image(systemName: "chevron.down").font(.system(size: 10)) }.buttonStyle(.plain)
+                Text(execution.connectionName).font(.system(size: Theme.zoom(10))).foregroundStyle(.secondary).help(execution.destination)
+                Button(action: hide) { Image(systemName: "chevron.down").font(.system(size: Theme.zoom(10))) }.buttonStyle(.plain)
                     .help("Ocultar resultados")
             }.padding(.horizontal, 15).frame(height: 32).background(Theme.bar)
             Rectangle().fill(Theme.border).frame(height: 1)
@@ -347,7 +347,7 @@ struct SQLResultsPanel: View {
                 if !result.columns.isEmpty { SQLResultTable(result: result, theme: AppSettings.shared.theme) }
                 else {
                     Text(result.error ?? "\(result.affectedRows) filas afectadas")
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(.system(size: Theme.zoom(12), design: .monospaced))
                             .foregroundStyle(result.error == nil ? Color.secondary : .red.opacity(0.9))
                         .textSelection(.enabled).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(16)
                 }
@@ -358,14 +358,14 @@ struct SQLResultsPanel: View {
                         Text(note).foregroundStyle(.orange).lineLimit(1).help(note)
                     }
                     if let error = execution.error { Text(error).foregroundStyle(.red.opacity(0.9)).lineLimit(1).help(error) }
-                }.font(.system(size: 10)).foregroundStyle(.secondary).padding(.horizontal, 15).frame(height: 25)
+                }.font(.system(size: Theme.zoom(10))).foregroundStyle(.secondary).padding(.horizontal, 15).frame(height: 25)
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(execution.error ?? (execution.isCancelling ? "Cancelando…" : execution.isRunning ? "Ejecutando…" : ""))
                         .foregroundStyle(execution.error == nil ? Color.secondary : .red)
                     if let note = execution.cancelNote { Text(note).foregroundStyle(.orange) }
                 }
-                .font(.system(size: 12))
+                .font(.system(size: Theme.zoom(12)))
                 .textSelection(.enabled).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(16)
             }
         }.background(Theme.background)

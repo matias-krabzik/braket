@@ -38,13 +38,21 @@ final class SessionRestorationTests: XCTestCase {
         XCTAssertEqual(settings.theme, .graphite)
         XCTAssertTrue(settings.restoreLastState)
         XCTAssertEqual(settings.markdownPreviewZoom, 1)
+        XCTAssertEqual(settings.uiScale, 1)
         settings.theme = .midnight
         settings.restoreLastState = true
         settings.markdownPreviewZoom = 1.4
+        settings.zoomIn()
+        settings.zoomIn()
         let reloaded = AppSettings(defaults: defaults)
         XCTAssertEqual(reloaded.theme, .midnight)
         XCTAssertTrue(reloaded.restoreLastState)
         XCTAssertEqual(reloaded.markdownPreviewZoom, 1.4)
+        XCTAssertEqual(reloaded.uiScale, 1.2, accuracy: 0.001)
+        reloaded.zoomOut()
+        XCTAssertEqual(reloaded.uiScale, 1.1, accuracy: 0.001)
+        reloaded.resetZoom()
+        XCTAssertEqual(reloaded.uiScale, 1)
     }
 
     func testRestoresProjectTabOrderAndSelectionWithoutRunningApprovedCommands() async throws {

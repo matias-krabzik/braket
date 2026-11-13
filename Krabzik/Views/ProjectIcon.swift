@@ -32,7 +32,7 @@ struct ProjectIcon: View {
                 shape.fill(style.color)
             }
             Text(style.label(for: name))
-                .font(.system(size: size * 0.31, weight: .semibold, design: .rounded))
+                .font(.system(size: Theme.zoom(size * 0.31), weight: .semibold, design: .rounded))
                 .lineLimit(1).minimumScaleFactor(0.5)
                 .frame(maxWidth: size * 0.82)
                 .foregroundStyle(.white)

@@ -4,6 +4,7 @@ import SwiftUI
 struct ConsoleView: NSViewRepresentable {
     let run: ProjectRun
     let theme: AppTheme
+    let uiScale: Double
 
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView()
@@ -16,7 +17,7 @@ struct ConsoleView: NSViewRepresentable {
         text.isRichText = false
         text.backgroundColor = EditorPalette.background(for: theme)
         text.textColor = EditorPalette.text
-        text.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        text.font = .monospacedSystemFont(ofSize: 12 * CGFloat(uiScale), weight: .regular)
         text.textContainerInset = NSSize(width: 16, height: 12)
         text.autoresizingMask = [.width]
         text.isVerticallyResizable = true
@@ -30,6 +31,13 @@ struct ConsoleView: NSViewRepresentable {
         let _ = run.revision
         guard let text = scroll.documentView as? NSTextView else { return }
         text.backgroundColor = EditorPalette.background(for: theme)
+        let font = NSFont.monospacedSystemFont(ofSize: 12 * CGFloat(uiScale), weight: .regular)
+        if text.font != font {
+            text.font = font
+            if let storage = text.textStorage, storage.length > 0 {
+                storage.addAttribute(.font, value: font, range: NSRange(location: 0, length: storage.length))
+            }
+        }
         let wasAtBottom = scroll.contentView.bounds.maxY >= text.bounds.height - 35
         let newOutput = run.output
         let oldOutput = text.string
@@ -37,7 +45,7 @@ struct ConsoleView: NSViewRepresentable {
             let addition = String(newOutput.dropFirst(oldOutput.count))
             storage.append(NSAttributedString(string: addition,
                                               attributes: [
-                                                  .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
+                                                  .font: font,
                                                   .foregroundColor: EditorPalette.text
                                               ]))
         } else { text.string = newOutput }

@@ -27,7 +27,7 @@ struct ProjectRail: View {
                                                                    dragged: $draggedProject))
                             if hoveredProject == url {
                                 Button { controller.requestCloseWorkspace(url) } label: {
-                                    Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
+                                    Image(systemName: "xmark").font(.system(size: Theme.zoom(9), weight: .bold))
                                         .frame(width: 20, height: 20)
                                         .background(Theme.sidebar, in: Circle())
                                         .overlay { Circle().strokeBorder(Theme.border) }
@@ -48,7 +48,7 @@ struct ProjectRail: View {
             Spacer(minLength: 12)
             Button { showingActions = true } label: {
                 Image(systemName: "plus")
-                    .font(.system(size: 19, weight: .medium))
+                    .font(.system(size: Theme.zoom(19), weight: .medium))
                     .frame(width: 42, height: 42)
                     .background(Theme.sidebar, in: RoundedRectangle(cornerRadius: 10))
                     .contentShape(Rectangle())

@@ -29,6 +29,7 @@ enum EditorPalette {
 struct CodeEditor: NSViewRepresentable {
     let document: EditorDocument
     let theme: AppTheme
+    let uiScale: Double
 
     func makeNSView(context: Context) -> EditorSurface {
         if let existing = document.editorStorage as? EditorSurface { return existing }
@@ -39,6 +40,7 @@ struct CodeEditor: NSViewRepresentable {
 
     func updateNSView(_ view: EditorSurface, context: Context) {
         view.applyTheme(theme)
+        view.applyZoom(uiScale)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: EditorSurface, context: Context) -> CGSize? {
@@ -84,6 +86,7 @@ private final class ObserverToken: @unchecked Sendable {
     private var highlightedRevision = -1
     private var highlightedRange = NSRange(location: NSNotFound, length: 0)
     private var appliedTheme: AppTheme?
+    private var appliedZoom = 1.0
 
     init(document: EditorDocument) {
         self.document = document
@@ -169,6 +172,31 @@ private final class ObserverToken: @unchecked Sendable {
         gutter.needsDisplay = true
     }
 
+    func applyZoom(_ scale: Double) {
+        guard appliedZoom != scale else { return }
+        appliedZoom = scale
+        let font = NSFont.monospacedSystemFont(ofSize: 13 * CGFloat(scale), weight: .regular)
+        let style = NSMutableParagraphStyle()
+        style.minimumLineHeight = 23 * CGFloat(scale)
+        style.maximumLineHeight = 23 * CGFloat(scale)
+        style.tabStops = []
+        style.defaultTabInterval = 32 * CGFloat(scale)
+        paragraph = style
+        textView.font = font
+        textView.defaultParagraphStyle = style
+        textView.textContainerInset = NSSize(width: 12 * CGFloat(scale), height: 18 * CGFloat(scale))
+        textView.typingAttributes = baseAttributes
+        if let storage = textView.textStorage, storage.length > 0 {
+            let range = NSRange(location: 0, length: storage.length)
+            storage.beginEditing()
+            storage.addAttributes([.font: font, .paragraphStyle: style], range: range)
+            storage.endEditing()
+        }
+        gutter.ruleThickness = 54 * CGFloat(scale)
+        gutter.needsDisplay = true
+        textView.needsLayout = true
+    }
+
     func reloadFromDocument() {
         guard let document else { return }
         let selection = textView.selectedRange()
@@ -200,7 +228,8 @@ private final class ObserverToken: @unchecked Sendable {
     }
 
     private var baseAttributes: [NSAttributedString.Key: Any] {
-        [.font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular), .foregroundColor: EditorPalette.text, .paragraphStyle: paragraph]
+        [.font: NSFont.monospacedSystemFont(ofSize: 13 * CGFloat(appliedZoom), weight: .regular),
+         .foregroundColor: EditorPalette.text, .paragraphStyle: paragraph]
     }
 
     override func viewDidMoveToWindow() {
@@ -300,7 +329,7 @@ private final class ObserverToken: @unchecked Sendable {
               let viewport = layout.textViewportLayoutController.viewportRange else { return }
         let visible = surface.scrollView.contentView.bounds
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular),
+            .font: NSFont.monospacedDigitSystemFont(ofSize: Theme.zoom(11), weight: .regular),
             .foregroundColor: EditorPalette.muted
         ]
         layout.enumerateTextLayoutFragments(from: viewport.location, options: []) { fragment in
@@ -311,7 +340,7 @@ private final class ObserverToken: @unchecked Sendable {
             let label = "\(number)" as NSString
             let size = label.size(withAttributes: attributes)
             let y = frame.minY + surface.textView.textContainerInset.height - visible.minY + 4
-            label.draw(at: NSPoint(x: self.ruleThickness - size.width - 12, y: y), withAttributes: attributes)
+            label.draw(at: NSPoint(x: self.ruleThickness - size.width - Theme.zoom(12), y: y), withAttributes: attributes)
             return true
         }
     }
