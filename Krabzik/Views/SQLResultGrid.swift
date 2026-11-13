@@ -55,6 +55,7 @@ struct SQLResultGrid: NSViewRepresentable {
         table.delegate = context.coordinator
         table.dataSource = context.coordinator
         table.target = context.coordinator
+        table.action = #selector(Coordinator.selectCell(_:))
         table.doubleAction = #selector(Coordinator.editCell(_:))
         context.coordinator.table = table
         table.review = { [weak coordinator = context.coordinator] in
@@ -79,6 +80,7 @@ struct SQLResultGrid: NSViewRepresentable {
         _ = draft.deleted
         _ = draft.sent
         _ = draft.reason
+        _ = draft.selectedCell
         table.backgroundColor = EditorPalette.background(for: theme)
         table.rowHeight = 28 * scale
         if changedResult {
@@ -101,7 +103,14 @@ struct SQLResultGrid: NSViewRepresentable {
             column.width = width
             coordinator.settingWidth = false }
         }
-        if !coordinator.editing { table.reloadData() }
+        if !coordinator.editing {
+            table.reloadData()
+            if draft.inserted.count > coordinator.insertedCount {
+                table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+                table.scrollRowToVisible(0)
+            }
+            coordinator.insertedCount = draft.inserted.count
+        }
     }
 
     @MainActor final class Coordinator: NSObject, NSTableViewDelegate, NSTableViewDataSource, NSTextFieldDelegate {
@@ -110,11 +119,19 @@ struct SQLResultGrid: NSViewRepresentable {
         weak var table: SQLGridTable?
         var editing = false
         var settingWidth = false
+        var insertedCount = 0
+        private func modelRow(_ row: Int) -> Int {
+            row < draft.inserted.count ? draft.rowCount - 1 - row : row - draft.inserted.count
+        }
+        private func visibleRow(_ row: Int) -> Int {
+            row >= draft.result.rows.count ? draft.rowCount - 1 - row : row + draft.inserted.count
+        }
         private var menuRow = 0, menuColumn = 0
         init(draft: SQLResultDraft) { self.draft = draft }
         func numberOfRows(in tableView: NSTableView) -> Int { draft.rowCount }
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
             guard let column = Int(tableColumn?.identifier.rawValue ?? ""), row < draft.rowCount else { return nil }
+            let row = modelRow(row)
             let identifier = NSUserInterfaceItemIdentifier("value")
             let field = (tableView.makeView(withIdentifier: identifier, owner: nil) as? SQLGridField) ?? SQLGridField()
             let value = draft.value(row: row, column: column)
@@ -124,7 +141,8 @@ struct SQLResultGrid: NSViewRepresentable {
             field.delegate = self
             field.stringValue = value.display
             field.isBordered = false
-            field.drawsBackground = false
+            field.drawsBackground = draft.selectedCell == SQLCell(row: row, column: column)
+            field.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.16)
             field.isEditable = false
             field.isSelectable = false
             field.font = .monospacedSystemFont(ofSize: 12 * scale, weight: .regular)
@@ -140,18 +158,25 @@ struct SQLResultGrid: NSViewRepresentable {
                   let index = Int(column.identifier.rawValue) else { return }
             draft.widths[index] = column.width / scale
         }
+        @objc func selectCell(_ sender: NSTableView) {
+            guard sender.clickedRow >= 0, sender.clickedColumn >= 0 else { return }
+            draft.selectedCell = SQLCell(row: modelRow(sender.clickedRow), column: sender.clickedColumn)
+        }
         @objc func editCell(_ sender: NSTableView) {
-            beginEditing(row: sender.clickedRow, column: sender.clickedColumn)
+            guard sender.clickedRow >= 0 else { return }
+            beginEditing(row: modelRow(sender.clickedRow), column: sender.clickedColumn)
         }
         private func beginEditing(row: Int, column: Int) {
             guard let sender = table, draft.canEdit, row >= 0, column >= 0, !draft.deleted.contains(row),
                   draft.column(column)?.generated != true,
-                  let field = sender.view(atColumn: column, row: row, makeIfNecessary: true) as? SQLGridField else { return }
+                  let field = sender.view(atColumn: column, row: visibleRow(row), makeIfNecessary: true) as? SQLGridField else { return }
             field.isEditable = true
             field.isSelectable = true
             if draft.value(row: row, column: column) == .null || draft.value(row: row, column: column) == .serverDefault {
                 field.stringValue = ""
             }
+            draft.selectedCell = SQLCell(row: row, column: column)
+            draft.isEditingCell = true
             editing = true
             SQLGridTable.editingField = field
             field.selectText(nil)
@@ -160,6 +185,7 @@ struct SQLResultGrid: NSViewRepresentable {
             guard let field = notification.object as? SQLGridField, editing else { return }
             draft.set(.text(field.stringValue), row: field.rowIndex, column: field.columnIndex)
             editing = false
+            draft.isEditingCell = false
             SQLGridTable.editingField = nil
             field.isEditable = false
             table?.reloadData()
@@ -171,6 +197,8 @@ struct SQLResultGrid: NSViewRepresentable {
             }
             if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
                 editing = false
+                draft.isEditingCell = false
+                SQLGridTable.editingField = nil
                 table?.window?.makeFirstResponder(table)
                 table?.reloadData()
                 return true
@@ -178,9 +206,11 @@ struct SQLResultGrid: NSViewRepresentable {
             return false
         }
         func menu(row: Int, column: Int) -> NSMenu {
+            let row = modelRow(row)
             table?.window?.makeFirstResponder(table)
             menuRow = row
             menuColumn = column
+            draft.selectedCell = SQLCell(row: row, column: column)
             let menu = NSMenu()
             func add(_ title: String, _ action: String, enabled: Bool = true) {
                 let item = NSMenuItem(title: title, action: #selector(menuAction(_:)), keyEquivalent: "")

@@ -9,6 +9,12 @@ final class FileTreeOutlineView: NSOutlineView {
         super.keyDown(with: event)
     }
 
+    override func canDragRows(with rowIndexes: IndexSet, at mouseDownPoint: NSPoint) -> Bool {
+        // La celda personalizada contiene el botón +/−; no debe bloquear el
+        // arrastre del nombre o del icono de toda la fila.
+        return !rowIndexes.isEmpty && rowIndexes.allSatisfy { $0 >= 0 && $0 < numberOfRows }
+    }
+
     override func frameOfOutlineCell(atRow row: Int) -> NSRect { .zero }
 
     override func frameOfCell(atColumn column: Int, row: Int) -> NSRect {

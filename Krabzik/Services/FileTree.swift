@@ -79,6 +79,9 @@ struct FileTree: NSViewRepresentable {
 
     func updateNSView(_ view: NSScrollView, context: Context) {
         context.coordinator.update(workspace, at: workspaceURL, revision: revision)
+        if let request = controller.newFileRequest {
+            context.coordinator.requestNewFile(request, in: controller.newFileDirectory)
+        }
     }
 
     /// Dueño del árbol: qué nodos hay, cuándo se leen y qué se observa.
@@ -96,8 +99,11 @@ struct FileTree: NSViewRepresentable {
         var lastURL: URL?
         var generation = UUID()
         private var editingNode: FileNode?
+        private var deferredReloads: Set<URL> = []
         private var hoveredDropURL: URL?
         private var pendingSelectionURL: URL?
+        private var pendingRenameURL: URL?
+        private var lastCreationRequest: UUID?
         private let queue = DispatchQueue(label: "com.krabzik.files", qos: .userInitiated)
         nonisolated private static let excluded: Set<String> = [
             ".git",
@@ -114,6 +120,7 @@ struct FileTree: NSViewRepresentable {
         init(controller: WorkspaceController) { self.controller = controller }
 
         func update(_ workspace: Workspace, at url: URL, revision: Int) {
+            guard editingNode == nil else { return }
             guard revision != lastRevision || url != lastURL else { return }
             let sameWorkspace = lastURL == url
             lastRevision = revision
@@ -217,7 +224,8 @@ struct FileTree: NSViewRepresentable {
                 guard self.generation == token else { return }
                 node.projectIcon = files.favicons.lazy.compactMap { FileIcons.favicon($0) }.first
                     ?? files.technology.flatMap { FileIcons.asset($0) } ?? FileIcons.project(project)
-                self.outline?.reloadItem(node)
+                if self.editingNode == nil { self.outline?.reloadItem(node) }
+                else { self.deferredReloads.insert(node.url) }
             }
         }
 
@@ -255,6 +263,8 @@ struct FileTree: NSViewRepresentable {
                     guard let self, let node else { return }
                     node.loading = false
                     guard self.generation == token else { return }
+                    guard self.editingNode == nil else { self.deferredReloads.insert(url)
+                        return }
                     switch result {
                     case .success(let entries):
                         let old = Dictionary(uniqueKeysWithValues: (node.children ?? []).map { ($0.url, $0) })
@@ -267,10 +277,18 @@ struct FileTree: NSViewRepresentable {
                         self.outline?.reloadItem(node, reloadChildren: true)
                         self.restoreExpansion(node)
                         if let selected = self.pendingSelectionURL,
-                           let child = node.children?.first(where: { $0.url.standardizedFileURL == selected }),
+                           let child = node.children?
+                           .first(where: {
+                           $0.url.resolvingSymlinksInPath().standardizedFileURL == selected.resolvingSymlinksInPath().standardizedFileURL
+                           }),
                            let row = self.outline?.row(forItem: child), row >= 0 {
                             self.outline?.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
                             self.pendingSelectionURL = nil
+                            self.outline?.scrollRowToVisible(row)
+                            if self.pendingRenameURL == selected {
+                                self.pendingRenameURL = nil
+                                self.beginRename(child, selectStem: true)
+                            }
                         }
                         self.refreshDisclosure()
                         self.watch(node)
@@ -318,6 +336,7 @@ struct FileTree: NSViewRepresentable {
                 menu.addItem(.separator())
                 add("Quitar del proyecto", to: menu, action: #selector(removeRoot(_:)), represented: project)
             } else if selection.count == 1, !node.isDirectory, roots.contains(where: { $0 === node }) {
+                add("Renombrar…", to: menu, action: #selector(renameAction(_:)), represented: node)
                 add("Mostrar en Finder", to: menu, action: #selector(reveal(_:)), represented: node)
                 add("Quitar del proyecto", to: menu, action: #selector(removeScript(_:)), represented: node)
             } else if selection.allSatisfy({ canChange($0) }) {
@@ -335,7 +354,7 @@ struct FileTree: NSViewRepresentable {
                 add("Mostrar en Finder", to: menu, action: #selector(reveal(_:)), represented: node)
             }
             for item in menu.items where item.action != #selector(reveal(_:)) && item.action != #selector(copyPath(_:)) {
-                item.isEnabled = !controller.isReadOnly
+                item.isEnabled = !controller.isReadOnly && controller.fileOperation == nil
             }
         }
 
@@ -354,11 +373,11 @@ struct FileTree: NSViewRepresentable {
             if let project = item.representedObject as? CodeProject { controller.projects.remove(project.id) } }
 
         private var fileSystem: ExplorerFileSystem {
-            ExplorerFileSystem(roots: roots.map(\.url))
+            ExplorerFileSystem(roots: roots.map { $0.isDirectory ? $0.url : $0.url.deletingLastPathComponent() })
         }
 
         private func canChange(_ node: FileNode) -> Bool {
-            node.project == nil && (try? fileSystem.checkedSource(node.url)) != nil
+            controller.fileOperation == nil && node.project == nil && (try? fileSystem.checkedSource(node.url)) != nil
         }
 
         private func add(_ title: String, to menu: NSMenu, action: Selector, represented: Any) {
@@ -391,7 +410,8 @@ struct FileTree: NSViewRepresentable {
 
         private func findNode(at url: URL) -> FileNode? {
             func find(_ node: FileNode) -> FileNode? {
-                if node.url.standardizedFileURL == url.standardizedFileURL { return node }
+                if node.url.resolvingSymlinksInPath().standardizedFileURL.path == url.resolvingSymlinksInPath()
+                    .standardizedFileURL.path { return node }
                 for child in node.children ?? [] where child.isDirectory {
                     if let result = find(child) { return result }
                 }
@@ -400,8 +420,81 @@ struct FileTree: NSViewRepresentable {
             return roots.lazy.compactMap(find).first
         }
 
+        func requestNewFile(_ request: UUID, in directory: URL?) {
+            guard lastCreationRequest != request else { return }
+            lastCreationRequest = request
+            Task { [weak self] in
+                guard let self, self.controller.newFileRequest == request else { return }
+                self.controller.newFileRequest = nil
+                self.createFileInline(in: directory)
+            }
+        }
+
+        private func createFileInline(in directory: URL?) {
+            guard !controller.isReadOnly, controller.fileOperation == nil, let workspaceURL = controller.workspaceURL else { return }
+            let selected = selectedNodes().first
+            let folder = directory ?? selected.map { $0.isDirectory ? $0.url : $0.url.deletingLastPathComponent() }
+                ?? roots.first(where: \.isDirectory)?.url ?? workspaceURL.deletingLastPathComponent()
+            do {
+                let fs = ExplorerFileSystem(roots: [folder])
+                let name = FileManager.default.fileExists(atPath: folder.appendingPathComponent("nuevo.txt").path)
+                    ? try fs.availableName(for: "nuevo.txt", in: folder) : "nuevo.txt"
+                let url = try fs.create(name: name, in: folder, directory: false)
+                if !roots.contains(where: { $0.isDirectory && ExplorerFileSystem.contains(folder, in: $0.url) }),
+                   var workspace = controller.workspace {
+                    let base = workspaceURL.deletingLastPathComponent()
+                    let path = folder.standardizedFileURL == base.standardizedFileURL ? "." : folder.path
+                    workspace.projects.append(CodeProject(name: folder.lastPathComponent, path: path, kind: .files, command: ""))
+                    controller.session.write(workspace)
+                    update(workspace, at: workspaceURL, revision: controller.session.revision)
+                }
+                Task {
+                    do {
+                        try await controller.docs.open(url) { self.controller.workspaceURL == workspaceURL }
+                        guard controller.workspaceURL == workspaceURL else { return }
+                        controller.docs.selected?.focusEditorOnOpen = false
+                        showCreatedFile(url, in: folder)
+                    } catch { report(error) }
+                }
+            } catch { report(error) }
+        }
+
+        private func showCreatedFile(_ url: URL, in folder: URL) {
+            guard let parent = findNode(at: folder), let outline else { return }
+            let child = parent.children?.first { $0.url.resolvingSymlinksInPath() == url.resolvingSymlinksInPath() }
+                ?? FileNode(url: url, isDirectory: false)
+            var children = parent.children ?? []
+            if !children.contains(where: { $0 === child }) { children.append(child) }
+            parent.children = children.sorted {
+                if $0.isDirectory != $1.isDirectory { return $0.isDirectory }
+                return $0.name.localizedStandardCompare($1.name) == .orderedAscending
+            }
+            parent.expanded = true
+            outline.reloadItem(parent, reloadChildren: true)
+            outline.expandItem(parent)
+            let row = outline.row(forItem: child)
+            guard row >= 0 else { return }
+            outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            outline.scrollRowToVisible(row)
+            deferredReloads.insert(folder)
+            // SwiftUI termina de insertar la pestaña antes de entregar el foco al
+            // editor de nombres de AppKit; hacerlo durante ese layout lo cancela.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                guard let self, self.controller.selectedDocument?.url.standardizedFileURL == url.standardizedFileURL,
+                      let current = self.findNode(at: folder)?.children?.first(where: {
+                          $0.url.standardizedFileURL.path == url.standardizedFileURL.path
+                      }) else { return }
+                let row = self.outline?.row(forItem: current) ?? -1
+                guard row >= 0 else { return }
+                self.outline?.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+                self.beginRename(current, selectStem: true)
+            }
+        }
+
         private func create(in node: FileNode, directory: Bool) {
-            guard !controller.isReadOnly else { return }
+            if !directory { createFileInline(in: node.url)
+                return }
+            guard controller.fileOperation == nil, !controller.isReadOnly else { return }
             let title = directory ? "Nueva carpeta" : "Nuevo archivo"
             guard let name = WorkspacePrompts.nameForNewItem(title, suggested: directory ? "Nueva carpeta" : "nuevo.txt") else { return }
             do {
@@ -414,26 +507,36 @@ struct FileTree: NSViewRepresentable {
 
         @objc private func renameAction(_ item: NSMenuItem) {
             guard let node = item.representedObject as? FileNode else { return }
-            beginRename(node)
+            if node.isDirectory { beginRename(node) }
+            else { controller.renameFile(node.url) }
         }
 
-        private func beginRename(_ node: FileNode) {
+        private func beginRename(_ node: FileNode, selectStem: Bool = false) {
             guard !controller.isReadOnly, canChange(node) else { return }
             guard let outline, outline.row(forItem: node) >= 0,
-                  let cell = outline.view(atColumn: 0, row: outline.row(forItem: node), makeIfNecessary: false)
+                  let cell = outline.view(atColumn: 0, row: outline.row(forItem: node), makeIfNecessary: true)
                     as? FileTreeCell,
                   let field = cell.textField else { return }
             editingNode = node
             field.isEditable = true
             field.isSelectable = true
             field.delegate = self
-            outline.window?.makeFirstResponder(field)
             field.selectText(nil)
+            if selectStem, let editor = field.currentEditor() as? NSTextView {
+                editor.setSelectedRange(NSRange(location: 0, length: node.url.deletingPathExtension().lastPathComponent.utf16.count))
+            }
+        }
+
+        private func flushDeferredReloads() {
+            let folders = Array(deferredReloads)
+            deferredReloads.removeAll()
+            DispatchQueue.main.async { [weak self] in self?.refresh(folders) }
         }
 
         func controlTextDidEndEditing(_ notification: Notification) {
             guard let node = editingNode, let field = notification.object as? NSTextField else { return }
             editingNode = nil
+            defer { flushDeferredReloads() }
             field.isEditable = false
             field.delegate = nil
             let name = field.stringValue
@@ -447,6 +550,8 @@ struct FileTree: NSViewRepresentable {
             guard commandSelector == #selector(NSResponder.cancelOperation(_:)) else { return false }
             if let node = editingNode { control.stringValue = node.name }
             editingNode = nil
+            (control as? NSTextField)?.isEditable = false
+            flushDeferredReloads()
             control.window?.makeFirstResponder(outline)
             return true
         }
@@ -508,25 +613,36 @@ struct FileTree: NSViewRepresentable {
             trash(selectedNodes(clicked: node))
         }
 
+        private func disk<T: Sendable>(_ operation: @escaping @Sendable (ExplorerFileSystem) throws -> T) async throws -> T {
+            let roots = fileSystem.roots
+            return try await Task.detached(priority: .userInitiated) {
+                try operation(ExplorerFileSystem(roots: roots))
+            }.value
+        }
+
         private func trash(_ nodes: [FileNode]) {
-            guard !controller.isReadOnly, !nodes.isEmpty, nodes.allSatisfy(canChange) else { return }
+            guard !controller.isReadOnly, controller.fileOperation == nil,
+                  !nodes.isEmpty, nodes.allSatisfy(canChange) else { return }
             let urls = nodes.map(\.url)
             let affected = urls.flatMap { controller.docs.affected(by: $0) }
             let running = activeProjects(affectedBy: urls)
-            guard WorkspacePrompts.confirmTrash(nodes.map(\.name), openFiles: affected.count,
-                                                running: running.map(\.name)) else { return }
+            controller.fileOperation = FileOperationStatus(action: "Moviendo a la Papelera", total: urls.count)
             Task {
+                defer { controller.fileOperation = nil }
                 guard await prepareDocuments(at: urls, saving: true) else { return }
+                if !running.isEmpty, !WorkspacePrompts.confirmStopAffectedProcesses(running.map(\.name)) { return }
                 guard await stop(running) else { return }
-                let fs = fileSystem
                 var moved: [(URL, URL)] = []
                 for url in urls {
-                    do { moved.append((url, try fs.trash(url))) }
+                    controller.fileOperation?.filename = url.lastPathComponent
+                    do { moved.append((url, try await disk { try $0.trash(url) })) }
                     catch { report(error) }
+                    controller.fileOperation?.completed += 1
                 }
                 for document in affected where moved.contains(where: { ExplorerFileSystem.contains(document.url, in: $0.0) }) {
                     controller.docs.close(document)
                 }
+                for (original, _) in moved { controller.files.removeScript(original) }
                 refresh(moved.map { $0.0.deletingLastPathComponent() })
                 if !moved.isEmpty { registerUndoTrash(moved) }
             }
@@ -568,8 +684,10 @@ struct FileTree: NSViewRepresentable {
         }
 
         private func transfer(_ urls: [URL], to folder: URL, moving: Bool, external: Bool, renamed: String? = nil) {
-            guard !controller.isReadOnly else { return }
+            guard !controller.isReadOnly, controller.fileOperation == nil, !urls.isEmpty else { return }
+            controller.fileOperation = FileOperationStatus(action: moving ? "Moviendo" : "Copiando", total: urls.count)
             Task {
+                defer { controller.fileOperation = nil }
                 let running = moving ? activeProjects(affectedBy: urls) : []
                 if !running.isEmpty {
                     guard WorkspacePrompts.confirmStopAffectedProcesses(running.map(\.name)), await stop(running) else { return }
@@ -578,7 +696,13 @@ struct FileTree: NSViewRepresentable {
                 let fs = fileSystem
                 var refreshFolders = [folder]
                 var changes: [(URL?, URL, URL?)] = []
+                defer {
+                    refresh(refreshFolders)
+                    if !changes.isEmpty { registerUndoTransfer(changes) }
+                }
                 for url in urls {
+                    controller.fileOperation?.filename = url.lastPathComponent
+                    defer { controller.fileOperation?.completed += 1 }
                     do {
                         var name = renamed ?? url.lastPathComponent
                         var originalDestination = try fs.destination(name: name, in: folder)
@@ -601,38 +725,49 @@ struct FileTree: NSViewRepresentable {
                                           await stop(destinationProcesses) else { return }
                                 }
                                 let open = controller.docs.affected(by: originalDestination)
-                                replaced = try fs.trash(originalDestination)
+                                let target = originalDestination
+                                replaced = try await disk { try $0.trash(target) }
                                 for document in open { controller.docs.close(document) }
                             }
                         }
                         let result: URL
                         do {
                             let sourceIsInternal = roots.contains { ExplorerFileSystem.contains(url, in: $0.url) }
-                            result = moving ? try fs.move(url, to: folder, name: name)
-                                : try fs.copy(url, to: folder, name: name, external: external && !sourceIsInternal)
+                            let targetName = name
+                            result = try await disk { system in
+                                moving ? try system.move(url, to: folder, name: targetName)
+                                    : try system.copy(url, to: folder, name: targetName, external: external && !sourceIsInternal)
+                            }
                         } catch {
                             if let replaced, !FileManager.default.fileExists(atPath: originalDestination.path) {
-                                try? FileManager.default.moveItem(at: replaced, to: originalDestination)
+                                let target = originalDestination
+                                try? await disk { _ in try FileManager.default.moveItem(at: replaced, to: target) }
                             }
                             throw error
                         }
                         if moving {
                             controller.docs.relocate(from: url, to: result)
+                            controller.connections.relocateScript(from: url, to: result)
+                            controller.files.relocateScripts(from: url, to: result)
                             refreshFolders.append(url.deletingLastPathComponent())
                         }
                         changes.append((moving ? url : nil, result, replaced))
                         pendingSelectionURL = result
                     } catch { report(error) }
                 }
-                refresh(refreshFolders)
-                if !changes.isEmpty { registerUndoTransfer(changes) }
             }
         }
 
         private func registerUndoTransfer(_ changes: [(URL?, URL, URL?)]) {
             outline?.undoManager?.registerUndo(withTarget: self) { coordinator in
+                guard coordinator.controller.fileOperation == nil else { return }
+                coordinator.controller.fileOperation = FileOperationStatus(action: "Deshaciendo", total: changes.count)
+                Task {
+                defer { coordinator.controller.fileOperation = nil }
                 var folders: [URL] = []
                 for (source, destination, replaced) in changes.reversed() {
+                    coordinator.controller.fileOperation?.filename = destination.lastPathComponent
+                    defer { coordinator.controller.fileOperation?.completed += 1 }
                     do {
                         guard FileManager.default.fileExists(atPath: destination.path) else {
                             throw ExplorerFileError.missingSource
@@ -641,39 +776,50 @@ struct FileTree: NSViewRepresentable {
                             guard !FileManager.default.fileExists(atPath: source.path) else {
                                 throw ExplorerFileError.alreadyExists
                             }
-                            try FileManager.default.moveItem(at: destination, to: source)
+                            try await coordinator.disk { _ in try FileManager.default.moveItem(at: destination, to: source) }
                             coordinator.controller.docs.relocate(from: destination, to: source)
+                            coordinator.controller.connections.relocateScript(from: destination, to: source)
+                            coordinator.controller.files.relocateScripts(from: destination, to: source)
                             folders.append(source.deletingLastPathComponent())
                         } else {
                             let open = coordinator.controller.docs.affected(by: destination)
                             guard !open.contains(where: { $0.isDirty || $0.sqlExecution.isRunning }) else {
                                 throw ExplorerFileError.unsavedChanges
                             }
-                            _ = try coordinator.fileSystem.trash(destination)
+                            _ = try await coordinator.disk { try $0.trash(destination) }
                             for document in open { coordinator.controller.docs.close(document) }
                         }
                         if let replaced {
-                            try FileManager.default.moveItem(at: replaced, to: destination)
+                            try await coordinator.disk { _ in try FileManager.default.moveItem(at: replaced, to: destination) }
                         }
                         folders.append(destination.deletingLastPathComponent())
                     } catch { coordinator.report(error) }
                 }
                 coordinator.refresh(folders)
+                }
             }
             outline?.undoManager?.setActionName("Mover archivos")
         }
 
         private func registerUndoTrash(_ moved: [(URL, URL)]) {
             outline?.undoManager?.registerUndo(withTarget: self) { coordinator in
+                guard coordinator.controller.fileOperation == nil else { return }
+                coordinator.controller.fileOperation = FileOperationStatus(action: "Restaurando", total: moved.count)
+                Task {
+                defer { coordinator.controller.fileOperation = nil }
                 for (original, trash) in moved {
+                    coordinator.controller.fileOperation?.filename = original.lastPathComponent
+                    defer { coordinator.controller.fileOperation?.completed += 1 }
                     do {
                         guard !FileManager.default.fileExists(atPath: original.path) else {
                             throw ExplorerFileError.alreadyExists
                         }
-                        try FileManager.default.moveItem(at: trash, to: original)
+                        try await coordinator.disk { _ in try FileManager.default.moveItem(at: trash, to: original) }
+                        coordinator.controller.files.remember(original)
                     } catch { coordinator.report(error) }
                 }
                 coordinator.refresh(moved.map { $0.0.deletingLastPathComponent() })
+                }
             }
             outline?.undoManager?.setActionName("Mover a la Papelera")
         }
@@ -716,9 +862,10 @@ struct FileTree: NSViewRepresentable {
 
         func outlineView(_ outlineView: NSOutlineView, validateDrop info: NSDraggingInfo,
                          proposedItem item: Any?, proposedChildIndex index: Int) -> NSDragOperation {
-            guard !controller.isReadOnly, let node = dropFolder(for: item),
-                  (info.draggingPasteboard.readObjects(forClasses: [NSURL.self],
-                                                       options: [.urlReadingFileURLsOnly: true]) as? [URL])?.isEmpty == false,
+            guard !controller.isReadOnly, controller.fileOperation == nil, let node = dropFolder(for: item),
+                  let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self],
+                                                                 options: [.urlReadingFileURLsOnly: true]) as? [URL],
+                  !urls.isEmpty, !urls.contains(where: { ExplorerFileSystem.contains(node.url, in: $0) }),
                   (try? fileSystem.checkedFolder(node.url)) != nil else { return [] }
             outlineView.setDropItem(node, dropChildIndex: NSOutlineViewDropOnItemIndex)
             if hoveredDropURL != node.url {
@@ -736,7 +883,7 @@ struct FileTree: NSViewRepresentable {
         func outlineView(_ outlineView: NSOutlineView, acceptDrop info: NSDraggingInfo,
                          item: Any?, childIndex index: Int) -> Bool {
             hoveredDropURL = nil
-            guard let node = dropFolder(for: item),
+            guard !controller.isReadOnly, controller.fileOperation == nil, let node = dropFolder(for: item),
                   let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self],
                                                                  options: [.urlReadingFileURLsOnly: true]) as? [URL],
                   !urls.isEmpty else { return false }

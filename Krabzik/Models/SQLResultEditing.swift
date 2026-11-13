@@ -30,6 +30,27 @@ final class SQLResultDraft {
     var reason = "Cargando estructura…"
     var changes: [SQLCell: SQLCellValue] = [:]
     var inserted: [[SQLCellValue]] = []
+    private var insertedOriginals: [[SQLCellValue]] = []
+    var selectedCell: SQLCell?
+    var isEditingCell = false
+    var canDeleteSelected: Bool {
+        guard let cell = selectedCell else { return false }
+        return canEdit && !isEditingCell && (0..<rowCount).contains(cell.row) && !deleted.contains(cell.row)
+    }
+    var canResetSelected: Bool {
+        guard canEdit, !isEditingCell, let cell = selectedCell,
+              (0..<rowCount).contains(cell.row), !deleted.contains(cell.row) else { return false }
+        if cell.row < result.rows.count { return changes[cell] != nil }
+        let row = cell.row - result.rows.count
+        return inserted[row][cell.column] != insertedOriginals[row][cell.column]
+    }
+
+    func resetSelected() {
+        guard canResetSelected, let cell = selectedCell else { return }
+        if cell.row < result.rows.count { changes.removeValue(forKey: cell) }
+        else { inserted[cell.row - result.rows.count][cell.column] = insertedOriginals[cell.row - result.rows.count][cell.column] }
+    }
+
     var deleted: Set<Int> = []
     var showingReview = false
     var sending = false
@@ -120,17 +141,25 @@ final class SQLResultDraft {
             if let row { return value(row: row, column: index) }
             return metadata?.canDefault == true ? .serverDefault : .text("")
         })
+        insertedOriginals.append(inserted[inserted.count - 1])
+        selectedCell = SQLCell(row: rowCount - 1, column: 0)
     }
 
     func deleteRow(_ row: Int) {
-        guard canEdit else { return }
-        if row >= result.rows.count { inserted.remove(at: row - result.rows.count) }
+        guard canEdit, (0..<rowCount).contains(row) else { return }
+        if row >= result.rows.count {
+            inserted.remove(at: row - result.rows.count)
+            insertedOriginals.remove(at: row - result.rows.count)
+            selectedCell = nil
+        }
         else if deleted.contains(row) { deleted.remove(row) }
         else { deleted.insert(row) }
     }
 
     func discard() { changes = [:]
     inserted = []
+    insertedOriginals = []
+    selectedCell = nil
     deleted = []
     error = nil }
 

@@ -3,6 +3,45 @@ import AppKit
 import XCTest
 
 final class SQLWorkspaceTests: XCTestCase {
+    @MainActor func testRepeatedQueryReusesTabAndReplacesData() {
+        let execution = SQLExecution()
+        var result = SQLResult(statement: 1, line: 1)
+        result.sql = "SELECT id FROM people"
+        result.connection = DatabaseConnection()
+        result.database = "qa"
+        XCTAssertTrue(execution.begin(result))
+        let id = execution.selectedResultID
+        XCTAssertEqual(execution.selectedResult?.isLoading, true)
+        result.columns = ["id"]
+        result.rows = [["1"]]
+        execution.receive(result)
+        XCTAssertEqual(execution.selectedResultID, id)
+        XCTAssertTrue(execution.begin(result))
+        result.rows = [["2"]]
+        execution.receive(result)
+        XCTAssertEqual(execution.results.count, 1)
+        XCTAssertEqual(execution.selectedResultID, id)
+        XCTAssertEqual(execution.selectedResult?.rows, [["2"]])
+        result.database = "other"
+        execution.receive(result)
+        XCTAssertEqual(execution.results.count, 2)
+        result.resultIndex = 1
+        execution.receive(result)
+        XCTAssertEqual(execution.results.count, 3)
+    }
+
+    @MainActor func testFailedQueryLeavesRetryableTabWithoutSpinner() {
+        let execution = SQLExecution()
+        XCTAssertEqual(execution.timeoutSeconds, 15)
+        var result = SQLResult(statement: 1, line: 1)
+        result.sql = "SELECT SLEEP(20)"
+        XCTAssertTrue(execution.begin(result))
+        execution.finish(error: "Timeout")
+        XCTAssertEqual(execution.selectedResult?.isLoading, false)
+        XCTAssertEqual(execution.selectedResult?.error, "Timeout")
+        XCTAssertEqual(execution.selectedResult?.sql, result.sql)
+    }
+
     func testCursorFindsWholeMultilineStatementAndIgnoresBlankLine() throws {
         let sql = "SELECT '🦀;';\n\nSELECT id,\n name\nFROM users;\nSELECT 3;"
         let range = (sql as NSString).range(of: "name")
@@ -67,6 +106,66 @@ final class SQLWorkspaceTests: XCTestCase {
         }
         XCTAssertNil(try SQLScript.atCursor(in: "SELECT 1", selection: NSRange(location: 99, length: 0)))
         XCTAssertThrowsError(try SQLScript.atCursor(in: "SELECT 'bad", selection: NSRange(location: 7, length: 0)))
+    }
+
+    func testPaginationRecognizesOuterLimitAndSkipsWrites() throws {
+        XCTAssertNil(SQLPagination("SELECT * FROM t LIMIT 9", page: 0))
+        XCTAssertNil(SQLPagination("UPDATE t SET x = 1", page: 0))
+        XCTAssertNil(SQLPagination("DELETE FROM t", page: 0))
+        XCTAssertNil(SQLPagination("SELECT * INTO OUTFILE 'x' FROM t", page: 0))
+        let page = try XCTUnwrap(SQLPagination("SELECT 'LIMIT 9', `limit` FROM (SELECT * FROM t LIMIT 2) q -- LIMIT 3", page: 2))
+        XCTAssertTrue(page.query.contains("LIMIT 101 OFFSET 200"))
+        XCTAssertNotNil(page.countQuery)
+        let cte = try XCTUnwrap(SQLPagination("WITH q AS (SELECT * FROM t LIMIT 8) SELECT * FROM q", page: 0))
+        XCTAssertTrue(cte.query.contains("LIMIT 101 OFFSET 0"))
+        let locked = try XCTUnwrap(SQLPagination("SELECT * FROM t FOR UPDATE", page: 0))
+        XCTAssertTrue(locked.query.contains("LIMIT 101 OFFSET 0\nFOR UPDATE"))
+        XCTAssertNil(locked.countQuery)
+    }
+
+    @MainActor func testPinnedResultSurvivesIdenticalQueryAndExplicitPagingKeepsPin() throws {
+        let execution = SQLExecution()
+        var result = SQLResult(statement: 1, line: 1)
+        result.sql = "SELECT * FROM t"
+        XCTAssertTrue(execution.begin(result))
+        result.rows = [["original"]]
+        execution.receive(result)
+        let pinned = try XCTUnwrap(execution.selectedResultID)
+        execution.pinned.insert(pinned)
+        XCTAssertTrue(execution.begin(result))
+        result.rows = [["new"]]
+        execution.receive(result)
+        XCTAssertEqual(execution.results.count, 2)
+        XCTAssertEqual(execution.results.first?.rows, [["original"]])
+        XCTAssertNotEqual(execution.selectedResultID, pinned)
+        execution.targetResultID = pinned
+        XCTAssertTrue(execution.begin(result))
+        result.page = SQLPage(index: 1, totalRows: 150, hasNext: false)
+        execution.receive(result)
+        XCTAssertEqual(execution.results.count, 2)
+        XCTAssertEqual(execution.selectedResultID, pinned)
+        XCTAssertTrue(execution.pinned.contains(pinned))
+    }
+
+    @MainActor func testResetOnlyChangesSelectedCommittedField() {
+        let (result, table) = fixture()
+        let draft = SQLResultDraft(result: result)
+        draft.configure(table)
+        draft.selectedCell = SQLCell(row: 0, column: 1)
+        XCTAssertFalse(draft.canResetSelected)
+        draft.set(.text("Changed"), row: 0, column: 1)
+        draft.set(.text("Other"), row: 1, column: 1)
+        draft.isEditingCell = true
+        XCTAssertFalse(draft.canResetSelected)
+        draft.isEditingCell = false
+        XCTAssertTrue(draft.canResetSelected)
+        draft.resetSelected()
+        XCTAssertEqual(draft.value(row: 0, column: 1), .text("Before"))
+        XCTAssertEqual(draft.value(row: 1, column: 1), .text("Other"))
+        XCTAssertFalse(draft.canResetSelected)
+        draft.sent = true
+        draft.selectedCell = SQLCell(row: 1, column: 1)
+        XCTAssertFalse(draft.canResetSelected)
     }
 
     @MainActor private func fixture() -> (SQLResult, SQLSchemaTable) {

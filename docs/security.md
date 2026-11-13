@@ -63,15 +63,17 @@ trae. Es un rediseño, no un ajuste: si alguna vez se decide, es un spec aparte.
 
 **Uso local firmado y preparación de distribución.** Actualizado el 2026-11-10.
 
-La app se compila e instala en la máquina del autor, con el flujo de `AGENTS.md`:
-`CODE_SIGN_IDENTITY = Apple Development` (certificado de desarrollo), `CODE_SIGN_STYLE = Manual`, todavía sin
-notarización.
+Las instalaciones locales Release usan `scripts/build.sh` con la misma identidad **Developer ID
+Application** y equipo que la distribución, y hardened runtime activo. La identidad puede configurarse
+con `BRAKET_SIGN_IDENTITY` y `BRAKET_SIGN_TEAM`. Si el certificado no está disponible, la compilación
+falla; no se sustituye por firma ad hoc. Esto permite que Keychain reconozca la app entre compilaciones.
+Una credencial autorizada para una antigua compilación ad hoc puede requerir una última autorización
+con «Permitir siempre» al pasar a la identidad estable. No se amplían las ACL del llavero ni se almacenan
+contraseñas fuera de él.
 
-**Este binario no está preparado para distribuirse a terceros.** En otra máquina Gatekeeper lo va a
-bloquear, y con razón: no hay Developer ID que responda por él ni notarización que diga que Apple lo
-revisó. Si alguna vez se quiere distribuir, el camino está escrito en la opción B de S6 (identidad y equipo
-por variables de entorno, `scripts/release_updates.py` con `notarytool` y `stapler`, verificación con
-`spctl -a -vvv`) y las credenciales de notarización van en el llavero, nunca en el repositorio.
+La compilación local no se notariza automáticamente. La distribución pública usa
+`scripts/release_updates.py` con Developer ID, `notarytool`, `stapler` y verificación con `spctl`.
+Las credenciales de notarización permanecen en el llavero, nunca en el repositorio.
 
 ## Revisión
 

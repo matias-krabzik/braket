@@ -68,6 +68,7 @@ actor MySQLClient {
     private var busy: Set<UUID> = []
     private var jobs: [UUID: UUID] = [:]
     private var cancelled: Set<UUID> = []
+    private var timedOut: Set<UUID> = []
     private var epoch = UUID()
 
     /// El grupo de eventos se crea la primera vez que se usa y vive hasta `shutdown()`:
@@ -193,7 +194,9 @@ actor MySQLClient {
     }
 
     func execute(_ text: String, startingLine: Int, configuration: DatabaseConnection, password: String,
-                 operation: UUID, onResult: @escaping @Sendable (SQLResult) async -> Void) async throws -> DatabaseSessionInfo {
+                 operation: UUID, timeoutSeconds: Int = 15, pageIndex: Int? = nil,
+                 onStatement: @escaping @Sendable (SQLResult) async throws -> Void = { _ in },
+                 onResult: @escaping @Sendable (SQLResult) async -> Void) async throws -> DatabaseSessionInfo {
         try Task.checkCancellation()
         let id = configuration.id
         guard busy.insert(id).inserted else { throw DatabaseFailure("La conexión está ocupada.") }
@@ -202,6 +205,7 @@ actor MySQLClient {
             busy.remove(id)
             jobs.removeValue(forKey: operation)
             cancelled.remove(operation)
+            timedOut.remove(operation)
         }
         var session = try await session(configuration, password: password)
         if cancelled.contains(operation) || Task.isCancelled {
@@ -215,39 +219,86 @@ actor MySQLClient {
             statementNumber += 1
             guard statementNumber <= 200 else { throw DatabaseFailure("Ejecutá como máximo 200 sentencias por vez.") }
             guard resultCount < 200 else { throw DatabaseFailure("Se alcanzó el límite de 200 resultados por ejecución.") }
-            let command = MySQLTextCommand(sql: statement.text, statement: statementNumber, line: statement.line,
+            var pending = SQLResult(statement: statementNumber, line: statement.line)
+            pending.sql = statement.text
+            pending.connection = configuration
+            pending.database = session.database
+            let pagination = pageIndex.flatMap {
+                SQLPagination(statement.text, page: $0, noBackslashEscapes: session.flags.contains(.SERVER_STATUS_NO_BACKSLASH_ESCAPES))
+            }
+            if let pagination { pending.page = SQLPage(index: pagination.index) }
+            try await onStatement(pending)
+            let timeout = Task {
+                do { try await Task.sleep(for: .seconds(max(1, min(timeoutSeconds, 3600)))) }
+                catch { return }
+                await self.expire(operation)
+            }
+            let command = MySQLTextCommand(sql: pagination?.query ?? statement.text, statement: statementNumber, line: statement.line,
                                            byteLimit: min(remainingBytes, 4_000_000), resultLimit: 200 - resultCount)
             do {
                 try await session.connection.send(command, logger: session.connection.logger).get()
                 let captured = try await session.connection.eventLoop.submit { (command.results, command.status) }.get()
+                if timedOut.contains(operation) { throw DatabaseFailure("La consulta superó el límite de \(timeoutSeconds) segundos.") }
                 if cancelled.contains(operation) { throw CancellationError() }
                 session.flags = captured.1
                 if let database = Self.useDatabase(in: statement.text) { session.database = database }
                 sessions[id] = session
-                for result in captured.0 {
+                var totalRows: Int?
+                if let pagination, let countSQL = pagination.countQuery,
+                   captured.0.count == 1, captured.0[0].rowCount > SQLPage.size || pagination.index > 0 {
+                    let count = MySQLTextCommand(sql: countSQL, statement: 0, line: 1)
+                    do {
+                        try await session.connection.send(count, logger: session.connection.logger).get()
+                        let value = try await session.connection.eventLoop.submit { count.results.first?.rows.first?.first }.get()
+                        totalRows = value.flatMap { $0 }.flatMap(Int.init)
+                    } catch {
+                        if timedOut.contains(operation) || cancelled.contains(operation) { throw error }
+                        // Algunos SELECT (por ejemplo, columnas duplicadas) no admiten una tabla derivada.
+                        let reusable = try await session.connection.eventLoop.submit { count.reusableAfterFailure }.get()
+                        if !reusable { throw error }
+                    }
+                }
+                timeout.cancel()
+                if timedOut.contains(operation) { throw DatabaseFailure("La consulta superó el límite de \(timeoutSeconds) segundos.") }
+                for (index, result) in captured.0.enumerated() {
                     resultCount += 1
                     remainingBytes -= result.rows.reduce(0) { $0 + $1.reduce(0) { $0 + 16 + ($1?.utf8.count ?? 0) } }
                     var contextual = result
+                    contextual.resultIndex = index
+                    contextual.sql = statement.text
+                    if let pagination {
+                        let hasNext = result.rowCount > SQLPage.size
+                        let knownTotal = totalRows ?? (!hasNext ? pagination.index * SQLPage.size + result.rowCount : nil)
+                        contextual.page = SQLPage(index: pagination.index, totalRows: knownTotal, hasNext: hasNext)
+                        contextual.rows = Array(result.rows.prefix(SQLPage.size))
+                        contextual.rowCount = contextual.rows.count
+                    }
                     contextual.connection = configuration
-                    contextual.database = session.database
+                    contextual.database = pending.database
                     await onResult(contextual)
                 }
             } catch {
+                timeout.cancel()
+                if timedOut.contains(operation) {
+                    throw DatabaseFailure("La consulta superó el límite de \(timeoutSeconds) segundos. Ajustá el timeout y reintentá.")
+                }
                 if cancelled.contains(operation) { throw CancellationError() }
                 let captured = try? await session.connection.eventLoop.submit {
                     (command.results, command.status, command.reusableAfterFailure)
                 }.get()
                 if let captured {
-                    for result in captured.0 { var contextual = result
+                    for (index, result) in captured.0.enumerated() { var contextual = result
+                    contextual.resultIndex = index
                     contextual.connection = configuration
-                    contextual.database = session.database
+                    contextual.database = pending.database
                     await onResult(contextual) }
                     if !captured.0.isEmpty {
                         session.flags = captured.1
                         sessions[id] = session
                     }
                 }
-                var failure = SQLResult(statement: statementNumber, line: statement.line)
+                var failure = pending
+                failure.resultIndex = captured?.0.count ?? 0
                 failure.error = "Línea \(statement.line): \(Self.message(error))"
                 await onResult(failure)
                 if captured?.2 != true { await disconnect(id) }
@@ -403,11 +454,19 @@ actor MySQLClient {
         }
     }
 
+    private func expire(_ operation: UUID) async {
+        guard jobs[operation] != nil, !Task.isCancelled else { return }
+        timedOut.insert(operation)
+        await cancel(operation)
+    }
+
     @discardableResult
     func cancel(_ operation: UUID) async -> CancelOutcome {
         guard let id = jobs[operation] else { return .killed }
         cancelled.insert(operation)
         guard let value = sessions.removeValue(forKey: id) else { return .killed }
+        // Liberar inmediatamente la espera local, incluso si el canal de control tarda.
+        value.connection.channel.close(promise: nil)
         // Cerrar el socket no interrumpe de forma fiable una consulta larga en el
         // servidor. Una segunda conexión corta termina solo esta sesión, que es de
         // la app. La contraseña se relee del llavero: la sesión no la guarda.

@@ -35,16 +35,28 @@ final class DocumentStore {
     /// Al mover una carpeta, las pestañas siguen al archivo y conservan el texto sin
     /// guardar. El editor nativo se recrea con la nueva URL en la siguiente renderización.
     func relocate(from source: URL, to destination: URL) {
-        let source = source.standardizedFileURL, destination = destination.standardizedFileURL
+        // The source no longer exists after a move. Resolve the surviving ancestor,
+        // then append its missing components so symlinked project roots still match.
+        func canonical(_ url: URL) -> URL {
+            var ancestor = url.standardizedFileURL
+            var missing: [String] = []
+            while !FileManager.default.fileExists(atPath: ancestor.path), ancestor.path != "/" {
+                missing.insert(ancestor.lastPathComponent, at: 0)
+                ancestor.deleteLastPathComponent()
+            }
+            return missing.reduce(ancestor.resolvingSymlinksInPath()) { $0.appendingPathComponent($1) }.standardizedFileURL
+        }
+        let source = canonical(source), destination = destination.standardizedFileURL
         documents = documents.map { document in
-            guard ExplorerFileSystem.contains(document.url, in: source) else { return document }
+            let current = canonical(document.url)
+            guard ExplorerFileSystem.contains(current, in: source) else { return document }
             document.releaseEditor()
-            let suffix = String(document.url.path.dropFirst(source.path.count))
+            let suffix = String(current.path.dropFirst(source.path.count))
             let newURL = URL(fileURLWithPath: destination.path + suffix).standardizedFileURL
             return EditorDocument(relocating: document, to: newURL)
         }
-        if let selectedID, ExplorerFileSystem.contains(selectedID, in: source) {
-            let suffix = String(selectedID.path.dropFirst(source.path.count))
+        if let selectedID, ExplorerFileSystem.contains(canonical(selectedID), in: source) {
+            let suffix = String(canonical(selectedID).path.dropFirst(source.path.count))
             self.selectedID = URL(fileURLWithPath: destination.path + suffix).standardizedFileURL
         }
     }
@@ -77,10 +89,35 @@ final class DocumentStore {
         selectedID = document.id
     }
 
+    func createDraft(name: String, text: String) throws -> EditorDocument {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("Braket-Drafts")
+            .appendingPathComponent(UUID().uuidString).appendingPathComponent(name)
+        let document = try EditorDocument(url: url, data: Data(text.utf8))
+        document.isDraft = true
+        document.isDirty = true
+        documents.append(document)
+        selectedID = document.id
+        return document
+    }
+
+    func saveDraft(_ document: EditorDocument, to url: URL) throws -> EditorDocument {
+        guard document.isDraft, !contains(url) else { throw DatabaseFailure("El archivo ya está abierto en otra pestaña.") }
+        let data = Data(document.text.utf8)
+        try data.write(to: url, options: .atomic)
+        let saved = EditorDocument(relocating: document, to: url)
+        saved.isDraft = false
+        saved.isDirty = false
+        saved.originalData = data
+        document.releaseEditor()
+        documents = documents.map { $0 === document ? saved : $0 }
+        if selectedID == document.id { selectedID = saved.id }
+        return saved
+    }
+
     /// Guarda el documento. Lanza si el archivo cambió en disco desde que se leyó.
     @discardableResult
     func save(_ document: EditorDocument) async throws -> Bool {
-        guard document.previewImage == nil else { return false }
+        guard !document.isDraft, document.previewImage == nil else { return false }
         guard !document.isSaving else { return false }
         document.isSaving = true
         defer { document.isSaving = false }
@@ -130,7 +167,7 @@ final class DocumentStore {
     /// la lectura es asíncrona y el proyecto puede cerrarse en el medio.
     func refresh(matching predicate: @escaping (URL) -> Bool,
                  stillValid: @MainActor @escaping () -> Bool = { true }) async {
-        for document in documents where predicate(document.url) {
+        for document in documents where !document.isDraft && predicate(document.url) {
             let url = document.url
             let data = try? await Task.detached(priority: .utility) {
                 try DocumentIO.isPreviewableImage(url) ? DocumentIO.preview(url) : DocumentIO.read(url)

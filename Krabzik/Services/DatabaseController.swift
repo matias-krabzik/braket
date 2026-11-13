@@ -68,11 +68,16 @@ final class DatabaseController {
         return true
     }
 
-    func execute(_ document: EditorDocument, connection: DatabaseConnection) {
+    func execute(_ document: EditorDocument, connection: DatabaseConnection,
+                 queryOverride: String? = nil, databaseOverride: String? = nil,
+                 pageIndex: Int = 0, targetResultID: UUID? = nil) {
         let state = state(connection.id), execution = document.sqlExecution
         guard !execution.isRunning, !state.busy, state.status != .connecting else { return }
         let query: (text: String, startingLine: Int)
-        do { query = try document.queryAtCursor(noBackslashEscapes: state.noBackslashEscapes) }
+        do {
+            query = try queryOverride.map { (text: $0, startingLine: 1) }
+                ?? document.queryAtCursor(noBackslashEscapes: state.noBackslashEscapes)
+        }
         catch { execution.error = MySQLClient.message(error)
         resultsVisible = true
         return }
@@ -84,10 +89,35 @@ final class DatabaseController {
         let retainedBytes = execution.results.reduce(0) { total, result in
             total + result.rows.reduce(0) { $0 + $1.reduce(0) { $0 + 16 + ($1?.utf8.count ?? 0) } }
         }
-        guard execution.results.count < 200, retainedBytes < 24_000_000 else {
+        let reusing = execution.results.contains {
+            !execution.pinned.contains($0.id) && $0.sql.trimmingCharacters(in: .whitespacesAndNewlines) == query.text
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                && $0.connection == connection
+        }
+        guard reusing || (execution.results.count < 200 && retainedBytes < 24_000_000) else {
             execution.error = "Cerrá algunas pestañas de resultados antes de ejecutar más consultas."
             return
         }
+        execution.targetResultID = targetResultID
+        let targetDatabase = databaseOverride ?? (state.status == .connected ? state.currentDatabase
+            : (schema.preference(connection).defaultDatabase.isEmpty ? connection.database : schema.preference(connection).defaultDatabase))
+        do {
+            var script = SQLScript(query.text, startingLine: query.startingLine)
+            if let statement = try script.next(noBackslashEscapes: state.noBackslashEscapes) {
+                var pending = SQLResult(statement: 1, line: statement.line)
+                pending.sql = statement.text
+                pending.connection = connection
+                pending.database = targetDatabase
+                if SQLPagination(statement.text, page: pageIndex, noBackslashEscapes: state.noBackslashEscapes) != nil {
+                    pending.page = SQLPage(index: pageIndex)
+                }
+                guard execution.begin(pending) else { execution.targetResultID = nil
+                return }
+            }
+        } catch { execution.error = MySQLClient.message(error)
+        return }
+        let timeoutSeconds = max(1, min(execution.timeoutSeconds, 3600))
+        execution.timeoutSeconds = timeoutSeconds
         let operation = UUID()
         execution.operationID = operation
         execution.error = nil
@@ -101,6 +131,7 @@ final class DatabaseController {
         resultsVisible = true
         execution.task = Task {
             defer {
+                execution.finish(error: execution.error)
                 execution.isRunning = false
                 execution.isCancelling = false
                 execution.task = nil
@@ -110,19 +141,23 @@ final class DatabaseController {
             do {
                 try Task.checkCancellation()
                 let password = try CredentialStore.read(for: connection)
-                if await client.info(connection.id) == nil {
+                if let databaseOverride, !databaseOverride.isEmpty {
+                    _ = try await client.useDatabase(databaseOverride, config: connection, password: password)
+                } else if await client.info(connection.id) == nil {
                     let preferred = schema.preference(connection).defaultDatabase
                     if !preferred.isEmpty {
                         _ = try await client.useDatabase(preferred, config: connection, password: password)
                     }
                 }
                 let info = try await client.execute(query.text, startingLine: query.startingLine, configuration: connection,
-                                                    password: password, operation: operation) { result in
-                    await MainActor.run {
-                        execution.results.append(result)
-                        execution.selectedResultID = result.id
-                    }
-                }
+                                                    password: password, operation: operation, timeoutSeconds: timeoutSeconds,
+                                                    pageIndex: pageIndex,
+                                                    onStatement: { pending in
+                    let accepted = await MainActor.run { execution.begin(pending) }
+                    if !accepted { throw CancellationError() }
+                }, onResult: { result in
+                    await MainActor.run { execution.receive(result) }
+                })
                 state.status = .connected
                 state.currentDatabase = info.database
                 state.inTransaction = info.inTransaction

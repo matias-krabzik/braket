@@ -19,6 +19,7 @@ struct WorkspaceModeRail: View {
             Image(systemName: icon).font(.system(size: Theme.zoom(15)))
                 .foregroundStyle(controller.database.browserShowsDatabases == databases ? Theme.accent : .secondary)
                 .frame(width: Theme.zoom(30), height: Theme.zoom(30))
+                .contentShape(Rectangle())
                 .background(controller.database.browserShowsDatabases == databases ? Theme.accent.opacity(0.12) : .clear,
                             in: RoundedRectangle(cornerRadius: 5))
         }.buttonStyle(.plain).help(label).accessibilityLabel(label)
@@ -62,7 +63,9 @@ struct DatabaseExplorer: View {
         let store = controller.database.schema
         let state = controller.database.state(connection.id)
         return VStack(alignment: .leading, spacing: 6) {
-            SidebarTree(nodes: nodes(connection), name: { $0.name }) { item in
+            SidebarTree(nodes: nodes(connection), name: { $0.name }, activate: { item in
+                if case .table(let table) = item { controller.openTableQuery(table, connection: connection) }
+            }) { item in
                 treeLabel(item, connection: connection)
             }
             if let snapshot = store.snapshot(connection) {

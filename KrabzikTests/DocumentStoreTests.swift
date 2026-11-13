@@ -20,6 +20,42 @@ final class DocumentStoreTests: XCTestCase {
         return url
     }
 
+    func testRelocationUpdatesTabOpenedThroughSymbolicDirectory() async throws {
+        let base = try directory()
+        let real = base.appendingPathComponent("real")
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+        let alias = base.appendingPathComponent("alias")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: real)
+        let source = try file("nuevo.txt", "", in: real)
+        let store = DocumentStore()
+        try await store.open(alias.appendingPathComponent("nuevo.txt"))
+        let destination = real.appendingPathComponent("renamed.txt")
+        try FileManager.default.moveItem(at: source, to: destination)
+        store.relocate(from: source, to: destination)
+        XCTAssertEqual(store.documents.count, 1)
+        XCTAssertEqual(store.selectedID, destination.standardizedFileURL)
+        XCTAssertEqual(store.selected?.url, destination.standardizedFileURL)
+    }
+
+    func testSQLDraftStaysInMemoryUntilSavedAndPreservesResults() throws {
+        let store = DocumentStore()
+        let draft = try store.createDraft(name: "customers.sql", text: "SELECT * FROM customers;")
+        XCTAssertTrue(draft.isDraft)
+        XCTAssertTrue(draft.isDirty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: draft.url.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: draft.url.deletingLastPathComponent().path))
+        draft.draftConnectionID = UUID()
+        let target = try directory().appendingPathComponent("saved.sql")
+        let saved = try store.saveDraft(draft, to: target)
+        XCTAssertEqual(try String(contentsOf: target, encoding: .utf8), draft.text)
+        XCTAssertFalse(saved.isDraft)
+        XCTAssertFalse(saved.isDirty)
+        XCTAssertTrue(saved.sqlExecution === draft.sqlExecution)
+        XCTAssertEqual(saved.draftConnectionID, draft.draftConnectionID)
+        XCTAssertEqual(store.selectedID, target)
+        XCTAssertEqual(store.documents.count, 1)
+    }
+
     func testOpeningTheSameFileTwiceDoesNotDuplicateTheTab() async throws {
         let base = try directory()
         let url = try file("a.sql", "SELECT 1;\n", in: base)

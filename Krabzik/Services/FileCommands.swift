@@ -1,5 +1,12 @@
 import Foundation
 
+struct FileOperationStatus {
+    var action: String
+    var filename = ""
+    var completed = 0
+    var total: Int
+}
+
 /// Lo que el usuario le pide al editor sobre un archivo: abrirlo, crearlo, guardarlo,
 /// cerrarlo, recargarlo, y la lista de scripts del proyecto.
 ///
@@ -14,8 +21,13 @@ import Foundation
 final class FileCommands {
     private let session: WorkspaceSession
     private let docs: DocumentStore
+    private let defaults: UserDefaults
+    private static let scriptsDirectoriesKey = "sql.projectScriptsDirectories.v1"
+    var requestNewFile: ((URL?) -> Void)?
+    var didSaveDraft: ((EditorDocument) -> Void)?
 
-    init(session: WorkspaceSession, docs: DocumentStore) {
+    init(session: WorkspaceSession, docs: DocumentStore, defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         self.session = session
         self.docs = docs
     }
@@ -47,7 +59,7 @@ final class FileCommands {
     }
 
     /// Agrega el script a la lista del proyecto, si `ScriptLibrary` dice que corresponde.
-    private func remember(_ url: URL) {
+    func remember(_ url: URL) {
         guard let workspace = session.workspace, let workspaceURL = session.url,
               let updated = ScriptLibrary.remembering(url, in: workspace, at: workspaceURL) else { return }
         session.write(updated)
@@ -67,24 +79,93 @@ final class FileCommands {
     }
 
     func create(in directory: URL? = nil) {
-        guard !session.isReadOnly, let workspaceURL = session.url else { return }
-        let suggested = directory
-            ?? docs.selected?.url.deletingLastPathComponent()
-            ?? session.mountedProjects.first?.directory(relativeTo: workspaceURL)
-        guard let url = session.dialogs.createFile("nuevo.sql", suggested) else { return }
-        let roots = session.mountedProjects.map { $0.directory(relativeTo: workspaceURL) }
-        let system = ExplorerFileSystem(roots: roots + [url.deletingLastPathComponent()])
+        guard !session.isReadOnly, session.url != nil else { return }
+        requestNewFile?(directory)
+    }
+
+    func createTableQuery(_ table: SQLSchemaTable) async -> EditorDocument? {
+        guard !session.isReadOnly, session.url != nil else { return nil }
         do {
-            let target = try system.create(name: url.lastPathComponent, in: url.deletingLastPathComponent(), directory: false)
-            remember(target)
+            let suggested = table.name + ".sql"
+            let name = ExplorerFileSystem.validName(suggested) ? suggested : "consulta.sql"
+            return try docs.createDraft(name: name, text: "SELECT * FROM \(table.qualified);\n")
+        } catch {
+            session.errors.report(error)
+            return nil
+        }
+    }
+
+    func relocateScripts(from source: URL, to destination: URL) {
+        guard var workspace = session.workspace, let workspaceURL = session.url else { return }
+        let base = workspaceURL.deletingLastPathComponent().path + "/"
+        var changed = false
+        workspace.scripts = workspace.scripts.map { path in
+            guard let url = scriptURL(path), ExplorerFileSystem.contains(url, in: source) else { return path }
+            let suffix = String(url.path.dropFirst(source.standardizedFileURL.path.count))
+            let target = destination.standardizedFileURL.path + suffix
+            changed = true
+            return target.hasPrefix(base) ? String(target.dropFirst(base.count)) : target
+        }
+        if changed { session.write(workspace) }
+    }
+
+    /// Renombra sin descartar el buffer de una pestaña ni sobrescribir otro archivo.
+    func rename(_ url: URL) -> URL? {
+        guard !session.isReadOnly, let workspaceURL = session.url,
+              var workspace = session.workspace else { return nil }
+        let url = url.standardizedFileURL
+        guard let name = WorkspacePrompts.nameForNewItem("Renombrar archivo", suggested: url.lastPathComponent, action: "Renombrar"),
+              name != url.lastPathComponent else { return nil }
+        var roots = session.mountedProjects.map { $0.directory(relativeTo: workspaceURL) }
+        if !roots.contains(where: { ExplorerFileSystem.contains(url, in: $0) }),
+           standaloneScripts.contains(url) || docs.documents.contains(where: { $0.url.standardizedFileURL == url }) {
+            roots.append(url.deletingLastPathComponent())
+        }
+        do {
+            let result = try ExplorerFileSystem(roots: roots).move(url, to: url.deletingLastPathComponent(), name: name)
+            docs.relocate(from: url, to: result)
+            let base = workspaceURL.deletingLastPathComponent().path + "/"
+            workspace.scripts = workspace.scripts.map { path in
+                guard scriptURL(path)?.standardizedFileURL == url else { return path }
+                return result.path.hasPrefix(base) ? String(result.path.dropFirst(base.count)) : result.path
+            }
+            session.write(workspace)
             session.touch()
-            open(target)
-        } catch { session.errors.report(error) }
+            return result
+        } catch {
+            session.errors.report(error)
+            return nil
+        }
+    }
+
+    private func scriptsDirectory() -> URL? {
+        guard !session.isReadOnly, let workspaceURL = session.url else { return nil }
+        let key = workspaceURL.standardizedFileURL.path
+        var directories = defaults.dictionary(forKey: Self.scriptsDirectoriesKey) as? [String: String] ?? [:]
+        if let path = directories[key] {
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue {
+                return URL(fileURLWithPath: path, isDirectory: true)
+            }
+        }
+        guard let directory = session.dialogs.chooseScriptsDirectory(workspaceURL.deletingLastPathComponent()) else { return nil }
+        directories[key] = directory.standardizedFileURL.path
+        defaults.set(directories, forKey: Self.scriptsDirectoriesKey)
+        return directory
     }
 
     @discardableResult
     func save(_ document: EditorDocument) async -> Bool {
         do {
+            if document.isDraft {
+                guard let directory = scriptsDirectory(),
+                      let url = session.dialogs.saveCopy(document.url.lastPathComponent, directory) else { return false }
+                let saved = try docs.saveDraft(document, to: url)
+                didSaveDraft?(saved)
+                remember(url)
+                session.touch()
+                return true
+            }
             return try await docs.save(document)
         } catch {
             session.errors.report(error)
@@ -120,11 +201,12 @@ final class FileCommands {
         }
         guard document.sqlExecution.drafts.values.allSatisfy({ !$0.sending && $0.confirmDiscard() }) else { return false }
         guard await confirmSave(document) else { return false }
-        docs.close(document)
+        docs.close(docs.documents.first { $0.sqlExecution === document.sqlExecution } ?? document)
         return true
     }
 
     func reload(_ document: EditorDocument) {
+        guard !document.isDraft else { return }
         if document.isDirty, !session.dialogs.confirmDiscardChanges(document.url.lastPathComponent) {
             return
         }

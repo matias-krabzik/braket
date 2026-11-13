@@ -28,6 +28,9 @@ final class WorkspaceController {
     var openWorkspaceModels: [URL: Workspace] = [:]
     @ObservationIgnored var workspaceStates: [URL: SavedWorkspaceState] = [:]
     var selectedProjectID: UUID?
+    var newFileRequest: UUID?
+    var newFileDirectory: URL?
+    var fileOperation: FileOperationStatus?
     var sidebarVisible = true
     var processesVisible = true
     var commandProject: CodeProject?
@@ -97,8 +100,18 @@ final class WorkspaceController {
         session = WorkspaceSession(trustStore: trust, errors: errors)
         projects = ProjectLibrary(session: session, runner: runner)
         connections = ConnectionStore(session: session, database: database, defaults: defaults)
-        files = FileCommands(session: session, docs: docs)
+        files = FileCommands(session: session, docs: docs, defaults: defaults)
+        files.didSaveDraft = { [connections] document in
+            connections.persistDraftSelection(document)
+        }
         bridge = AgentBridge(session: session, agent: agent, docs: docs, files: files)
+        files.requestNewFile = { [weak self] directory in
+            guard let self, self.fileOperation == nil else { return }
+            self.database.browserShowsDatabases = false
+            self.sidebarVisible = true
+            self.newFileDirectory = directory
+            self.newFileRequest = UUID()
+        }
         // Lo que el usuario ya venía usando se considera confiable, una sola vez.
         trust.migrateIfNeeded(recentProjects: recents.urls)
     }
@@ -233,6 +246,22 @@ final class WorkspaceController {
             """)
     }
 
+    func openTableQuery(_ table: SQLSchemaTable, connection: DatabaseConnection) {
+        guard !isReadOnly else { return }
+        Task {
+            if let document = await files.createTableQuery(table) {
+                connections.select(connection.id, for: document)
+                workflowVisible = false
+                database.execute(document, connection: connection, databaseOverride: table.database)
+            }
+        }
+    }
+
+    func renameFile(_ url: URL) {
+        guard fileOperation == nil else { return }
+        if let destination = files.rename(url) { connections.relocateScript(from: url, to: destination) }
+    }
+
     func moveOpenWorkspace(_ url: URL, to target: URL) {
         guard !isSwitchingWorkspace, let source = openWorkspaceURLs.firstIndex(of: url),
               let destination = openWorkspaceURLs.firstIndex(of: target), source != destination else { return }
@@ -257,6 +286,7 @@ final class WorkspaceController {
     /// El orden en que se le pregunta al usuario antes de dejar lo que está abierto:
     /// Codex, los archivos sin guardar, los procesos, la base. Cualquiera cancela todo.
     func prepareToLeave() async -> Bool {
+        guard fileOperation == nil else { return false }
         if agent.isRunning {
             guard session.dialogs.confirmStopAgent() else { return false }
             agent.shutdown()
@@ -275,6 +305,7 @@ final class WorkspaceController {
     /// Cerrar la app conserva proyectos y pestañas. Solo consulta al usuario si
     /// debe interrumpir una ejecución; guarda los cambios del editor antes de salir.
     func prepareToQuit() async -> Bool {
+        guard fileOperation == nil else { return false }
         for document in documents {
             guard document.sqlExecution.drafts.values.allSatisfy({ !$0.sending && $0.confirmDiscard() }) else { return false }
         }

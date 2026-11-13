@@ -341,6 +341,7 @@ struct SQLToolbar: View {
                     }.labelsHidden().frame(maxWidth: 190).disabled(!canExecute)
                 }
                 Spacer(minLength: 4)
+                SQLTimeoutControl(execution: document.sqlExecution)
                 if let connection {
                     let state = controller.database.state(connection.id)
                     Button(state.status == .connected ? "Desconectar" : "Conectar") {

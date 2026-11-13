@@ -120,7 +120,10 @@ struct DatabaseFailure: LocalizedError, Sendable {
 /// coinciden, `truncated` es `true`. Los topes están en `MySQLTextCommand` y no limitan
 /// la consulta, solo la memoria.
 struct SQLResult: Identifiable, Sendable {
-    let id = UUID()
+    var id = UUID()
+    var isLoading = false
+    var resultIndex = 0
+    var page: SQLPage?
     var statement: Int
     var line: Int
     var sql = ""
@@ -151,6 +154,58 @@ struct SQLResult: Identifiable, Sendable {
 /// `DatabaseController` al avanzar la ejecución y la lee la vista.
 @MainActor @Observable
 final class SQLExecution {
+    var timeoutSeconds = 15
+    private var activeResultID: UUID?
+    var pinned: Set<UUID> = []
+    var targetResultID: UUID?
+
+    private func matching(_ result: SQLResult) -> Int? {
+        results.firstIndex {
+            (!pinned.contains($0.id) || $0.id == targetResultID) && (targetResultID == nil || $0.id == targetResultID)
+                && $0.sql.trimmingCharacters(in: .whitespacesAndNewlines) == result.sql.trimmingCharacters(in: .whitespacesAndNewlines)
+                && $0.connection == result.connection && $0.database == result.database && $0.resultIndex == result.resultIndex
+        }
+    }
+
+    func begin(_ result: SQLResult) -> Bool {
+        let related = results.filter {
+            (!pinned.contains($0.id) || $0.id == targetResultID) && (targetResultID == nil || $0.id == targetResultID)
+                && $0.sql.trimmingCharacters(in: .whitespacesAndNewlines) == result.sql.trimmingCharacters(in: .whitespacesAndNewlines)
+                && $0.connection == result.connection && $0.database == result.database
+        }
+        for previous in related {
+            if let draft = drafts[previous.id], draft.sending || !draft.confirmDiscard() { return false }
+        }
+        var pending = result
+        pending.isLoading = true
+        receive(pending)
+        activeResultID = selectedResultID
+        return true
+    }
+
+    func receive(_ result: SQLResult) {
+        var updated = result
+        if let index = matching(result) {
+            updated.id = results[index].id
+            drafts.removeValue(forKey: updated.id)
+            results[index] = updated
+        } else {
+            updated.id = UUID()
+            results.append(updated)
+        }
+        selectedResultID = updated.id
+    }
+
+    func finish(error: String?) {
+        if let index = results.firstIndex(where: { $0.id == activeResultID && $0.isLoading }) {
+            results[index].isLoading = false
+            results[index].error = error
+            drafts.removeValue(forKey: results[index].id)
+        }
+        activeResultID = nil
+        targetResultID = nil
+    }
+
     var results: [SQLResult] = []
     var drafts: [UUID: SQLResultDraft] = [:]
     var hasPendingChanges: Bool { drafts.values.contains { $0.hasChanges } }

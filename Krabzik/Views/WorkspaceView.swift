@@ -15,7 +15,7 @@ struct WorkspaceView: View {
                 if controller.isReadOnly { readOnlyBanner }
                 HStack(spacing: 0) {
                     ProjectRail(controller: controller)
-                    WorkspaceModeRail(controller: controller)
+                    WorkspaceModeRail(controller: controller).zIndex(1)
                     WorkspaceVerticalSplit(showsBottom: showsSQLResults || (controller.processesVisible && !controller.workflowVisible),
                                            isResults: showsSQLResults) {
                         HSplitView {
@@ -25,6 +25,7 @@ struct WorkspaceView: View {
                                     else { WorkspaceSidebar(controller: controller, workspace: workspace, url: url).id(url) }
                                 }
                                 .frame(minWidth: 230, idealWidth: 270, maxWidth: 420)
+                                .clipped()
                                 .background(SidebarWidthPersistence())
                             }
                             editorArea.frame(minWidth: 420, maxWidth: .infinity, minHeight: 180, maxHeight: .infinity)
@@ -143,11 +144,15 @@ struct WorkspaceView: View {
                         ForEach(controller.documents) { document in
                             WorkspaceEditorTab(title: document.url.lastPathComponent,
                                                icon: Image(nsImage: FileIcons.file(document.url)),
-                                               tooltip: document.url.path,
+                                               tooltip: document.isDraft ? "Borrador SQL · sin guardar" : document.url.path,
                                                isDirty: document.isDirty,
                                                selected: !controller.workflowVisible && controller.selectedDocumentID == document.id,
                                                select: { controller.selectedDocumentID = document.id },
                                                close: { controller.closeDocument(document) })
+                                .contextMenu {
+                                    Button("Renombrar…") { controller.renameFile(document.url) }.disabled(document.isDraft)
+                                        .disabled(controller.isReadOnly)
+                                }
                         }
                         if controller.workflowTabOpen {
                             WorkspaceEditorTab(title: controller.workflows.selected?.name ?? "Automatización",
@@ -199,7 +204,8 @@ struct WorkspaceView: View {
         VStack(spacing: 0) {
             if let document = controller.selectedDocument {
                 HStack(spacing: 7) {
-                    Text(breadcrumb(document.url)).lineLimit(1).truncationMode(.middle)
+                    Text(document.isDraft ? "Borrador · " + document.url.lastPathComponent : breadcrumb(document.url)).lineLimit(1)
+                        .truncationMode(.middle)
                     Spacer()
                     if isMarkdown(document) {
                         markdownModeControls(document)

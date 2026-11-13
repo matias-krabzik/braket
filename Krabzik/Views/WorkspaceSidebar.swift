@@ -32,7 +32,7 @@ struct WorkspaceSidebar: View {
                     Menu {
                         Button("Agregar carpeta…", action: controller.projects.addFolders)
                         Button("Agregar archivo SQL…", action: controller.files.importScripts)
-                        Button("Nuevo archivo SQL…") { controller.files.create() }
+                        Button("Nuevo archivo") { controller.files.create() }
                     } label: { Image(systemName: "plus") }
                         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                         .help("Agregar archivos y carpetas").accessibilityLabel("Agregar archivos y carpetas")
@@ -43,6 +43,18 @@ struct WorkspaceSidebar: View {
             Divider()
             codeContent.frame(maxWidth: .infinity, maxHeight: .infinity)
             Divider()
+            if let operation = controller.fileOperation {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("\(operation.action) · \(operation.completed) de \(operation.total)")
+                        Text(operation.filename).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    }
+                    Spacer(minLength: 0)
+                }.font(.system(size: Theme.zoom(11))).padding(12)
+                    .accessibilityElement(children: .combine)
+                Divider()
+            }
             Button { controller.database.showingConnections = true } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "slider.horizontal.3")

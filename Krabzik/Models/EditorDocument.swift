@@ -18,6 +18,9 @@ final class EditorDocument: Identifiable {
 
     let id: URL
     var url: URL { id }
+    var focusEditorOnOpen = true
+    var isDraft = false
+    var draftConnectionID: UUID?
     var isDirty = false
     var isSaving = false
     var hasExternalChange = false
@@ -52,7 +55,7 @@ final class EditorDocument: Identifiable {
     @ObservationIgnored var originalData: Data
     @ObservationIgnored var editorStorage: AnyObject?
     @ObservationIgnored var selectedRange = NSRange(location: 0, length: 0)
-    let sqlExecution = SQLExecution()
+    let sqlExecution: SQLExecution
 
     var sqlToExecute: (text: String, startingLine: Int) {
         (try? queryAtCursor()) ?? ("", 1)
@@ -70,6 +73,7 @@ final class EditorDocument: Identifiable {
     var language: String { SyntaxLanguage.name(url) }
 
     init(url: URL, data: Data) throws {
+        self.sqlExecution = SQLExecution()
         guard data.count <= 5 * 1024 * 1024 else { throw WorkspaceError.largeFile }
         guard !data.contains(0), let text = String(data: data, encoding: .utf8) else { throw WorkspaceError.binaryFile }
         self.id = url.standardizedFileURL
@@ -78,6 +82,7 @@ final class EditorDocument: Identifiable {
     }
 
     init(url: URL, previewData: Data) throws {
+        self.sqlExecution = SQLExecution()
         guard let image = NSImage(data: previewData), image.isValid else { throw WorkspaceError.invalidImage }
         self.id = url.standardizedFileURL
         self.cachedText = ""
@@ -86,6 +91,9 @@ final class EditorDocument: Identifiable {
     }
 
     init(relocating document: EditorDocument, to url: URL) {
+        self.isDraft = document.isDraft
+        self.draftConnectionID = document.draftConnectionID
+        self.sqlExecution = document.sqlExecution
         self.id = url.standardizedFileURL
         self.cachedText = document.text
         self.originalData = document.originalData

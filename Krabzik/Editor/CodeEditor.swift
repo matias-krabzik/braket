@@ -278,7 +278,7 @@ private final class ObserverToken: @unchecked Sendable {
         if window != nil {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                self.window?.makeFirstResponder(self.textView)
+                if self.document?.focusEditorOnOpen != false { self.window?.makeFirstResponder(self.textView) }
                 self.scheduleHighlight()
             }
         }

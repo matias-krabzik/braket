@@ -30,7 +30,7 @@ struct KrabzikApp: App {
                 Button("Agregar subproyecto…", action: controller.projects.addFolders)
                     .keyboardShortcut("o", modifiers: [.command, .shift])
                     .disabled(controller.workspace == nil)
-                Button("Nuevo archivo…") { controller.files.create() }.keyboardShortcut("n").disabled(controller.workspace == nil)
+                Button("Nuevo archivo") { controller.files.create() }.keyboardShortcut("n").disabled(controller.workspace == nil)
             }
             CommandGroup(replacing: .saveItem) {
                 Button("Guardar") { if let document = controller.selectedDocument { Task { await controller.files.save(document) } } }

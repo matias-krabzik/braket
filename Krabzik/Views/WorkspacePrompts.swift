@@ -18,10 +18,10 @@ enum ExplorerConflictDecision {
 /// 4,3 horas colgada—. Ver docs/specs/C5-dividir-workspacecontroller.md.
 @MainActor
 enum WorkspacePrompts {
-    static func nameForNewItem(_ title: String, suggested: String) -> String? {
+    static func nameForNewItem(_ title: String, suggested: String, action: String = "Crear") -> String? {
         let alert = NSAlert()
         alert.messageText = title
-        alert.addButton(withTitle: "Crear")
+        alert.addButton(withTitle: action)
         alert.addButton(withTitle: "Cancelar")
         let field = NSTextField(string: suggested)
         field.frame = NSRect(x: 0, y: 0, width: 310, height: 24)
@@ -121,6 +121,19 @@ enum WorkspacePrompts {
         return panel.runModal() == .OK ? panel.url : nil
     }
 
+    static func chooseScriptsDirectory(in directory: URL) -> URL? {
+        let panel = NSOpenPanel()
+        panel.title = "Carpeta de scripts SQL"
+        panel.message = "Elegí una carpeta para guardar los scripts de este proyecto. Se recordará para las próximas consultas."
+        panel.directoryURL = directory
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Usar carpeta"
+        return panel.runModal() == .OK ? panel.url : nil
+    }
+
     static func saveCopy(named name: String, in directory: URL) -> URL? {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = name
@@ -199,6 +212,7 @@ struct WorkspaceDialogs {
     var chooseFolders: () -> [URL] = { [] }
     var chooseScripts: () -> [URL] = { [] }
     var createFile: (String, URL?) -> URL? = { _, _ in nil }
+    var chooseScriptsDirectory: (URL) -> URL? = { _ in nil }
     var saveCopy: (String, URL) -> URL? = { _, _ in nil }
     var confirmSave: (String) -> SaveDecision = { _ in .cancel }
     var confirmDiscardChanges: (String) -> Bool = { _ in false }
@@ -214,6 +228,7 @@ struct WorkspaceDialogs {
                          chooseFolders: WorkspacePrompts.chooseFolders,
                          chooseScripts: WorkspacePrompts.chooseScripts,
                          createFile: { WorkspacePrompts.createFile(named: $0, in: $1) },
+                         chooseScriptsDirectory: { WorkspacePrompts.chooseScriptsDirectory(in: $0) },
                          saveCopy: { WorkspacePrompts.saveCopy(named: $0, in: $1) },
                          confirmSave: WorkspacePrompts.confirmSave,
                          confirmDiscardChanges: WorkspacePrompts.confirmDiscardChanges,

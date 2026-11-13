@@ -90,8 +90,10 @@ struct SidebarTreeNode<Value>: Identifiable {
 struct SidebarTree<Value, Content: View>: View {
     let nodes: [SidebarTreeNode<Value>]
     let name: (Value) -> String
+    var activate: (Value) -> Void = { _ in }
     @ViewBuilder let content: (Value) -> Content
     @State private var expanded: Set<String> = []
+    @State private var selected: String?
 
     private struct Row: Identifiable {
         let node: SidebarTreeNode<Value>
@@ -109,40 +111,60 @@ struct SidebarTree<Value, Content: View>: View {
 
     var body: some View {
         LazyVStack(alignment: .leading, spacing: 0) {
-            ForEach(rows(nodes)) { row in
-                let open = expanded.contains(row.id)
-                let depth = CGFloat(row.ancestors.count)
-                HStack(spacing: 0) {
-                    Color.clear.frame(width: Theme.zoom(depth * SidebarTreeStyle.indent + SidebarTreeStyle.iconLeading))
-                    content(row.node.value)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(height: Theme.zoom(SidebarTreeStyle.rowHeight))
-                .background {
-                    Path(SidebarTreeStyle.guides(ancestors: row.ancestors,
-                                                 expanded: open && !row.node.children.isEmpty,
-                                                 height: SidebarTreeStyle.rowHeight))
-                        .scale(Theme.zoom(1), anchor: .topLeading)
-                        .stroke(.primary.opacity(0.19), style: StrokeStyle(lineWidth: 0.8, lineCap: .round, dash: [1, 3]))
-                }
-                .overlay(alignment: .leading) {
-                    if row.node.expandable || !row.node.children.isEmpty {
-                        SidebarDisclosure(name: name(row.node.value), expanded: open) {
-                            var transaction = Transaction(animation: nil)
-                            transaction.disablesAnimations = true
-                            withTransaction(transaction) {
-                                if open { expanded.remove(row.id) } else { expanded.insert(row.id) }
-                            }
-                        }
-                        .frame(width: Theme.zoom(16), height: Theme.zoom(18))
-                        .padding(.leading, Theme.zoom(depth * SidebarTreeStyle.indent + 8))
-                    }
-                }
-            }
+            ForEach(rows(nodes)) { row in rowView(row) }
         }
+        .clipped()
         .transaction { transaction in
             transaction.animation = nil
             transaction.disablesAnimations = true
+        }
+    }
+
+    private func rowView(_ row: Row) -> some View {
+        let open = expanded.contains(row.id)
+        let depth = CGFloat(row.ancestors.count)
+        return HStack(spacing: 0) {
+            Color.clear.frame(width: Theme.zoom(depth * SidebarTreeStyle.indent + SidebarTreeStyle.iconLeading))
+            content(row.node.value)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(height: Theme.zoom(SidebarTreeStyle.rowHeight))
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            selected = row.id
+            activate(row.node.value)
+        }
+        .onTapGesture { selected = row.id }
+        .accessibilityAddTraits(selected == row.id ? .isSelected : [])
+        .background(alignment: .leading) {
+            if selected == row.id {
+                RoundedRectangle(cornerRadius: 5).fill(.primary.opacity(0.14))
+                    .padding(.leading, Theme.zoom(depth * SidebarTreeStyle.indent + SidebarTreeStyle.iconLeading))
+                    .padding(.trailing, Theme.zoom(8)).padding(.vertical, Theme.zoom(2))
+                    .allowsHitTesting(false)
+            }
+        }
+        .background {
+            Path(SidebarTreeStyle.guides(ancestors: row.ancestors,
+                                         expanded: open && !row.node.children.isEmpty,
+                                         height: SidebarTreeStyle.rowHeight))
+                .scale(Theme.zoom(1), anchor: .topLeading)
+                .stroke(.primary.opacity(0.19), style: StrokeStyle(lineWidth: 0.8, lineCap: .round, dash: [1, 3]))
+                .allowsHitTesting(false)
+        }
+        .overlay(alignment: .leading) {
+            if row.node.expandable || !row.node.children.isEmpty {
+                SidebarDisclosure(name: name(row.node.value), expanded: open) {
+                    selected = row.id
+                    var transaction = Transaction(animation: nil)
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        if open { expanded.remove(row.id) } else { expanded.insert(row.id) }
+                    }
+                }
+                .frame(width: Theme.zoom(16), height: Theme.zoom(18))
+                .padding(.leading, Theme.zoom(depth * SidebarTreeStyle.indent + 8))
+            }
         }
     }
 }

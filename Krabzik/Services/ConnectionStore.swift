@@ -25,14 +25,31 @@ final class ConnectionStore {
     }
 
     /// Cada archivo conserva una selección independiente, compartida entre proyectos.
+    func relocateScript(from source: URL, to destination: URL) {
+        let old = source.standardizedFileURL.path
+        let new = destination.standardizedFileURL.path
+        if let selection = selections.removeValue(forKey: old) { selections[new] = selection }
+        defaults.set(selections, forKey: Self.selectionsKey)
+    }
+
+    func persistDraftSelection(_ document: EditorDocument) {
+        guard !document.isDraft, let id = document.draftConnectionID else { return }
+        selections[document.url.standardizedFileURL.path] = id.uuidString
+        document.draftConnectionID = nil
+        defaults.set(selections, forKey: Self.selectionsKey)
+    }
+
     func selected(for document: EditorDocument) -> DatabaseConnection? {
-        guard let id = selections[document.url.standardizedFileURL.path] else { return nil }
+        guard let id = document.draftConnectionID?.uuidString ?? selections[document.url.standardizedFileURL.path] else { return nil }
         return profiles.first { $0.id.uuidString == id }
     }
 
     func select(_ id: UUID?, for document: EditorDocument) {
         guard !document.sqlExecution.isRunning,
               id == nil || profiles.contains(where: { $0.id == id }) else { return }
+        if document.isDraft { document.draftConnectionID = id
+            return }
+        document.draftConnectionID = nil
         selections[document.url.standardizedFileURL.path] = id?.uuidString
         defaults.set(selections, forKey: Self.selectionsKey)
     }

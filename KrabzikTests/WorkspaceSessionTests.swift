@@ -184,6 +184,48 @@ final class WorkspaceSessionTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("marcador").path))
     }
 
+    func testDraftFolderIsRequestedOnceAndRememberedAcrossFileCommands() async throws {
+        let (directory, defaults) = try environment()
+        let session = session(defaults), docs = DocumentStore()
+        session.open(Workspace(name: "p"), at: directory.appendingPathComponent("p.kzk"), trust: .trusted)
+        var requests = 0, saves = 0
+        session.dialogs.chooseScriptsDirectory = { _ in requests += 1
+            return directory }
+        session.dialogs.saveCopy = { name, folder in
+            XCTAssertEqual(folder.standardizedFileURL.path, directory.standardizedFileURL.path)
+            saves += 1
+            return folder.appendingPathComponent(name)
+        }
+        for name in ["first.sql", "second.sql"] {
+            let files = FileCommands(session: session, docs: docs, defaults: defaults)
+            let draft = try docs.createDraft(name: name, text: "SELECT 1;")
+            let saved = await files.save(draft)
+            XCTAssertTrue(saved)
+        }
+        XCTAssertEqual(requests, 1)
+        XCTAssertEqual(saves, 2)
+        session.open(Workspace(name: "other"), at: directory.appendingPathComponent("other.kzk"), trust: .trusted)
+        session.dialogs.chooseScriptsDirectory = { _ in requests += 1
+            return nil }
+        let draft = try docs.createDraft(name: "cancelled.sql", text: "SELECT 2;")
+        let saved = await FileCommands(session: session, docs: docs, defaults: defaults).save(draft)
+        XCTAssertFalse(saved)
+        XCTAssertTrue(draft.isDraft)
+        XCTAssertEqual(requests, 2)
+        XCTAssertEqual(saves, 2)
+    }
+
+    func testMovingScriptFolderUpdatesReferencesWithoutChangingOtherScripts() throws {
+        let (directory, defaults) = try environment()
+        let session = session(defaults), docs = DocumentStore()
+        var project = Workspace(name: "p")
+        project.scripts = ["queries/one.sql", "queries/nested/two.sql", "other.sql"]
+        session.open(project, at: directory.appendingPathComponent("p.kzk"), trust: .trusted)
+        let files = FileCommands(session: session, docs: docs, defaults: defaults)
+        files.relocateScripts(from: directory.appendingPathComponent("queries"), to: directory.appendingPathComponent("sql"))
+        XCTAssertEqual(session.workspace?.scripts, ["sql/one.sql", "sql/nested/two.sql", "other.sql"])
+    }
+
     // MARK: - Cerrar una pestaña (FileCommands)
 
     func testClosingATabWithARunningQueryAsksBeforeCancelling() async throws {

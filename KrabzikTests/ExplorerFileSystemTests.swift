@@ -86,6 +86,7 @@ import XCTest
         docs.relocate(from: folder, to: moved)
         XCTAssertEqual(docs.selected?.url, moved.appendingPathComponent("main.dart"))
         XCTAssertEqual(docs.selected?.text, "unsaved")
+        XCTAssertTrue(docs.selected?.sqlExecution === document.sqlExecution)
         XCTAssertTrue(try XCTUnwrap(docs.selected).isDirty)
         let saved = try await docs.save(try XCTUnwrap(docs.selected))
         XCTAssertTrue(saved)

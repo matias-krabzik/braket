@@ -180,6 +180,57 @@ final class SQLSchemaLoadingTests: XCTestCase {
         return config
     }
 
+    private actor QueryResults {
+        var values: [SQLResult] = []
+        func append(_ value: SQLResult) { values.append(value) }
+    }
+
+    func testQueryPaginationCountsNavigatesAndPreservesExplicitLimit() async throws {
+        let config = try Self.configuration(), client = MySQLClient()
+        let sql = "WITH RECURSIVE numbers AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM numbers WHERE n < 205) "
+            + "SELECT n FROM numbers ORDER BY n"
+        let first = QueryResults(), second = QueryResults(), explicit = QueryResults()
+        do {
+            _ = try await client.execute(sql, startingLine: 1, configuration: config, password: "", operation: UUID(), pageIndex: 0) {
+                await first.append($0)
+            }
+            _ = try await client.execute(sql, startingLine: 1, configuration: config, password: "", operation: UUID(), pageIndex: 1) {
+                await second.append($0)
+            }
+            _ = try await client.execute(sql + " LIMIT 7", startingLine: 1, configuration: config,
+                                         password: "", operation: UUID(), pageIndex: 0) { await explicit.append($0) }
+            let a = await first.values.first, b = await second.values.first, c = await explicit.values.first
+            XCTAssertEqual(a?.rows.count, 100)
+            XCTAssertEqual(a?.page?.totalRows, 205)
+            XCTAssertEqual(a?.page?.count, 3)
+            XCTAssertEqual(a?.rows.first, ["1"])
+            XCTAssertEqual(b?.rows.first, ["101"])
+            XCTAssertEqual(b?.page?.index, 1)
+            XCTAssertEqual(b?.page?.hasNext, true)
+            XCTAssertEqual(c?.rows.count, 7)
+            XCTAssertNil(c?.page)
+        } catch { await client.shutdown()
+        throw error }
+        await client.shutdown()
+    }
+
+    func testQueryTimeoutAllowsRetryWithLongerLimit() async throws {
+        let config = try Self.configuration(), client = MySQLClient()
+        do {
+            let start = ContinuousClock.now
+            do {
+                _ = try await client.execute("SELECT SLEEP(2)", startingLine: 1, configuration: config,
+                                             password: "", operation: UUID(), timeoutSeconds: 1) { _ in }
+                XCTFail("Expected timeout")
+            } catch { XCTAssertTrue(MySQLClient.message(error).contains("límite de 1 segundos"), MySQLClient.message(error)) }
+            XCTAssertLessThan(start.duration(to: .now), .seconds(3))
+            _ = try await client.execute("SELECT SLEEP(2)", startingLine: 1, configuration: config,
+                                         password: "", operation: UUID(), timeoutSeconds: 5) { _ in }
+        } catch { await client.shutdown()
+        throw error }
+        await client.shutdown()
+    }
+
     func testMetadataTimeoutAndCancellationDoNotDisconnectSQLSession() async throws {
         let config = try Self.configuration(), client = MySQLClient()
         do {

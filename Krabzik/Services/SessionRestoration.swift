@@ -54,8 +54,9 @@ extension WorkspaceController {
 
     func captureCurrentWorkspaceState() -> SavedWorkspaceState? {
         guard let workspaceURL else { return nil }
-        return SavedWorkspaceState(workspaceURL: workspaceURL, openFiles: documents.map(\.url),
-                                   selectedFile: selectedDocumentID, selectedProjectID: selectedProjectID,
+        return SavedWorkspaceState(workspaceURL: workspaceURL, openFiles: documents.filter { !$0.isDraft }.map(\.url),
+                                   selectedFile: selectedDocument?.isDraft == true ? nil : selectedDocumentID,
+                                   selectedProjectID: selectedProjectID,
                                    sidebarVisible: sidebarVisible, processesVisible: processesVisible)
     }
 
