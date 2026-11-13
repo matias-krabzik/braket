@@ -123,6 +123,10 @@ struct SQLResult: Identifiable, Sendable {
     let id = UUID()
     var statement: Int
     var line: Int
+    var sql = ""
+    var connection: DatabaseConnection?
+    var database = ""
+    var origins: [SQLColumnOrigin] = []
     var columns: [String] = []
     var rows: [[String?]] = []
     var rowCount = 0
@@ -148,6 +152,15 @@ struct SQLResult: Identifiable, Sendable {
 @MainActor @Observable
 final class SQLExecution {
     var results: [SQLResult] = []
+    var drafts: [UUID: SQLResultDraft] = [:]
+    var hasPendingChanges: Bool { drafts.values.contains { $0.hasChanges } }
+
+    func draft(for result: SQLResult) -> SQLResultDraft {
+        if let draft = drafts[result.id] { return draft }
+        let draft = SQLResultDraft(result: result)
+        drafts[result.id] = draft
+        return draft
+    }
     var selectedResultID: UUID?
     var isRunning = false
     var isCancelling = false
@@ -175,6 +188,7 @@ final class DatabaseState {
     var status: Status = .disconnected
     var error: String?
     var currentDatabase = ""
+    var noBackslashEscapes = false
     var inTransaction = false
     var busy = false
 

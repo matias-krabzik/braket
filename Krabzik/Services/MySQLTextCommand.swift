@@ -115,13 +115,18 @@ final class MySQLTextCommand: MySQLCommand, @unchecked Sendable {
             phase = .columns(Int(count))
         case .columns(let count):
             // Read the two-byte collation ID directly (modern IDs may exceed 255).
-            for _ in 0..<4 { guard packet.payload.readSQLSlice() != nil else { throw MySQLError.protocolError } }
-            guard let name = packet.payload.readSQLString(),
+            guard packet.payload.readSQLSlice() != nil,
+                  let database = packet.payload.readSQLString(),
                   packet.payload.readSQLSlice() != nil,
+                  let table = packet.payload.readSQLString() else { throw MySQLError.protocolError }
+            guard let name = packet.payload.readSQLString(),
+                  let originalName = packet.payload.readSQLString(),
                   packet.payload.readSQLLength() != nil,
                   let charset = packet.payload.readInteger(endianness: .little, as: UInt16.self),
                   packet.payload.readInteger(endianness: .little, as: UInt32.self) != nil,
                   let type = packet.payload.readInteger(as: UInt8.self) else { throw MySQLError.protocolError }
+            current.origins.append(SQLColumnOrigin(database: database, table: table, column: originalName,
+                                                   binary: charset == Wire.binaryCharset && Wire.binaryFieldTypes.contains(type)))
             columnNames.append(name)
             binaryColumns.append(charset == Wire.binaryCharset && Wire.binaryFieldTypes.contains(type))
             if columnNames.count == count {
@@ -182,6 +187,7 @@ final class MySQLTextCommand: MySQLCommand, @unchecked Sendable {
             current.warnings = Int(ok.warningsCount ?? 0)
             status = ok.statusFlags
         }
+        current.sql = sql
         current.elapsed = Date().timeIntervalSince(started)
         results.append(current)
         if status.contains(.SERVER_MORE_RESULTS_EXISTS) {

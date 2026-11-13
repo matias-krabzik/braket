@@ -118,6 +118,7 @@ final class FileCommands {
             guard session.dialogs.confirmCancelQuery() else { return false }
             cancelQuery(document.sqlExecution)
         }
+        guard document.sqlExecution.drafts.values.allSatisfy({ !$0.sending && $0.confirmDiscard() }) else { return false }
         guard await confirmSave(document) else { return false }
         docs.close(document)
         return true
@@ -147,6 +148,9 @@ final class FileCommands {
     /// Resuelve todos los documentos con cambios sin guardar, de a uno. `false` en cuanto
     /// el usuario cancele: dejar un proyecto no puede perder lo que escribió.
     func resolveDirty() async -> Bool {
+        for document in docs.documents {
+            guard document.sqlExecution.drafts.values.allSatisfy({ !$0.sending && $0.confirmDiscard() }) else { return false }
+        }
         for document in docs.dirty {
             if !(await confirmSave(document)) { return false }
         }

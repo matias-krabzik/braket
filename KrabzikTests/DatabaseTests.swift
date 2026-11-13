@@ -99,7 +99,7 @@ final class DatabaseTests: XCTestCase {
         XCTAssertEqual(document.sqlToExecute.text, "SELECT 2;")
         XCTAssertEqual(document.sqlToExecute.startingLine, 3)
         document.selectedRange = NSRange(location: 0, length: 0)
-        XCTAssertEqual(document.sqlToExecute.text, text)
+        XCTAssertEqual(document.sqlToExecute.text, "")
     }
 
     func testLoopbackDetectionCoversAliasesAndRanges() {

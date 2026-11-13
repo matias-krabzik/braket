@@ -305,6 +305,16 @@ struct SQLToolbar: View {
                 Button { controller.database.showingConnections = true } label: {
                     Image(systemName: "slider.horizontal.3")
                 }.help("Administrar conexiones globales").accessibilityLabel("Administrar conexiones")
+                if let connection {
+                    let state = controller.database.state(connection.id)
+                    let names = controller.database.schema.preference(connection).visible
+                    Picker("Base de datos", selection: Binding(get: { state.currentDatabase }, set: {
+                        controller.database.selectDatabase($0, connection: connection)
+                    })) {
+                        Text(state.currentDatabase.isEmpty ? "Base…" : state.currentDatabase).tag(state.currentDatabase)
+                        ForEach(names.filter { $0 != state.currentDatabase }, id: \.self) { Text($0).tag($0) }
+                    }.labelsHidden().frame(maxWidth: 190).disabled(!canExecute)
+                }
                 Spacer(minLength: 4)
                 if let connection {
                     let state = controller.database.state(connection.id)
@@ -319,7 +329,7 @@ struct SQLToolbar: View {
                     }.disabled(document.sqlExecution.isCancelling)
                 } else {
                     Button(action: controller.executeSQL) { Label("Ejecutar", systemImage: "play.fill") }
-                        .disabled(!canExecute).help("Ejecutar selección o script (⌘↩)")
+                        .disabled(!canExecute).help("Ejecutar selección o sentencia bajo el cursor (⌘↩)")
                         .accessibilityLabel("Ejecutar SQL")
                 }
             }
@@ -340,120 +350,5 @@ struct SQLToolbar: View {
         }
         .padding(.horizontal, 18).padding(.vertical, 10)
         .background(Theme.bar)
-    }
-}
-
-struct SQLResultsPanel: View {
-    @Bindable var execution: SQLExecution
-    let hide: () -> Void
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Text("Resultados").font(.system(size: Theme.zoom(11), weight: .medium))
-                if execution.isRunning { ProgressView().controlSize(.mini) }
-                if execution.results.count > 1 {
-                    Picker("Resultado", selection: $execution.selectedResultID) {
-                        ForEach(execution.results) { result in
-                            Text("\(result.statement) · línea \(result.line)").tag(Optional(result.id))
-                        }
-                    }.labelsHidden().fixedSize()
-                }
-                Spacer()
-                Text(execution.connectionName).font(.system(size: Theme.zoom(10))).foregroundStyle(.secondary).help(execution.destination)
-                Button(action: hide) { Image(systemName: "chevron.down").font(.system(size: Theme.zoom(10))) }.buttonStyle(.plain)
-                    .help("Ocultar resultados")
-            }.padding(.horizontal, 15).frame(height: 32).background(Theme.bar)
-            Rectangle().fill(Theme.border).frame(height: 1)
-            if let result = execution.selectedResult {
-                if !result.columns.isEmpty { SQLResultTable(result: result, theme: AppSettings.shared.theme) }
-                else {
-                    Text(result.error ?? "\(result.affectedRows) filas afectadas")
-                        .font(.system(size: Theme.zoom(12), design: .monospaced))
-                            .foregroundStyle(result.error == nil ? Color.secondary : .red.opacity(0.9))
-                        .textSelection(.enabled).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(16)
-                }
-                HStack {
-                    Text(result.error == nil ? result.summary : "Línea \(result.line)").lineLimit(1)
-                    Spacer()
-                    if let note = execution.cancelNote {
-                        Text(note).foregroundStyle(.orange).lineLimit(1).help(note)
-                    }
-                    if let error = execution.error { Text(error).foregroundStyle(.red.opacity(0.9)).lineLimit(1).help(error) }
-                }.font(.system(size: Theme.zoom(10))).foregroundStyle(.secondary).padding(.horizontal, 15).frame(height: 25)
-            } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(execution.error ?? (execution.isCancelling ? "Cancelando…" : execution.isRunning ? "Ejecutando…" : ""))
-                        .foregroundStyle(execution.error == nil ? Color.secondary : .red)
-                    if let note = execution.cancelNote { Text(note).foregroundStyle(.orange) }
-                }
-                .font(.system(size: Theme.zoom(12)))
-                .textSelection(.enabled).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(16)
-            }
-        }.background(Theme.background)
-    }
-}
-
-private struct SQLResultTable: NSViewRepresentable {
-    let result: SQLResult
-    let theme: AppTheme
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSScrollView()
-        scroll.hasVerticalScroller = true
-        scroll.hasHorizontalScroller = true
-        scroll.autohidesScrollers = true
-        let table = NSTableView()
-        table.backgroundColor = EditorPalette.background(for: theme)
-        table.style = .plain
-        table.rowHeight = 25
-        table.intercellSpacing = NSSize(width: 12, height: 0)
-        table.gridStyleMask = [.solidVerticalGridLineMask]
-        table.gridColor = .separatorColor.withAlphaComponent(0.25)
-        table.allowsMultipleSelection = true
-        table.columnAutoresizingStyle = .noColumnAutoresizing
-        table.delegate = context.coordinator
-        table.dataSource = context.coordinator
-        scroll.documentView = table
-        return scroll
-    }
-
-    func updateNSView(_ scroll: NSScrollView, context: Context) {
-        guard let table = scroll.documentView as? NSTableView else { return }
-        table.backgroundColor = EditorPalette.background(for: theme)
-        guard context.coordinator.result?.id != result.id else { return }
-        context.coordinator.result = result
-        for column in table.tableColumns { table.removeTableColumn(column) }
-        for (index, name) in result.columns.enumerated() {
-            let column = NSTableColumn(identifier: .init("\(index)"))
-            column.title = name
-            let length = max(name.count, result.rows.prefix(25).map { $0[index]?.count ?? 4 }.max() ?? 0)
-            column.width = CGFloat(min(380, max(95, length * 7 + 24)))
-            column.minWidth = 60
-            column.maxWidth = 1600
-            table.addTableColumn(column)
-        }
-        table.reloadData()
-        if !result.rows.isEmpty { table.scrollRowToVisible(0) }
-    }
-
-    final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate {
-        var result: SQLResult?
-        func numberOfRows(in tableView: NSTableView) -> Int { result?.rows.count ?? 0 }
-        func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-            guard let result, let index = Int(tableColumn?.identifier.rawValue ?? ""), result.rows.indices.contains(row) else { return nil }
-            let identifier = NSUserInterfaceItemIdentifier("value")
-            let field = (tableView.makeView(withIdentifier: identifier, owner: nil) as? NSTextField) ?? NSTextField(labelWithString: "")
-            let value = result.rows[row][index]
-            field.identifier = identifier
-            field.stringValue = value ?? "NULL"
-            field.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-            field.textColor = value == nil ? .tertiaryLabelColor : EditorPalette.text
-            field.lineBreakMode = .byTruncatingTail
-            field.isSelectable = true
-            field.toolTip = value ?? "NULL"
-            return field
-        }
     }
 }

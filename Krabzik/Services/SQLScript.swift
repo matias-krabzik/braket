@@ -5,6 +5,8 @@ import Foundation
 struct SQLStatement: Sendable {
     let text: String
     let line: Int
+    var range = NSRange(location: 0, length: 0)
+    var delimiter = ";"
 }
 
 /// Bytes que el parser reconoce. Con los números a la vista, cada comparación de este
@@ -104,9 +106,7 @@ struct SQLScript {
                 let end = position
                 position += delimiter.count
                 if hasSQL {
-                    return SQLStatement(text: String(decoding: bytes[start..<end], as: UTF8.self)
-                        .trimmingCharacters(in: .whitespacesAndNewlines),
-                                        line: startLine)
+                    return statement(start: start, end: end, line: startLine, rangeEnd: position)
                 }
                 start = position
                 startLine = line
@@ -139,7 +139,38 @@ struct SQLScript {
         }
         guard quote == nil, !blockComment else { throw DatabaseFailure("Texto o comentario sin cerrar desde la línea \(startLine).") }
         guard hasSQL else { return nil }
-        return SQLStatement(text: String(decoding: bytes[start...], as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines),
-                            line: startLine)
+        return statement(start: start, end: bytes.count, line: startLine, rangeEnd: bytes.count)
+    }
+
+    private func statement(start: Int, end: Int, line: Int, rangeEnd: Int) -> SQLStatement {
+        let prefix = String(decoding: bytes[..<start], as: UTF8.self)
+        let covered = String(decoding: bytes[start..<rangeEnd], as: UTF8.self)
+        return SQLStatement(text: String(decoding: bytes[start..<end], as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines), line: line,
+                            range: NSRange(location: prefix.utf16.count, length: covered.utf16.count),
+                            delimiter: String(decoding: delimiter, as: UTF8.self))
+    }
+
+    static func atCursor(in text: String, selection: NSRange, noBackslashEscapes: Bool = false) throws -> SQLStatement? {
+        let source = text as NSString
+        guard selection.location <= source.length, selection.length <= source.length - selection.location else { return nil }
+        if selection.length > 0 {
+            return SQLStatement(text: source.substring(with: selection),
+                                line: source.substring(to: selection.location).filter { $0 == "\n" }.count + 1, range: selection)
+        }
+        let physicalLine = source.lineRange(for: selection)
+        let line = source.substring(with: physicalLine).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !line.isEmpty, !line.hasPrefix("--"), !line.hasPrefix("#"), !line.uppercased().hasPrefix("DELIMITER ") else { return nil }
+        var parser = SQLScript(text)
+        while let statement = try parser.next(noBackslashEscapes: noBackslashEscapes) {
+            let trailingLine = source.substring(with: NSRange(location: selection.location,
+                                                              length: NSMaxRange(physicalLine) - selection.location))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if NSLocationInRange(selection.location, statement.range)
+                || (selection.location == NSMaxRange(statement.range) && trailingLine.isEmpty) {
+                return statement
+            }
+        }
+        return nil
     }
 }

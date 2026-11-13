@@ -275,6 +275,9 @@ final class WorkspaceController {
     /// Cerrar la app conserva proyectos y pestañas. Solo consulta al usuario si
     /// debe interrumpir una ejecución; guarda los cambios del editor antes de salir.
     func prepareToQuit() async -> Bool {
+        for document in documents {
+            guard document.sqlExecution.drafts.values.allSatisfy({ !$0.sending && $0.confirmDiscard() }) else { return false }
+        }
         let running = runner.hasActiveProcesses || workflows.isRunning || agent.isRunning || database.hasActiveWork ||
             documents.contains { $0.sqlExecution.isRunning }
         if running && !session.dialogs.confirmStopProcesses() { return false }
@@ -302,6 +305,7 @@ final class WorkspaceController {
     }
 
     func executeSQL() {
+        if SQLGridTable.reviewFocusedGrid() { return }
         guard let document = selectedDocument, document.language == "SQL",
               let connection = connections.selected(for: document), !isReadOnly else { return }
         database.execute(document, connection: connection)

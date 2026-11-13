@@ -30,6 +30,7 @@ struct CodeEditor: NSViewRepresentable {
     let document: EditorDocument
     let theme: AppTheme
     let uiScale: Double
+    var completion: ((String, Int) -> [String])?
 
     func makeNSView(context: Context) -> EditorSurface {
         if let existing = document.editorStorage as? EditorSurface { return existing }
@@ -39,6 +40,8 @@ struct CodeEditor: NSViewRepresentable {
     }
 
     func updateNSView(_ view: EditorSurface, context: Context) {
+        view.completion = document.language == "SQL" ? completion : nil
+        view.textView.sqlCompletionEnabled = view.completion != nil
         view.applyTheme(theme)
         view.applyZoom(uiScale)
     }
@@ -49,6 +52,27 @@ struct CodeEditor: NSViewRepresentable {
 }
 
 final class CodeTextView: NSTextView {
+    var sqlCompletionEnabled = false
+    var requestCompletion: (() -> Void)?
+    var completionKey: ((NSEvent) -> Bool)?
+    override func complete(_ sender: Any?) {
+        if sqlCompletionEnabled { requestCompletion?() } else { super.complete(sender) }
+    }
+    override var rangeForUserCompletion: NSRange {
+        guard sqlCompletionEnabled, selectedRange().length == 0 else { return super.rangeForUserCompletion }
+        let position = selectedRange().location
+        let prefix = (string as NSString).substring(to: position)
+        let word = String(prefix.reversed().prefix { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "$" }.reversed())
+        return NSRange(location: position - word.utf16.count, length: word.utf16.count)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if completionKey?(event) == true { return }
+        if event.modifierFlags.contains(.control), event.keyCode == 49 { complete(nil)
+        return }
+        super.keyDown(with: event)
+    }
+
     override func insertTab(_ sender: Any?) { insertText("    ", replacementRange: selectedRange()) }
 
     override func insertNewline(_ sender: Any?) {
@@ -75,7 +99,10 @@ private final class ObserverToken: @unchecked Sendable {
     let scrollView = NSScrollView()
     let textView = CodeTextView(usingTextLayoutManager: true)
     weak var document: EditorDocument?
+    var completion: ((String, Int) -> [String])?
     var lines: LineIndex
+    private let suggestions = SQLCompletionList()
+    private var completionWork: DispatchWorkItem?
     private var highlighter: DispatchWorkItem?
     private var syntax: SyntaxHighlighter
     private var highlightTask: Task<Void, Never>?
@@ -143,6 +170,18 @@ private final class ObserverToken: @unchecked Sendable {
         textView.string = document.text
         textView.textStorage?.setAttributes(baseAttributes, range: NSRange(location: 0, length: (document.text as NSString).length))
         textView.delegate = self
+        textView.requestCompletion = { [weak self] in
+            guard let self, let completion = self.completion else { return }
+            let values = completion(self.textView.string, self.textView.selectedRange().location)
+            self.suggestions.show(values, in: self, textView: self.textView)
+        }
+        textView.completionKey = { [weak self] event in self?.suggestions.handle(event) ?? false }
+        suggestions.accept = { [weak self] value in
+            guard let self else { return }
+            self.window?.makeFirstResponder(self.textView)
+            self.textView.insertText(value, replacementRange: self.textView.rangeForUserCompletion)
+            self.completionWork?.cancel()
+        }
         textView.setSelectedRange(NSRange(location: 0, length: 0))
         textView.setAccessibilityLabel(document.url.lastPathComponent)
         scrollView.documentView = textView
@@ -221,6 +260,8 @@ private final class ObserverToken: @unchecked Sendable {
     /// Si nadie la llama, `ObserverToken` quita el observador al liberarse y el resaltado
     /// pendiente no hace nada, porque captura `self` de forma débil.
     func teardown() {
+        completionWork?.cancel()
+        suggestions.hide()
         scrollObserver = nil
         highlighter?.cancel()
         highlighter = nil
@@ -259,6 +300,16 @@ private final class ObserverToken: @unchecked Sendable {
     }
 
     func textDidChange(_ notification: Notification) {
+        completionWork?.cancel()
+        if completion != nil, !textView.hasMarkedText(), textView.selectedRange().length == 0 {
+            let prefix = (textView.string as NSString).substring(to: textView.selectedRange().location)
+            let token = prefix.reversed().prefix { $0.isLetter || $0.isNumber || $0 == "_" }
+            if prefix.hasSuffix(".") || token.count >= 2 {
+                let work = DispatchWorkItem { [weak self] in self?.textView.complete(nil) }
+                completionWork = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
+            }
+        }
         editRevision += 1
         document?.markTextStale()
         if document?.isDirty == false { document?.isDirty = true }
@@ -268,7 +319,16 @@ private final class ObserverToken: @unchecked Sendable {
         updatePosition()
     }
 
-    func textViewDidChangeSelection(_ notification: Notification) { updatePosition() }
+    func textView(_ textView: NSTextView, completions words: [String], forPartialWordRange charRange: NSRange,
+                  indexOfSelectedItem index: UnsafeMutablePointer<Int>?) -> [String] {
+        if completion != nil { index?.pointee = -1 }
+        return completion?(textView.string, NSMaxRange(charRange)) ?? words
+    }
+
+    func textViewDidChangeSelection(_ notification: Notification) {
+        suggestions.hide()
+        updatePosition()
+    }
 
     private func updatePosition() {
         document?.selectedRange = textView.selectedRange()

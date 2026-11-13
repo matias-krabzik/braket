@@ -55,10 +55,16 @@ final class EditorDocument: Identifiable {
     let sqlExecution = SQLExecution()
 
     var sqlToExecute: (text: String, startingLine: Int) {
-        let source = text as NSString
-        guard selectedRange.length > 0, NSMaxRange(selectedRange) <= source.length else { return (text, 1) }
-        let prefix = source.substring(to: selectedRange.location)
-        return (source.substring(with: selectedRange), prefix.filter { $0 == "\n" }.count + 1)
+        (try? queryAtCursor()) ?? ("", 1)
+    }
+
+    func queryAtCursor(noBackslashEscapes: Bool = false) throws -> (text: String, startingLine: Int) {
+        guard let query = try SQLScript.atCursor(in: text, selection: selectedRange,
+                                                 noBackslashEscapes: noBackslashEscapes) else { return ("", 1) }
+        if query.delimiter != ";" {
+            return ("DELIMITER " + query.delimiter + "\n" + query.text + query.delimiter, max(0, query.line - 1))
+        }
+        return (query.text, query.line)
     }
 
     var language: String { SyntaxLanguage.name(url) }

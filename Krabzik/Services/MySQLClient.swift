@@ -23,6 +23,7 @@ extension SocketAddress {
 struct DatabaseSessionInfo: Sendable {
     var database: String
     var inTransaction: Bool
+    var noBackslashEscapes = false
 }
 
 /// El cliente de MySQL: una sesión persistente por conexión.
@@ -175,7 +176,8 @@ actor MySQLClient {
         guard busy.insert(config.id).inserted else { throw DatabaseFailure("La conexión está ocupada.") }
         defer { busy.remove(config.id) }
         let value = try await session(config, password: password)
-        return .init(database: value.database, inTransaction: value.flags.contains(.SERVER_STATUS_IN_TRANS))
+        return .init(database: value.database, inTransaction: value.flags.contains(.SERVER_STATUS_IN_TRANS),
+                     noBackslashEscapes: value.flags.contains(.SERVER_STATUS_NO_BACKSLASH_ESCAPES))
     }
 
     func test(_ config: DatabaseConnection, password: String) async throws {
@@ -225,7 +227,10 @@ actor MySQLClient {
                 for result in captured.0 {
                     resultCount += 1
                     remainingBytes -= result.rows.reduce(0) { $0 + $1.reduce(0) { $0 + 16 + ($1?.utf8.count ?? 0) } }
-                    await onResult(result)
+                    var contextual = result
+                    contextual.connection = configuration
+                    contextual.database = session.database
+                    await onResult(contextual)
                 }
             } catch {
                 if cancelled.contains(operation) { throw CancellationError() }
@@ -233,7 +238,10 @@ actor MySQLClient {
                     (command.results, command.status, command.reusableAfterFailure)
                 }.get()
                 if let captured {
-                    for result in captured.0 { await onResult(result) }
+                    for result in captured.0 { var contextual = result
+                    contextual.connection = configuration
+                    contextual.database = session.database
+                    await onResult(contextual) }
                     if !captured.0.isEmpty {
                         session.flags = captured.1
                         sessions[id] = session
@@ -249,7 +257,129 @@ actor MySQLClient {
         }
         guard statementNumber > 0 else { throw DatabaseFailure("No hay sentencias SQL para ejecutar.") }
         if cancelled.contains(operation) || Task.isCancelled { throw CancellationError() }
-        return .init(database: session.database, inTransaction: session.flags.contains(.SERVER_STATUS_IN_TRANS))
+        return .init(database: session.database, inTransaction: session.flags.contains(.SERVER_STATUS_IN_TRANS),
+                     noBackslashEscapes: session.flags.contains(.SERVER_STATUS_NO_BACKSLASH_ESCAPES))
+    }
+
+    private func read(_ sql: String, on connection: MySQLConnection) async throws -> SQLResult {
+        let command = MySQLTextCommand(sql: sql, statement: 0, line: 1)
+        try await connection.send(command, logger: connection.logger).get()
+        let results = try await connection.eventLoop.submit { command.results }.get()
+        guard let result = results.first, !result.truncated else {
+            throw DatabaseFailure("La estructura supera el límite de lectura; seleccioná menos bases.")
+        }
+        return result
+    }
+
+    func databases(_ config: DatabaseConnection, password: String) async throws -> [String] {
+        let connection = try await open(config, password: password)
+        do {
+            let result = try await read("SHOW DATABASES", on: connection)
+            try? await connection.close().get()
+            return result.rows.compactMap { $0.first ?? nil }
+        } catch { try? await connection.close().get()
+        throw error }
+    }
+
+    func schema(_ config: DatabaseConnection, password: String, databases: [String]) async throws -> SQLSchemaSnapshot {
+        let connection = try await open(config, password: password)
+        do {
+            var tables: [SQLSchemaTable] = []
+            for database in databases {
+                let rows = try await read("SELECT TABLE_NAME, TABLE_TYPE, ENGINE FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = "
+                                          + SQLValue.literal(database) + " ORDER BY TABLE_NAME", on: connection)
+                for row in rows.rows where row.count == 3 {
+                    guard let name = row[0] else { continue }
+                    var table = SQLSchemaTable(database: database, name: name, kind: row[1] ?? "", engine: row[2] ?? "")
+                    table = try await describe(table, on: connection)
+                    tables.append(table)
+                }
+            }
+            try? await connection.close().get()
+            return SQLSchemaSnapshot(connection: config, databases: databases, tables: tables)
+        } catch { try? await connection.close().get()
+        throw error }
+    }
+
+    private func describe(_ table: SQLSchemaTable, on connection: MySQLConnection) async throws -> SQLSchemaTable {
+        var table = table
+        let predicate = " WHERE TABLE_SCHEMA = " + SQLValue.literal(table.database) + " AND TABLE_NAME = " + SQLValue.literal(table.name)
+        let columns = try await read("SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, EXTRA "
+                                     + "FROM INFORMATION_SCHEMA.COLUMNS" + predicate + " ORDER BY ORDINAL_POSITION", on: connection)
+        table.columns = columns.rows.compactMap { row in
+            guard row.count == 5, let name = row[0], let type = row[1] else { return nil }
+            return SQLSchemaColumn(name: name, type: type, nullable: row[2] == "YES", defaultValue: row[3], extra: row[4] ?? "")
+        }
+        let keys = try await read("SELECT INDEX_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.STATISTICS" + predicate
+                                  + " AND NON_UNIQUE = 0 ORDER BY INDEX_NAME, SEQ_IN_INDEX", on: connection)
+        var grouped: [String: [String]] = [:]
+        var invalid: Set<String> = []
+        for row in keys.rows where row.count == 2 {
+            guard let name = row[0] else { continue }
+            if let column = row[1] { grouped[name, default: []].append(column) }
+            else { invalid.insert(name) }
+        }
+        table.uniqueKeys = grouped.keys.sorted().filter { !invalid.contains($0) }.compactMap { grouped[$0] }
+        return table
+    }
+
+    func createTable(_ table: SQLSchemaTable, config: DatabaseConnection, password: String) async throws -> String {
+        let connection = try await open(config, password: password)
+        do {
+            let result = try await read("SHOW CREATE TABLE " + table.qualified, on: connection)
+            try? await connection.close().get()
+            return result.rows.first.flatMap { $0.count > 1 ? $0[1] : nil } ?? ""
+        } catch { try? await connection.close().get()
+        throw error }
+    }
+
+    func useDatabase(_ database: String, config: DatabaseConnection, password: String) async throws -> DatabaseSessionInfo {
+        try await execute("USE " + SQLValue.identifier(database), startingLine: 1, configuration: config,
+                          password: password, operation: UUID()) { _ in }
+    }
+
+    func apply(_ mutations: [SQLMutation], table: SQLSchemaTable, configuration: DatabaseConnection,
+               password: String) async throws {
+        guard !mutations.isEmpty, busy.insert(configuration.id).inserted else { throw DatabaseFailure("La conexión está ocupada.") }
+        defer { busy.remove(configuration.id) }
+        let session = try await session(configuration, password: password)
+        guard !session.flags.contains(.SERVER_STATUS_IN_TRANS), session.flags.contains(.SERVER_STATUS_AUTOCOMMIT) else {
+            throw DatabaseFailure("Finalizá la transacción del script y activá autocommit antes de enviar cambios de la grilla.")
+        }
+        let fresh = try await describe(table, on: session.connection)
+        guard fresh.columns == table.columns, fresh.uniqueKeys == table.uniqueKeys else {
+            throw DatabaseFailure("La estructura cambió. Actualizá la consulta antes de editar.")
+        }
+        let engine = try await read("SELECT ENGINE FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = "
+                                    + SQLValue.literal(table.database) + " AND TABLE_NAME = " + SQLValue.literal(table.name),
+                                    on: session.connection)
+        guard (engine.rows.first?.first ?? nil)?.uppercased() == "INNODB" else {
+            throw DatabaseFailure("La edición requiere una tabla InnoDB.")
+        }
+        _ = try await read("START TRANSACTION", on: session.connection)
+        do {
+            for mutation in mutations {
+                if let verification = mutation.verificationSQL {
+                    let matching = try await read(verification, on: session.connection)
+                    guard matching.rows.count == 1 else {
+                        throw DatabaseFailure("La fila cambió o ya no existe. Se revirtieron los cambios.")
+                    }
+                }
+                let result = try await read(mutation.sql, on: session.connection)
+                guard (result.affectedRows == 1 || (mutation.allowsUnchanged && result.affectedRows == 0)), result.warnings == 0 else {
+                    throw DatabaseFailure("La fila cambió, ya no existe o el servidor rechazó un valor. Se revirtieron los cambios.")
+                }
+            }
+        } catch {
+            do { _ = try await read("ROLLBACK", on: session.connection) }
+            catch { await disconnect(configuration.id) }
+            throw error
+        }
+        do { _ = try await read("COMMIT", on: session.connection) }
+        catch {
+            await disconnect(configuration.id)
+            throw DatabaseFailure("No se pudo confirmar la respuesta de COMMIT. Consultá los datos antes de volver a enviar.")
+        }
     }
 
     @discardableResult
@@ -289,7 +419,8 @@ actor MySQLClient {
 
     func info(_ id: UUID) -> DatabaseSessionInfo? {
         guard let session = sessions[id], !session.connection.isClosed else { return nil }
-        return .init(database: session.database, inTransaction: session.flags.contains(.SERVER_STATUS_IN_TRANS))
+        return .init(database: session.database, inTransaction: session.flags.contains(.SERVER_STATUS_IN_TRANS),
+                     noBackslashEscapes: session.flags.contains(.SERVER_STATUS_NO_BACKSLASH_ESCAPES))
     }
 
     func closeAll() async {

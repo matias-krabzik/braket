@@ -3,34 +3,42 @@ import SwiftUI
 struct WorkspaceView: View {
     @Bindable var controller: WorkspaceController
 
+    private var showsSQLResults: Bool {
+        guard !controller.workflowVisible, let document = controller.selectedDocument,
+              document.language == "SQL", controller.database.resultsVisible else { return false }
+        return document.sqlExecution.isRunning || document.sqlExecution.error != nil || !document.sqlExecution.results.isEmpty
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             if let workspace = controller.workspace, let url = controller.workspaceURL {
                 if controller.isReadOnly { readOnlyBanner }
                 HStack(spacing: 0) {
                     ProjectRail(controller: controller)
-                    HSplitView {
-                        if controller.sidebarVisible {
-                            WorkspaceSidebar(controller: controller, workspace: workspace, url: url).id(url)
-                                .frame(minWidth: 270, idealWidth: 270, maxWidth: 360)
+                    WorkspaceModeRail(controller: controller)
+                    WorkspaceVerticalSplit(showsBottom: showsSQLResults || (controller.processesVisible && !controller.workflowVisible),
+                                           isResults: showsSQLResults) {
+                        HSplitView {
+                            if controller.sidebarVisible {
+                                Group {
+                                    if controller.database.browserShowsDatabases { DatabaseExplorer(controller: controller) }
+                                    else { WorkspaceSidebar(controller: controller, workspace: workspace, url: url).id(url) }
+                                }
+                                .frame(minWidth: 230, idealWidth: 270, maxWidth: 420)
                                 .background(SidebarWidthPersistence())
-                        }
-                        VSplitView {
-                            editorArea
-                                .frame(minWidth: 520, maxWidth: .infinity, minHeight: 240, maxHeight: .infinity)
-                            if !controller.workflowVisible, let document = controller.selectedDocument,
-                               document.language == "SQL", controller.database.resultsVisible,
-                               document.sqlExecution.isRunning || document.sqlExecution.error != nil || !document.sqlExecution.results
-                               .isEmpty {
-                                SQLResultsPanel(execution: document.sqlExecution) { controller.database.resultsVisible = false }
-                                    .frame(minHeight: 140, idealHeight: 220, maxHeight: 350)
-                            } else if controller.processesVisible && !controller.workflowVisible {
-                                ProcessPanel(controller: controller)
-                                    .frame(minHeight: 150, idealHeight: 240, maxHeight: 440)
+                            }
+                            editorArea.frame(minWidth: 420, maxWidth: .infinity, minHeight: 180, maxHeight: .infinity)
+                            if controller.agent.visible && !controller.workflowVisible {
+                                AgentPanel(controller: controller).frame(minWidth: 300, idealWidth: 350, maxWidth: 460)
                             }
                         }
-                        if controller.agent.visible && !controller.workflowVisible {
-                            AgentPanel(controller: controller).frame(minWidth: 300, idealWidth: 350, maxWidth: 460)
+                    } bottom: {
+                        if showsSQLResults, let document = controller.selectedDocument {
+                            SQLResultsPanel(execution: document.sqlExecution, controller: controller) {
+                                controller.database.resultsVisible = false
+                            }.frame(minHeight: 220, idealHeight: 360, maxHeight: .infinity)
+                        } else if controller.processesVisible && !controller.workflowVisible {
+                            ProcessPanel(controller: controller).frame(minHeight: 150, idealHeight: 240, maxHeight: 440)
                         }
                     }
                 }
@@ -101,6 +109,10 @@ struct WorkspaceView: View {
         .sheet(item: Binding(get: { controller.database.editingConnection },
                              set: { controller.database.editingConnection = $0 })) { connection in
             ConnectionSheet(connection: connection, controller: controller)
+        }
+        .sheet(item: Binding(get: { controller.database.schema.choosing },
+                             set: { controller.database.schema.choosing = $0 })) { connection in
+            DatabaseSelectionSheet(connection: connection, database: controller.database)
         }
         // Muestra el primero de la cola, no el último: el primero suele ser la causa y
         // el resto la consecuencia. «Aceptar» pasa al siguiente si hay más.
@@ -211,7 +223,13 @@ struct WorkspaceView: View {
                 } else if isMarkdown(document) {
                     markdownContent(document)
                 } else {
-                    CodeEditor(document: document, theme: AppSettings.shared.theme, uiScale: controller.settings.uiScale).id(document.id)
+                    CodeEditor(document: document, theme: AppSettings.shared.theme, uiScale: controller.settings.uiScale,
+                               completion: { text, position in
+                                   let connection = controller.connections.selected(for: document)
+                                   let database = connection.map { controller.database.state($0.id).currentDatabase } ?? ""
+                                   return controller.database.schema.completions(connection: connection, database: database,
+                                                                                 text: text, position: position)
+                               }).id(document.id)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             } else {
