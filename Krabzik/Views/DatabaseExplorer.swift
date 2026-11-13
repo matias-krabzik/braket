@@ -61,80 +61,97 @@ struct DatabaseExplorer: View {
     private func connectionTree(_ connection: DatabaseConnection) -> some View {
         let store = controller.database.schema
         let state = controller.database.state(connection.id)
-        return DisclosureGroup {
-            if let snapshot = store.snapshot(connection) {
-                ForEach(snapshot.databases, id: \.self) { database in
-                    DisclosureGroup {
-                        ForEach(snapshot.tables.filter { $0.database == database }) { table in
-                            DisclosureGroup {
-                                ForEach(table.columns) { column in
-                                    HStack(spacing: 6) {
-                                        Image(systemName: table.uniqueKeys.contains { $0.contains(column.name) } ? "key" : "text.alignleft")
-                                            .foregroundStyle(.secondary)
-                                        Text(column.name)
-                                        Spacer(minLength: 4)
-                                        Text(column.type).foregroundStyle(.tertiary).lineLimit(1)
-                                    }.help(column.type + (column.nullable ? " · NULL" : " · NOT NULL"))
-                                }
-                            } label: {
-                                Label(table.name, systemImage: table.kind == "VIEW" ? "eye" : "tablecells")
-                                    .contextMenu {
-                                        Button("Copiar nombre SQL") {
-                                            NSPasteboard.general.clearContents()
-                                            NSPasteboard.general.setString(table.qualified, forType: .string)
-                                        }
-                                        Button("Ver CREATE TABLE") {
-                                            Task {
-                                                do {
-                                                    let password = try CredentialStore.read(for: connection)
-                                                    ddl = try await controller.database.client.createTable(table, config: connection,
-                                                                                                           password: password)
-                                                } catch { store.errors[connection.id] = MySQLClient.message(error) }
+        return VStack(alignment: .leading, spacing: 6) {
+            DisclosureGroup {
+                if let snapshot = store.snapshot(connection) {
+                    ForEach(snapshot.databases, id: \.self) { database in
+                        DisclosureGroup {
+                            ForEach(snapshot.tables.filter { $0.database == database }) { table in
+                                DisclosureGroup {
+                                    if table.columns.isEmpty { Text("Columnas pendientes de cargar").foregroundStyle(.secondary) }
+                                    ForEach(table.columns) { column in
+                                        HStack(spacing: 6) {
+                                            Image(systemName: table.uniqueKeys
+                                                .contains { $0.contains(column.name) } ? "key" : "text.alignleft")
+                                                .foregroundStyle(.secondary)
+                                            Text(column.name)
+                                            Spacer(minLength: 4)
+                                            Text(column.type).foregroundStyle(.tertiary).lineLimit(1)
+                                        }.help(column.type + (column.nullable ? " · NULL" : " · NOT NULL"))
+                                    }
+                                } label: {
+                                    Label(table.name, systemImage: table.kind == "VIEW" ? "eye" : "tablecells")
+                                        .contextMenu {
+                                            Button("Copiar nombre SQL") {
+                                                NSPasteboard.general.clearContents()
+                                                NSPasteboard.general.setString(table.qualified, forType: .string)
+                                            }
+                                            Button("Ver CREATE TABLE") {
+                                                Task {
+                                                    do {
+                                                        let password = try CredentialStore.read(for: connection)
+                                                        ddl = try await controller.database.client.createTable(table, config: connection,
+                                                                                                               password: password)
+                                                    } catch { store.errors[connection.id] = MySQLClient.message(error) }
+                                                }
                                             }
                                         }
-                                    }
-                            }
-                        }
-                    } label: {
-                        Label(database + (store.preference(connection).defaultDatabase == database ? " ★" : ""),
-                              systemImage: "externaldrive")
-                            .contextMenu {
-                                Button("Usar en la sesión") { controller.database.selectDatabase(database, connection: connection) }
-                                Button("Base predeterminada") {
-                                    var preference = store.preference(connection)
-                                    preference.defaultDatabase = database
-                                    store.save(preference, for: connection)
-                                    controller.database.selectDatabase(database, connection: connection)
                                 }
                             }
+                        } label: {
+                            Label(database + (store.preference(connection).defaultDatabase == database ? " ★" : ""),
+                                  systemImage: "externaldrive")
+                                .contextMenu {
+                                    Button("Usar en la sesión") { controller.database.selectDatabase(database, connection: connection) }
+                                    Button("Base predeterminada") {
+                                        var preference = store.preference(connection)
+                                        preference.defaultDatabase = database
+                                        store.save(preference, for: connection)
+                                        controller.database.selectDatabase(database, connection: connection)
+                                    }
+                                }
+                        }
                     }
+                    Text(snapshot.isPartial == true ? "Estructura parcial: la carga todavía no terminó."
+                         : "Estructura: " + snapshot.fetchedAt.formatted(date: .abbreviated, time: .shortened))
+                        .font(.system(size: Theme.zoom(9))).foregroundStyle(.tertiary)
                 }
-                Text("Estructura: " + snapshot.fetchedAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.system(size: Theme.zoom(9))).foregroundStyle(.tertiary)
+                if state.status == .disconnected {
+                    Button("Conectar") { controller.database.connect(connection) }.disabled(controller.isReadOnly)
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Circle().fill(state.status == .connected ? .green : .secondary).frame(width: 6, height: 6)
+                    Text(connection.name).lineLimit(1)
+                    Spacer(minLength: 0)
+                    if store.loading.contains(connection.id) {
+                        ProgressView().controlSize(.mini)
+                        Button { store.cancel(connection.id) } label: { Image(systemName: "xmark.circle") }
+                            .buttonStyle(.plain).help("Cancelar carga de estructura").accessibilityLabel("Cancelar carga de estructura")
+                    }
+                    Button {
+                        Task { await store.discover(connection, client: controller.database.client, choose: true) }
+                    } label: {
+                        Text(store.available[connection.id].map { "\(store.preference(connection).visible.count)/\($0.count)" }
+                             ?? "\(store.preference(connection).visible.count) bases")
+                            .font(.system(size: Theme.zoom(10))).padding(3).background(Theme.bar, in: RoundedRectangle(cornerRadius: 3))
+                    }.buttonStyle(.plain).help("Elegir bases visibles y predeterminada")
+                        .disabled(controller.isReadOnly)
+                }.contextMenu {
+                    Button("Actualizar estructura") { Task { await store.discover(connection, client: controller.database.client) } }
+                    Button("Desconectar") { Task { _ = await controller.database.disconnect(connection) } }.disabled(state.busy)
+                    Button("Configurar") { controller.database.editingConnection = connection }
+                }
+            }
+            if let progress = store.progress[connection.id] {
+                Text(progress).font(.system(size: Theme.zoom(10))).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             if let error = store.errors[connection.id] ?? state.error {
                 Text(error).font(.system(size: Theme.zoom(10))).foregroundStyle(.orange).textSelection(.enabled)
-            }
-            if state.status == .disconnected {
-                Button("Conectar") { controller.database.connect(connection) }.disabled(controller.isReadOnly)
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Circle().fill(state.status == .connected ? .green : .secondary).frame(width: 6, height: 6)
-                Text(connection.name).lineLimit(1)
-                Spacer(minLength: 0)
-                if store.loading.contains(connection.id) { ProgressView().controlSize(.mini) }
-                Button {
-                    Task { await store.discover(connection, client: controller.database.client, choose: true) }
-                } label: {
-                    Text("\(store.preference(connection).visible.count)/\(store.available[connection.id]?.count ?? 0)")
-                        .font(.system(size: Theme.zoom(10))).padding(3).background(Theme.bar, in: RoundedRectangle(cornerRadius: 3))
-                }.buttonStyle(.plain).help("Elegir bases visibles y predeterminada")
+                Button("Reintentar carga") { Task { await store.discover(connection, client: controller.database.client) } }
                     .disabled(store.loading.contains(connection.id) || controller.isReadOnly)
-            }.contextMenu {
-                Button("Actualizar estructura") { Task { await store.discover(connection, client: controller.database.client) } }
-                Button("Desconectar") { Task { _ = await controller.database.disconnect(connection) } }.disabled(state.busy)
-                Button("Configurar") { controller.database.editingConnection = connection }
+            } else if !store.loading.contains(connection.id), store.preference(connection).visible.isEmpty {
+                Text("Elegí las bases con el selector de la derecha.").font(.system(size: Theme.zoom(10))).foregroundStyle(.secondary)
             }
         }
     }

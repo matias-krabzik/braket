@@ -110,7 +110,9 @@ struct WorkspaceView: View {
                              set: { controller.database.editingConnection = $0 })) { connection in
             ConnectionSheet(connection: connection, controller: controller)
         }
-        .sheet(item: Binding(get: { controller.database.schema.choosing },
+        .sheet(item: Binding(get: {
+            controller.database.schema.selectionHosts.isEmpty ? controller.database.schema.choosing : nil
+        },
                              set: { controller.database.schema.choosing = $0 })) { connection in
             DatabaseSelectionSheet(connection: connection, database: controller.database)
         }

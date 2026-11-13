@@ -7,6 +7,7 @@ struct ConnectionsSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var editing: DatabaseConnection?
     @State private var removing: DatabaseConnection?
+    @State private var selectionHost = UUID()
 
     private var connectedCount: Int {
         controller.connections.profiles.filter { controller.database.states[$0.id]?.status == .connected }.count
@@ -53,6 +54,17 @@ struct ConnectionsSettingsView: View {
         }
         .background(Theme.background)
         .sheet(item: $editing) { ConnectionSheet(connection: $0, controller: controller) }
+        .onAppear {
+            if !controller.database.schema.selectionHosts.contains(selectionHost) {
+                controller.database.schema.selectionHosts.append(selectionHost)
+            }
+        }
+        .onDisappear { controller.database.schema.selectionHosts.removeAll { $0 == selectionHost } }
+        .sheet(item: Binding(get: {
+            controller.database.schema.selectionHosts.last == selectionHost ? controller.database.schema.choosing : nil
+        }, set: { controller.database.schema.choosing = $0 })) { connection in
+            DatabaseSelectionSheet(connection: connection, database: controller.database)
+        }
         .confirmationDialog("¿Quitar la conexión guardada?", isPresented: Binding(get: { removing != nil },
                                                                                   set: { if !$0 { removing = nil } }),
                             titleVisibility: .visible) {
@@ -99,8 +111,21 @@ struct ConnectionsSettingsView: View {
                 Label("Transacción abierta", systemImage: "exclamationmark.circle")
                     .font(.caption).foregroundStyle(.orange)
             }
-            if let error = state.error {
+            if let progress = controller.database.schema.progress[connection.id] {
+                HStack {
+                    ProgressView().controlSize(.mini)
+                    Text(progress).font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Cancelar carga") { controller.database.schema.cancel(connection.id) }
+                }
+            }
+            if let error = state.error ?? controller.database.schema.errors[connection.id] {
                 Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled)
+            }
+            if state.status == .connected {
+                Button("Elegir bases de datos…") {
+                    Task { await controller.database.schema.discover(connection, client: controller.database.client, choose: true) }
+                }
             }
         }
         .padding(16)

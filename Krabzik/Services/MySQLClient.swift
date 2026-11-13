@@ -271,34 +271,60 @@ actor MySQLClient {
         return result
     }
 
-    func databases(_ config: DatabaseConnection, password: String) async throws -> [String] {
-        let connection = try await open(config, password: password)
+    /// A metadata timeout closes only its private socket, never the editor's SQL session.
+    private func readMetadata(_ sql: String, on connection: MySQLConnection,
+                              timeoutMilliseconds: Int64 = 15_000) async throws -> SQLResult {
+        try Task.checkCancellation()
+        let deadline = NIODeadline.now() + .milliseconds(timeoutMilliseconds)
+        let channel = connection.channel
+        let timeout = connection.eventLoop.scheduleTask(deadline: deadline) { channel.close(promise: nil) }
+        defer { timeout.cancel() }
         do {
-            let result = try await read("SHOW DATABASES", on: connection)
-            try? await connection.close().get()
-            return result.rows.compactMap { $0.first ?? nil }
-        } catch { try? await connection.close().get()
-        throw error }
+            return try await withTaskCancellationHandler {
+                let result = try await read(sql, on: connection)
+                try Task.checkCancellation()
+                return result
+            } onCancel: { channel.close(promise: nil) }
+        } catch {
+            if Task.isCancelled { throw CancellationError() }
+            if NIODeadline.now() >= deadline {
+                throw DatabaseFailure("El servidor no respondió a la consulta de estructura a tiempo. "
+                                      + "Podés reintentar o elegir menos bases.")
+            }
+            throw error
+        }
     }
 
-    func schema(_ config: DatabaseConnection, password: String, databases: [String]) async throws -> SQLSchemaSnapshot {
+    func metadataQuery(_ sql: String, configuration: DatabaseConnection, password: String,
+                       timeoutMilliseconds: Int64 = 15_000) async throws -> SQLResult {
+        let connection = try await open(configuration, password: password)
+        do {
+            let result = try await readMetadata(sql, on: connection, timeoutMilliseconds: timeoutMilliseconds)
+            try? await connection.close().get()
+            return result
+        } catch {
+            try? await connection.close().get()
+            throw error
+        }
+    }
+
+    func databases(_ config: DatabaseConnection, password: String) async throws -> [String] {
+        let result = try await metadataQuery("SHOW DATABASES", configuration: config, password: password)
+        return result.rows.compactMap { $0.first ?? nil }
+    }
+
+    func schema(_ config: DatabaseConnection, password: String, databases: [String],
+                progress: @escaping @Sendable (SQLSchemaProgress) async -> Void = { _ in }) async throws -> SQLSchemaSnapshot {
         let connection = try await open(config, password: password)
         do {
-            var tables: [SQLSchemaTable] = []
-            for database in databases {
-                let rows = try await read("SELECT TABLE_NAME, TABLE_TYPE, ENGINE FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = "
-                                          + SQLValue.literal(database) + " ORDER BY TABLE_NAME", on: connection)
-                for row in rows.rows where row.count == 3 {
-                    guard let name = row[0] else { continue }
-                    var table = SQLSchemaTable(database: database, name: name, kind: row[1] ?? "", engine: row[2] ?? "")
-                    table = try await describe(table, on: connection)
-                    tables.append(table)
-                }
-            }
+            let loader = SQLSchemaLoader { sql in try await self.readMetadata(sql, on: connection) }
+            let snapshot = try await loader.load(connection: config, databases: databases, progress: progress)
             try? await connection.close().get()
-            return SQLSchemaSnapshot(connection: config, databases: databases, tables: tables)
-        } catch { try? await connection.close().get()
-        throw error }
+            return snapshot
+        } catch {
+            try? await connection.close().get()
+            throw error
+        }
     }
 
     private func describe(_ table: SQLSchemaTable, on connection: MySQLConnection) async throws -> SQLSchemaTable {
@@ -324,13 +350,8 @@ actor MySQLClient {
     }
 
     func createTable(_ table: SQLSchemaTable, config: DatabaseConnection, password: String) async throws -> String {
-        let connection = try await open(config, password: password)
-        do {
-            let result = try await read("SHOW CREATE TABLE " + table.qualified, on: connection)
-            try? await connection.close().get()
-            return result.rows.first.flatMap { $0.count > 1 ? $0[1] : nil } ?? ""
-        } catch { try? await connection.close().get()
-        throw error }
+        let result = try await metadataQuery("SHOW CREATE TABLE " + table.qualified, configuration: config, password: password)
+        return result.rows.first.flatMap { $0.count > 1 ? $0[1] : nil } ?? ""
     }
 
     func useDatabase(_ database: String, config: DatabaseConnection, password: String) async throws -> DatabaseSessionInfo {

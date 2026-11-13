@@ -1,6 +1,14 @@
 import Foundation
 import Observation
 
+protocol SQLSchemaSource: Sendable {
+    func databases(_ config: DatabaseConnection, password: String) async throws -> [String]
+    func schema(_ config: DatabaseConnection, password: String, databases: [String],
+                progress: @escaping @Sendable (SQLSchemaProgress) async -> Void) async throws -> SQLSchemaSnapshot
+}
+
+extension MySQLClient: SQLSchemaSource {}
+
 @MainActor @Observable
 final class SQLSchemaStore {
     struct Preference: Codable {
@@ -11,12 +19,19 @@ final class SQLSchemaStore {
     var preferences: [UUID: Preference] = [:]
     var loading: Set<UUID> = []
     var errors: [UUID: String] = [:]
+    var progress: [UUID: String] = [:]
+    @ObservationIgnored private var tasks: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var generations: [UUID: UUID] = [:]
+    @ObservationIgnored private let readPassword: @Sendable (DatabaseConnection) throws -> String
     var choosing: DatabaseConnection?
+    var selectionHosts: [UUID] = []
     var available: [UUID: [String]] = [:]
     @ObservationIgnored private let defaults: UserDefaults
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard,
+         readPassword: @escaping @Sendable (DatabaseConnection) throws -> String = { try CredentialStore.read(for: $0) }) {
         self.defaults = defaults
+        self.readPassword = readPassword
         if let data = defaults.data(forKey: "mysql.schemaPreferences.v1"),
            let saved = try? JSONDecoder().decode([UUID: Preference].self, from: data) { preferences = saved }
         if let data = defaults.data(forKey: "mysql.schemaCache.v1"),
@@ -38,24 +53,86 @@ final class SQLSchemaStore {
         if let data = try? JSONEncoder().encode(preferences) { defaults.set(data, forKey: "mysql.schemaPreferences.v1") }
     }
 
-    func discover(_ connection: DatabaseConnection, client: MySQLClient, choose: Bool = false) async {
-        guard loading.insert(connection.id).inserted else { return }
-        defer { loading.remove(connection.id) }
+    func cancel(_ id: UUID) {
+        tasks.removeValue(forKey: id)?.cancel()
+        generations.removeValue(forKey: id)
+        loading.remove(id)
+        progress.removeValue(forKey: id)
+        errors[id] = "Carga de estructura cancelada. Podés reintentar."
+    }
+
+    func cancelAll() {
+        for id in Array(tasks.keys) { cancel(id) }
+    }
+
+    func discover(_ connection: DatabaseConnection, client: any SQLSchemaSource, choose: Bool = false) async {
+        if loading.contains(connection.id) {
+            guard choose else { return }
+            cancel(connection.id)
+        }
+        let token = UUID()
+        generations[connection.id] = token
+        loading.insert(connection.id)
         errors[connection.id] = nil
+        progress[connection.id] = "Conectando para leer la estructura…"
+        let task = Task { await self.load(connection, client: client, choose: choose, token: token) }
+        tasks[connection.id] = task
+        await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+    }
+
+    private func load(_ connection: DatabaseConnection, client: any SQLSchemaSource, choose: Bool, token: UUID) async {
+        let id = connection.id
+        defer {
+            if generations[id] == token {
+                loading.remove(id)
+                progress.removeValue(forKey: id)
+                tasks.removeValue(forKey: id)
+                generations.removeValue(forKey: id)
+            }
+        }
         do {
-            let password = try CredentialStore.read(for: connection)
-            available[connection.id] = try await client.databases(connection, password: password)
-            if choose || preferences[connection.id] == nil { choosing = connection }
+            if !choose, preferences[id] != nil, preference(connection).visible.isEmpty {
+                snapshots[id] = SQLSchemaSnapshot(connection: connection, databases: [], tables: [], isPartial: false)
+                return
+            }
+            let password = try readPassword(connection)
+            // Choosing databases must never wait for introspection of the previous selection.
+            if choose || preferences[id] == nil {
+                progress[id] = "Buscando bases disponibles…"
+                let names = try await client.databases(connection, password: password)
+                try Task.checkCancellation()
+                guard generations[id] == token else { return }
+                available[id] = names
+                choosing = connection
+                return
+            }
             let visible = preference(connection).visible
-            if !visible.isEmpty {
-                let snapshot = try await client.schema(connection, password: password, databases: visible)
-                snapshots[connection.id] = snapshot
-                // Limit the on-disk cache without retaining credentials or result data.
-                if let data = try? JSONEncoder().encode(snapshots), data.count <= 20_000_000 {
-                    defaults.set(data, forKey: "mysql.schemaCache.v1")
+            var initial = snapshot(connection) ?? SQLSchemaSnapshot(connection: connection, databases: visible, tables: [])
+            initial.databases = visible
+            initial.tables.removeAll { !visible.contains($0.database) }
+            initial.isPartial = !visible.isEmpty
+            snapshots[id] = initial
+            let snapshot = try await client.schema(connection, password: password, databases: visible) { update in
+                await MainActor.run {
+                    guard self.generations[id] == token else { return }
+                    self.progress[id] = update.message
+                    if let tables = update.tables {
+                        self.snapshots[id]?.tables.removeAll { $0.database == update.database }
+                        self.snapshots[id]?.tables.append(contentsOf: tables)
+                    }
                 }
             }
-        } catch { errors[connection.id] = MySQLClient.message(error) }
+            try Task.checkCancellation()
+            guard generations[id] == token else { return }
+            snapshots[id] = snapshot
+            if let data = try? JSONEncoder().encode(snapshots), data.count <= 20_000_000 {
+                defaults.set(data, forKey: "mysql.schemaCache.v1")
+            }
+        } catch {
+            guard generations[id] == token else { return }
+            errors[id] = Task.isCancelled ? "Carga de estructura cancelada. Podés reintentar."
+                : (progress[id].map { $0 + "\n" } ?? "") + MySQLClient.message(error)
+        }
     }
 
     func completions(connection: DatabaseConnection?, database: String, text: String, position: Int) -> [String] {

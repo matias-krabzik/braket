@@ -58,6 +58,7 @@ final class SQLResultDraft {
             return "Solo lectura: resultado calculado o sin tabla de origen."
         }
         guard let table else { return "Solo lectura: estructura no disponible. Actualizá las bases de la conexión." }
+        guard table.metadataComplete != false else { return "Solo lectura: falta completar la estructura de esta tabla." }
         guard table.kind == "BASE TABLE", table.engine.uppercased() == "INNODB" else {
             return "Solo lectura: la edición transaccional requiere una tabla InnoDB."
         }

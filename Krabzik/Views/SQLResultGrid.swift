@@ -141,8 +141,10 @@ struct SQLResultGrid: NSViewRepresentable {
             draft.widths[index] = column.width / scale
         }
         @objc func editCell(_ sender: NSTableView) {
-            let row = sender.clickedRow, column = sender.clickedColumn
-            guard draft.canEdit, row >= 0, column >= 0, !draft.deleted.contains(row),
+            beginEditing(row: sender.clickedRow, column: sender.clickedColumn)
+        }
+        private func beginEditing(row: Int, column: Int) {
+            guard let sender = table, draft.canEdit, row >= 0, column >= 0, !draft.deleted.contains(row),
                   draft.column(column)?.generated != true,
                   let field = sender.view(atColumn: column, row: row, makeIfNecessary: true) as? SQLGridField else { return }
             field.isEditable = true
@@ -189,9 +191,10 @@ struct SQLResultGrid: NSViewRepresentable {
             }
             menu.autoenablesItems = false
             add("Copiar valor", "copy")
-            guard draft.canEdit else { return menu }
+            if !draft.canEdit { add(draft.reason.isEmpty ? "Edición no disponible" : draft.reason, "", enabled: false) }
             let metadata = draft.column(column)
-            if metadata?.generated != true, !draft.deleted.contains(row) {
+            add("Editar celda", "edit", enabled: draft.canEdit && metadata?.generated != true && !draft.deleted.contains(row))
+            if draft.canEdit, metadata?.generated != true, !draft.deleted.contains(row) {
                 if metadata?.nullable == true { add("Poner en NULL", "null") }
                 if metadata?.canDefault == true { add("Usar DEFAULT", "default") }
                 for value in metadata?.enumValues ?? [] { add(value, "enum:" + value) }
@@ -200,7 +203,7 @@ struct SQLResultGrid: NSViewRepresentable {
             menu.addItem(.separator())
             add("Agregar fila", "add", enabled: draft.canInsert)
             add("Duplicar fila", "duplicate", enabled: draft.canInsert)
-            add(draft.deleted.contains(row) ? "Restaurar fila" : "Eliminar fila", "delete")
+            add(draft.deleted.contains(row) ? "Restaurar fila" : "Eliminar fila", "delete", enabled: draft.canEdit)
             add("Revisar todos los cambios…", "review", enabled: draft.hasChanges)
             return menu
         }
@@ -210,6 +213,9 @@ struct SQLResultGrid: NSViewRepresentable {
             case "copy":
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(draft.value(row: menuRow, column: menuColumn).display, forType: .string)
+            case "edit":
+                beginEditing(row: menuRow, column: menuColumn)
+                return
             case "null": draft.set(.null, row: menuRow, column: menuColumn)
             case "default": draft.set(.serverDefault, row: menuRow, column: menuColumn)
             case "undo": draft.changes.removeValue(forKey: SQLCell(row: menuRow, column: menuColumn))

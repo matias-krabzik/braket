@@ -56,6 +56,22 @@ private struct SQLResultContent: View {
                 Text(draft.result.connection?.name ?? "").fontWeight(.medium)
                 Text(draft.result.database).foregroundStyle(.secondary)
                 Spacer()
+                if let connection = draft.result.connection, draft.result.origins.contains(where: { !$0.table.isEmpty }),
+                   !draft.canEdit, !draft.sent {
+                    if controller.database.schema.loading.contains(connection.id) {
+                        ProgressView().controlSize(.mini)
+                        Text("Cargando estructura…").foregroundStyle(.secondary)
+                    } else {
+                        Button("Cargar estructura") {
+                            let store = controller.database.schema
+                            let origin = draft.result.origins.first?.database ?? ""
+                            Task {
+                                await store.discover(connection, client: controller.database.client,
+                                                     choose: !store.preference(connection).visible.contains(origin))
+                            }
+                        }.disabled(controller.isReadOnly)
+                    }
+                }
                 if draft.canInsert { Button("Agregar fila") { draft.addRow() } }
                 if draft.hasChanges {
                     Button("Descartar") { if draft.confirmDiscard() { draft.discard() } }.disabled(draft.sending)
@@ -67,6 +83,10 @@ private struct SQLResultContent: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(16)
             } else {
                 SQLResultGrid(draft: draft, scale: controller.settings.uiScale, theme: controller.settings.theme)
+            }
+            if let connection = draft.result.connection, let error = controller.database.schema.errors[connection.id] {
+                Text("Estructura: " + error).font(.system(size: Theme.zoom(11))).foregroundStyle(.orange).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12)
             }
             HStack {
                 Text(draft.result.summary)

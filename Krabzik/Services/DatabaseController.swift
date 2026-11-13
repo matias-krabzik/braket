@@ -36,7 +36,6 @@ final class DatabaseController {
                 state.inTransaction = info.inTransaction
                 state.noBackslashEscapes = info.noBackslashEscapes
                 state.status = .connected
-                state.noBackslashEscapes = info.noBackslashEscapes
                 let preferred = schema.preference(connection).defaultDatabase
                 if !preferred.isEmpty, preferred != info.database {
                     let updated = try await client.useDatabase(preferred, config: connection, password: password)
@@ -61,6 +60,7 @@ final class DatabaseController {
             alert.addButton(withTitle: "Cancelar")
             guard alert.runModal() == .alertFirstButtonReturn else { return false }
         }
+        if schema.loading.contains(connection.id) { schema.cancel(connection.id) }
         await client.disconnect(connection.id)
         state.status = .disconnected
         state.inTransaction = false
@@ -127,7 +127,9 @@ final class DatabaseController {
                 state.currentDatabase = info.database
                 state.inTransaction = info.inTransaction
                 state.noBackslashEscapes = info.noBackslashEscapes
-                if schema.snapshot(connection) == nil { await schema.discover(connection, client: client) }
+                if schema.snapshot(connection) == nil {
+                    Task { await schema.discover(connection, client: client) }
+                }
             } catch {
                 execution.error = MySQLClient.message(error)
                 if let info = await client.info(connection.id) {
@@ -218,6 +220,7 @@ final class DatabaseController {
             alert.addButton(withTitle: "Cancelar")
             guard alert.runModal() == .alertFirstButtonReturn else { return false }
         }
+        schema.cancelAll()
         await client.closeAll()
         for state in states.values {
             state.status = .disconnected

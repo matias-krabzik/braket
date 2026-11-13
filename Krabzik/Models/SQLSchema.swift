@@ -42,6 +42,7 @@ struct SQLSchemaTable: Codable, Sendable, Equatable, Identifiable {
     var columns: [SQLSchemaColumn] = []
     var uniqueKeys: [[String]] = []
     var createSQL: String?
+    var metadataComplete: Bool?
     var id: String { database + "." + name }
     var qualified: String { SQLValue.identifier(database) + "." + SQLValue.identifier(name) }
 }
@@ -51,6 +52,7 @@ struct SQLSchemaSnapshot: Codable, Sendable {
     var databases: [String]
     var tables: [SQLSchemaTable]
     var fetchedAt = Date()
+    var isPartial: Bool?
 }
 
 enum SQLValue {
