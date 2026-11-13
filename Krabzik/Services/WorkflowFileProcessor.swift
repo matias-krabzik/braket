@@ -44,8 +44,9 @@ enum WorkflowFileProcessor {
                 let fallback = settings.namePattern
                     .replacingOccurrences(of: "{indice}", with: String(offset + 1))
                     .replacingOccurrences(of: "{extension}", with: ext)
-                let name = originalName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-                    ? originalName! : fallback
+                let name = originalName.flatMap { value in
+                    value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
+                } ?? fallback
                 try validateName(name)
                 guard let content = item["content"] as? String else {
                     throw WorkflowError.invalid("Falta el contenido de «\(name)».")

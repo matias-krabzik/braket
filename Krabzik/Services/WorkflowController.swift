@@ -248,7 +248,9 @@ final class WorkflowController {
                                                                  environment: ProcessInfo.processInfo.environment,
                                                                  json: input)
                     results[id] = WorkflowStepResult(summary: matches ? "Sí" : "No",
-                                                     detail: "\(left.prefix(160)) \(node.condition.operation.title) \(right.prefix(160))\n\(matches ? "Se cumplió" : "No se cumplió") la condición.",
+                                                     detail: "\(left.prefix(160)) \(node.condition.operation.title) " +
+                                                         "\(right.prefix(160))\n" +
+                                                         "\(matches ? "Se cumplió" : "No se cumplió") la condición.",
                                                      successful: true)
                     log += matches ? "Sí\n" : "No\n"
                     previousSucceeded = true
@@ -323,7 +325,7 @@ final class WorkflowController {
             case .files:
                 do {
                     let processed = try WorkflowFileProcessor.process(payload, settings: node.fileSettings,
-                                                                       root: root, preview: singleStep)
+                                                                      root: root, preview: singleStep)
                     payload = processed.payload
                     outputJSON[id] = WorkflowJSON.encode(payload)
                     previousSucceeded = processed.failed == 0

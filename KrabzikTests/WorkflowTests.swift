@@ -56,8 +56,7 @@ import XCTest
             XCTAssertEqual(model.visited[trigger.id], .exited(0))
             XCTAssertEqual(model.results[trigger.id]?.summary, "OK")
             XCTAssertEqual(model.results[finalNode.id]?.summary, "Finalizado")
-            XCTAssertTrue(model.traversedTransitions.contains(WorkflowTransition(
-                from: trigger.id, to: finalNode.id, isNo: false)))
+            XCTAssertTrue(model.traversedTransitions.contains(WorkflowTransition(from: trigger.id, to: finalNode.id, isNo: false)))
         }
     }
 
@@ -227,8 +226,8 @@ import XCTest
         XCTAssertEqual(WorkflowJSON.decode(received)["stdout"] as? String, "42")
         let selectedDecision = try XCTUnwrap(restored.selected?.nodes.first { $0.kind == .decision })
         XCTAssertEqual(restored.results[selectedDecision.id]?.summary, "Sí")
-        XCTAssertTrue(restored.traversedTransitions.contains(WorkflowTransition(
-            from: selectedDecision.id, to: try XCTUnwrap(selectedDecision.next), isNo: false)))
+        XCTAssertTrue(restored.traversedTransitions.contains(WorkflowTransition(from: selectedDecision.id,
+                                                                                to: try XCTUnwrap(selectedDecision.next), isNo: false)))
 
         var exitCondition = WorkflowCondition(mode: .compare, valueType: .number,
                                               operation: .equal,
@@ -319,11 +318,13 @@ import XCTest
         let file = root.appendingPathComponent(settings.outputPath)
         XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
         settings.outputMode = .filePath
-        XCTAssertEqual(WorkflowJSON.decode(try WorkflowAIOutput.deliver("## Nuevo", settings: settings, root: root).output)["files"] as? [[String: String]],
+        XCTAssertEqual(WorkflowJSON
+            .decode(try WorkflowAIOutput.deliver("## Nuevo", settings: settings, root: root).output)["files"] as? [[String: String]],
                        [["name": settings.outputPath, "content": "## Nuevo", "mimeType": "text/markdown"]])
         settings.outputMode = .output
         let multiple = """
-        {"text":"Listo","files":[{"name":"a.md","content":"A","mimeType":"text/markdown"},{"name":"b.json","content":"{}","mimeType":"application/json"}]}
+        {"text":"Listo","files":[{"name":"a.md","content":"A","mimeType":"text/markdown"},
+        {"name":"b.json","content":"{}","mimeType":"application/json"}]}
         """
         let multipleOutput = try WorkflowAIOutput.deliver(multiple, settings: settings, root: root).output
         XCTAssertEqual((WorkflowJSON.decode(multipleOutput)["files"] as? [[String: String]])?.count, 2)

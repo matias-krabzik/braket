@@ -176,14 +176,12 @@ final class AgentTests: XCTestCase {
         XCTAssertTrue(AgentController.approvalMatches(signed, approved: previous, team: "OPENAI"))
         XCTAssertFalse(AgentController.approvalMatches(signed, approved: previous, team: nil))
         XCTAssertFalse(AgentController.approvalMatches(signed, approved: previous, team: "OTHER"))
-        XCTAssertFalse(AgentController.approvalMatches(
-            CodexCandidate(url: signed.url, signature: .adHoc, identity: updated),
-            approved: previous, team: "OPENAI"))
+        XCTAssertFalse(AgentController.approvalMatches(CodexCandidate(url: signed.url, signature: .adHoc, identity: updated),
+                                                       approved: previous, team: "OPENAI"))
         let moved = BinaryIdentity(path: "/tmp/codex", size: 120, digest: "new")
-        XCTAssertFalse(AgentController.approvalMatches(
-            CodexCandidate(url: URL(fileURLWithPath: moved.path),
-                           signature: .developerID(team: "OPENAI"), identity: moved),
-            approved: previous, team: "OPENAI"))
+        XCTAssertFalse(AgentController.approvalMatches(CodexCandidate(url: URL(fileURLWithPath: moved.path),
+                                                                      signature: .developerID(team: "OPENAI"), identity: moved),
+                                                       approved: previous, team: "OPENAI"))
         XCTAssertTrue(AgentController.approvalMatches(signed, approved: updated, team: nil))
     }
 

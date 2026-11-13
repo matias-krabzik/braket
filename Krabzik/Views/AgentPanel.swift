@@ -2,7 +2,7 @@ import SwiftUI
 
 struct AgentPanel: View {
     @Bindable var controller: WorkspaceController
-    var onClose: (() -> Void)? = nil
+    var onClose: (() -> Void)?
     @State private var showingDiff = false
     @State private var showingDiagnostics = false
 
@@ -76,7 +76,8 @@ struct AgentPanel: View {
                     Divider()
                     VStack(alignment: .leading, spacing: 7) {
                         HStack {
-                            Text("\(agent.changes.count) archivos modificados").font(.system(size: Theme.zoom(10))).foregroundStyle(.secondary)
+                            Text("\(agent.changes.count) archivos modificados").font(.system(size: Theme.zoom(10)))
+                                .foregroundStyle(.secondary)
                             Spacer()
                             Button("Ver cambios") { showingDiff = true }.buttonStyle(.plain).font(.system(size: Theme.zoom(11)))
                                 .foregroundStyle(Theme.accent)
@@ -108,7 +109,8 @@ struct AgentPanel: View {
                         .overlay(alignment: .topLeading) {
                             if agent.draft
                                 .isEmpty {
-                                Text("Pedile un cambio a Codex…").font(.system(size: Theme.zoom(12))).foregroundStyle(.tertiary).padding(5)
+                                Text("Pedile un cambio a Codex…")
+                                    .font(.system(size: Theme.zoom(12))).foregroundStyle(.tertiary).padding(5)
                                 .allowsHitTesting(false) }
                         }
                     HStack {

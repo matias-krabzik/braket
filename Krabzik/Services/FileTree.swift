@@ -708,7 +708,7 @@ struct FileTree: NSViewRepresentable {
                          proposedItem item: Any?, proposedChildIndex index: Int) -> NSDragOperation {
             guard !controller.isReadOnly, let node = dropFolder(for: item),
                   (info.draggingPasteboard.readObjects(forClasses: [NSURL.self],
-                       options: [.urlReadingFileURLsOnly: true]) as? [URL])?.isEmpty == false,
+                                                       options: [.urlReadingFileURLsOnly: true]) as? [URL])?.isEmpty == false,
                   (try? fileSystem.checkedFolder(node.url)) != nil else { return [] }
             outlineView.setDropItem(node, dropChildIndex: NSOutlineViewDropOnItemIndex)
             if hoveredDropURL != node.url {
@@ -728,7 +728,7 @@ struct FileTree: NSViewRepresentable {
             hoveredDropURL = nil
             guard let node = dropFolder(for: item),
                   let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self],
-                                                                  options: [.urlReadingFileURLsOnly: true]) as? [URL],
+                                                                 options: [.urlReadingFileURLsOnly: true]) as? [URL],
                   !urls.isEmpty else { return false }
             let moving = info.draggingSource as? NSOutlineView === outlineView && !NSEvent.modifierFlags.contains(.option)
             transfer(urls, to: node.url, moving: moving, external: !moving)
