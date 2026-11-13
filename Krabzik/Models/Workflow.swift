@@ -209,7 +209,8 @@ extension WorkflowNode {
         } else {
             condition = savedCondition ?? .init()
             if kind == .decision {
-                if condition.left.source != .previousOutput && condition.left.source != .previousExitCode && condition.left.source != .jsonField {
+                if condition.left.source != .previousOutput && condition.left.source != .previousExitCode && condition.left
+                    .source != .jsonField {
                     condition.left = WorkflowOperand(source: .previousOutput)
                 }
                 if condition.right.source != .literal && condition.right.source != .environment {
@@ -299,7 +300,8 @@ struct WorkflowFile: Codable {
                       node.fileSettings.destination.utf8.count <= 2_048,
                       node.fileSettings.namePattern.utf8.count <= 256,
                       node.kind != .decision || (node.condition.mode == .compare &&
-                          (node.condition.left.source == .previousOutput || node.condition.left.source == .previousExitCode || node.condition.left.source == .jsonField) &&
+                          (node.condition.left.source == .previousOutput || node.condition.left.source == .previousExitCode || node
+                          .condition.left.source == .jsonField) &&
                           (node.condition.right.source == .literal || node.condition.right.source == .environment) &&
                           (node.condition.left.source != .previousExitCode || node.condition.valueType == .number)),
                       node.condition.left.value.utf8.count <= 2_048,

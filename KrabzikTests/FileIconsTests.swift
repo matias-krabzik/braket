@@ -11,9 +11,44 @@ final class FileIconsTests: XCTestCase {
     }
 
     func testPackagedVectorLogosAndFileTypes() throws {
-        for name in ["flutter", "android", "apple", "chrome", "windows8", "linux", "laravel", "php", "angular", "astro", "nodejs", "html5", "css3", "javascript", "typescript",
-                     "react", "vuejs", "svelte", "json", "yaml", "markdown", "swift", "dart", "python", "ruby",
-                     "go", "rust", "java", "c", "cplusplus", "csharp", "docker", "git", "bash", "npm", "composer"] {
+        for name in [
+            "flutter",
+            "android",
+            "apple",
+            "chrome",
+            "windows8",
+            "linux",
+            "laravel",
+            "php",
+            "angular",
+            "astro",
+            "nodejs",
+            "html5",
+            "css3",
+            "javascript",
+            "typescript",
+            "react",
+            "vuejs",
+            "svelte",
+            "json",
+            "yaml",
+            "markdown",
+            "swift",
+            "dart",
+            "python",
+            "ruby",
+            "go",
+            "rust",
+            "java",
+            "c",
+            "cplusplus",
+            "csharp",
+            "docker",
+            "git",
+            "bash",
+            "npm",
+            "composer"
+        ] {
             XCTAssertTrue(try XCTUnwrap(FileIcons.asset(name), name).isValid)
         }
         let mappings = ["view.blade.php": "laravel", "index.php": "php", "App.TSX": "react", "package.json": "npm",

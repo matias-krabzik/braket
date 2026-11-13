@@ -36,7 +36,8 @@ final class ProjectClosingTests: XCTestCase {
         let document = try XCTUnwrap(controller.selectedDocument)
         document.text = "SELECT 2;"
         document.isDirty = true
-        controller.session.dialogs.confirmStopProcesses = { XCTFail("No hay una ejecución activa"); return false }
+        controller.session.dialogs.confirmStopProcesses = { XCTFail("No hay una ejecución activa")
+        return false }
 
         let allowed = await controller.prepareToQuit()
         XCTAssertTrue(allowed)
@@ -51,7 +52,8 @@ final class ProjectClosingTests: XCTestCase {
         let running = await waitUntil { controller.runner.hasActiveProcesses }
         XCTAssertTrue(running)
         var prompts = 0
-        controller.session.dialogs.confirmStopProcesses = { prompts += 1; return false }
+        controller.session.dialogs.confirmStopProcesses = { prompts += 1
+        return false }
 
         let allowed = await controller.prepareToQuit()
         XCTAssertFalse(allowed)

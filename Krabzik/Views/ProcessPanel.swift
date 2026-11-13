@@ -8,7 +8,8 @@ struct ProcessPanel: View {
             HStack {
                 Text("Procesos").font(.system(size: Theme.zoom(11), weight: .medium))
                 Spacer()
-                Button { controller.processesVisible = false } label: { Image(systemName: "chevron.down").font(.system(size: Theme.zoom(10))) }
+                Button { controller.processesVisible = false } label: {
+                    Image(systemName: "chevron.down").font(.system(size: Theme.zoom(10))) }
                     .buttonStyle(.plain).help("Ocultar procesos")
             }
             .foregroundStyle(.secondary)

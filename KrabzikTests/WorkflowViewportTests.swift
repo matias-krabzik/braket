@@ -1,5 +1,5 @@
-@testable import Krabzik
 import AppKit
+@testable import Krabzik
 import SwiftUI
 import XCTest
 
@@ -12,8 +12,8 @@ import XCTest
         viewport.layoutSubtreeIfNeeded()
         func event(_ type: NSEvent.EventType, _ point: CGPoint) throws -> NSEvent {
             try XCTUnwrap(NSEvent.mouseEvent(with: type, location: viewport.convert(point, to: nil),
-                                            modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
-                                            context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+                                             modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
+                                             context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
         }
         viewport.mouseDown(with: try event(.leftMouseDown, CGPoint(x: 100, y: 100)))
         for step in 1...200 {
@@ -36,11 +36,11 @@ import XCTest
         var clicks = 0
         viewport.clearConnection = { clicks += 1 }
         let down = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: .zero,
-                                                  modifierFlags: [], timestamp: 0, windowNumber: 0,
-                                                  context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+                                                    modifierFlags: [], timestamp: 0, windowNumber: 0,
+                                                    context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
         let drag = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDragged, location: CGPoint(x: 80, y: 30),
-                                                  modifierFlags: [], timestamp: 0, windowNumber: 0,
-                                                  context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+                                                    modifierFlags: [], timestamp: 0, windowNumber: 0,
+                                                    context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
         viewport.mouseDown(with: down)
         viewport.mouseDragged(with: drag)
         viewport.mouseUp(with: drag)

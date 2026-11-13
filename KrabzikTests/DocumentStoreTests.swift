@@ -1,5 +1,5 @@
-@testable import Krabzik
 import AppKit
+@testable import Krabzik
 import XCTest
 
 /// Los archivos abiertos, sin un solo diálogo: es el criterio 5 de C5. Si alguna de estas

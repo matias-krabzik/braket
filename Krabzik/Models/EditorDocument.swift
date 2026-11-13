@@ -1,8 +1,8 @@
 import AppKit
 import Foundation
 import ImageIO
-import UniformTypeIdentifiers
 import Observation
+import UniformTypeIdentifiers
 
 /// Un archivo abierto en el editor.
 ///

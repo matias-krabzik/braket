@@ -354,10 +354,10 @@ struct WorkflowView: View {
                 guard let destination, let target = nodesByID[destination] else { continue }
                 let taken = traversed.contains(WorkflowTransition(from: node.id, to: destination, isNo: isNo))
                 drawings.append(arrowDrawing(from: outputPoint(node, isNo: isNo, size: size),
-                          to: inputPoint(target, size: size), color: color,
-                          targetWidth: halfWidth(of: target) * 2 * zoom,
-                          opacity: hasExecution ? (taken ? 1 : 0.16) : 0.85,
-                          lineWidth: taken ? 3.5 : 2))
+                                             to: inputPoint(target, size: size), color: color,
+                                             targetWidth: halfWidth(of: target) * 2 * zoom,
+                                             opacity: hasExecution ? (taken ? 1 : 0.16) : 0.85,
+                                             lineWidth: taken ? 3.5 : 2))
             }
         }
         if let pendingConnection, let source = nodesByID[pendingConnection.nodeID] {
@@ -370,8 +370,8 @@ struct WorkflowView: View {
     }
 
     private func arrowDrawing(from start: CGPoint, to end: CGPoint,
-                           color: Color, targetWidth: CGFloat = 0,
-                           opacity: Double = 0.85, lineWidth: CGFloat = 2) -> WorkflowConnectionDrawing {
+                              color: Color, targetWidth: CGFloat = 0,
+                              opacity: Double = 0.85, lineWidth: CGFloat = 2) -> WorkflowConnectionDrawing {
         var path = Path()
         path.move(to: start)
         if end.x < start.x + 24 * zoom {
@@ -794,7 +794,8 @@ private struct WorkflowInspector: View {
         switch node.kind {
         case .script: node.command.split(separator: "\n").first.map(String.init) ?? "Sin comando"
         case .ai: node.ai.model.isEmpty ? "Modelo automático" : node.ai.model
-        case .files: "\(node.fileSettings.sourcePath) → \(node.fileSettings.destination.isEmpty ? "Proyecto" : node.fileSettings.destination)"
+        case .files:
+            "\(node.fileSettings.sourcePath) → \(node.fileSettings.destination.isEmpty ? "Proyecto" : node.fileSettings.destination)"
         case .decision: "\(node.condition.left.source == .previousExitCode ? "Código" : "Salida") · \(node.condition.operation.title)"
         case .end: "Finaliza el flujo"
         case .start: "Inicio manual"
@@ -905,7 +906,10 @@ private struct WorkflowInspector: View {
         guard !node.kind.isTrigger else { return "{}" }
         switch predecessor?.kind {
         case .script: return WorkflowJSON.encode(["stdout": "a12b3c Mejorar editor", "stderr": "", "exitCode": 0])
-        case .ai: return WorkflowJSON.encode(["text": "Notas generadas", "files": [["name": "notas.md", "content": "# Cambios", "mimeType": "text/markdown"]]])
+        case .ai: return WorkflowJSON.encode([
+            "text": "Notas generadas",
+            "files": [["name": "notas.md", "content": "# Cambios", "mimeType": "text/markdown"]]
+        ])
         case .files: return WorkflowJSON.encode(["files": [["name": "notas.md", "content": "# Cambios", "mimeType": "text/markdown"]]])
         default: return WorkflowJSON.encode(["project": rootURL.lastPathComponent, "trigger": "manual"])
         }
@@ -916,9 +920,12 @@ private struct WorkflowInspector: View {
         case .start, .event, .schedule:
             return WorkflowJSON.encode(["project": rootURL.lastPathComponent, "trigger": node.kind.rawValue])
         case .script: return WorkflowJSON.encode(["stdout": "a12b3c Mejorar editor", "stderr": "", "exitCode": 0])
-        case .ai: return WorkflowJSON.encode(["text": "Notas generadas", "files": [["name": "notas.md", "content": "# Cambios", "mimeType": "text/markdown"]]])
+        case .ai: return WorkflowJSON.encode([
+            "text": "Notas generadas",
+            "files": [["name": "notas.md", "content": "# Cambios", "mimeType": "text/markdown"]]
+        ])
         case .files: return WorkflowJSON.encode(["fileResults": [["name": "notas.md", "path": "notas.md", "status": "preview"]],
-                                                  "fileSummary": ["total": 1, "processed": 1, "failed": 0, "preview": true]])
+                                                 "fileSummary": ["total": 1, "processed": 1, "failed": 0, "preview": true]])
         case .decision, .end: return exampleInput
         }
     }
@@ -1036,7 +1043,8 @@ private struct WorkflowInspector: View {
                         WorkflowSettingsCard(title: "Nombre si falta", symbol: "doc.text") {
                             TextField("archivo-{indice}.{extension}", text: $node.fileSettings.namePattern)
                                 .font(.system(size: Theme.zoom(11), design: .monospaced)).disabled(!canEdit)
-                            Text("Usa name si viene; si no, {indice} empieza en 1 y {extension} se obtiene de mimeType. Si existe, agrega (1), (2)…")
+                            Text("Usa name si viene; si no, {indice} empieza en 1 y {extension} se obtiene de mimeType. " +
+                                 "Si existe, agrega (1), (2)…")
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
                         WorkflowSettingsCard(title: "Sin archivos", symbol: "tray") {
@@ -1223,9 +1231,9 @@ private struct WorkflowJSONPane: View {
     let source: String?
     let json: String
     let example: Bool
-    var branchOutcome: String? = nil
+    var branchOutcome: String?
     var tested = false
-    var editableJSON: Binding<String>? = nil
+    var editableJSON: Binding<String>?
     @State private var viewMode = 0
     @State private var branchIndex = 0
 
@@ -1307,8 +1315,10 @@ private struct WorkflowJSONTree: View {
             if let object = value as? [String: Any] {
                 DisclosureGroup(isExpanded: $expanded) {
                     ForEach(object.keys.sorted(), id: \.self) { key in
-                        WorkflowJSONTree(name: key, value: object[key]!)
-                            .padding(.leading, 11)
+                        if let child = object[key] {
+                            WorkflowJSONTree(name: key, value: child)
+                                .padding(.leading, 11)
+                        }
                     }
                 } label: { Text("\(name)  {\(object.count)}") }
             } else if let items = value as? [Any] {
