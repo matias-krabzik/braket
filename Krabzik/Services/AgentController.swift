@@ -35,6 +35,7 @@ final class AgentController {
     var isBusy: Bool { isRunning || isLoadingSession }
     var selectedProjectID: UUID?
     var draft = ""
+    var deliveryMode = false
     var messages: [AgentMessage] = []
     var changes: [AgentFileChange] = []
     var requests: [AgentRequest] = []
@@ -442,7 +443,7 @@ final class AgentController {
         }
     }
 
-    func send(_ prompt: String, scope newScope: AgentScope, context: String = "") {
+    func send(_ prompt: String, scope newScope: AgentScope, context: String = "", deliveryMode: Bool = false) {
         guard !isBusy, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         guard prompt.utf8.count <= 32_000 else {
             error = "El mensaje admite hasta 32 KB."
@@ -508,7 +509,8 @@ final class AgentController {
                     "threadId": .string(threadID),
                     "input": .array([prompt, context].filter { !$0.isEmpty }
                     .map { .object(["type": .string("text"), "text": .string($0)]) }),
-                    "cwd": .string(newScope.cwd.path), "approvalPolicy": .string("on-request"), "sandboxPolicy": newScope.sandbox
+                    "cwd": .string(newScope.cwd.path), "approvalPolicy": .string("on-request"),
+                    "sandboxPolicy": newScope.sandbox(networkAccess: deliveryMode)
                 ]), timeout: 90)
                 guard token == generation, operation == operationID, isRunning else { return }
                 turnID = result["turn"]["id"].string

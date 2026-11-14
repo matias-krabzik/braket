@@ -27,7 +27,7 @@ import sys
 # El README no repite el número a propósito: así no hay nada que pueda quedar
 # desincronizado. Ver docs/specs/C10-version-unica.md.
 MARKETING_VERSION = '0.5.15'
-BUILD_NUMBER = '56'
+BUILD_NUMBER = '57'
 
 root = Path(__file__).resolve().parent.parent
 PBXPROJ = root / 'Braket.xcodeproj/project.pbxproj'

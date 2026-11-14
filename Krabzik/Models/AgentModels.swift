@@ -200,9 +200,9 @@ struct AgentScope: Equatable, Sendable {
         }
         return AgentScope(names: projects.map(\.name), roots: roots)
     }
-    var sandbox: JSONValue {
+    func sandbox(networkAccess: Bool = false) -> JSONValue {
         .object(["type": .string("workspaceWrite"), "writableRoots": .array(roots.map { .string($0.path) }),
-                 "networkAccess": .bool(false), "excludeSlashTmp": .bool(true), "excludeTmpdirEnvVar": .bool(true)])
+                 "networkAccess": .bool(networkAccess), "excludeSlashTmp": .bool(true), "excludeTmpdirEnvVar": .bool(true)])
     }
     var instructions: String {
         """
@@ -219,7 +219,13 @@ struct AgentScope: Equatable, Sendable {
         Resolvé decisiones rutinarias por tu cuenta, verificá con las pruebas pertinentes y corregí los fallos de tu cambio.
         Mantené al usuario informado con avances breves y concretos. No termines con una propuesta si pidió implementar.
         Para editar archivos usá apply_patch, de modo que el IDE pueda mostrar los cambios. Conservá los cambios existentes del usuario.
-        No accedas al Llavero, a credenciales de bases de datos, a archivos de autenticación ni a datos fuera de los subproyectos.
+        No leas el Llavero, credenciales de bases de datos ni archivos de autenticación. No leas datos fuera de los subproyectos.
+        Si el usuario habilitó el modo Entrega para este turno, podés usar la red para publicar en el destino pedido.
+        Usá los scripts de firma y notarización del proyecto: invocan el Llavero sin revelar las credenciales.
+        Si el sandbox impide ejecutar esos scripts, pedí permiso para ejecutar únicamente el script de entrega necesario.
+        Si el repositorio de destino está fuera de los subproyectos, indicá que debe agregarse al proyecto; \
+        no amplíes el alcance por tu cuenta.
+        Nunca imprimas ni copies secretos.
         No publiques, despliegues, envíes mensajes ni crees commits salvo pedido explícito. No inicies subagentes.
         Preguntá solo si falta una decisión esencial que no podés inferir del código. Respetá los pedidos de no programar.
         Al terminar indicá los cambios, la verificación realizada y cualquier impedimento real.

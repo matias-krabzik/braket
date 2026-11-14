@@ -133,6 +133,11 @@ struct AgentPanel: View {
                         Label("Contexto automático", systemImage: "doc.text.magnifyingglass")
                             .font(.system(size: Theme.zoom(10))).foregroundStyle(.secondary)
                             .help("Archivo activo, selección, archivos abiertos y salida reciente de procesos del alcance elegido.")
+                        Toggle("Entrega", isOn: $agent.deliveryMode)
+                            .toggleStyle(.checkbox).font(.system(size: Theme.zoom(10)))
+                            .disabled(agent.isBusy)
+                            .help("Habilita la red solo para esta tarea. Agregá el repositorio de destino "
+                                  + "como subproyecto. La firma usa los scripts y puede pedir aprobación.")
                         Spacer()
                         if agent.isRunning {
                             Button(action: agent.stop) { Image(systemName: "stop.fill") }

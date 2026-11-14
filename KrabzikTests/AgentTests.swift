@@ -273,8 +273,9 @@ final class AgentTests: XCTestCase {
         XCTAssertFalse(scope.contains(api.appendingPathComponent("outside/private.txt")))
         let single = try AgentScope.make(workspace: workspace, url: base.appendingPathComponent("Test.krabzik"), projectID: first.id)
         XCTAssertFalse(single.contains(client.appendingPathComponent("app.ts")))
-        XCTAssertEqual(scope.sandbox["networkAccess"], .bool(false))
-        XCTAssertEqual(scope.sandbox["excludeSlashTmp"], .bool(true))
+        XCTAssertEqual(scope.sandbox()["networkAccess"], .bool(false))
+        XCTAssertEqual(scope.sandbox(networkAccess: true)["networkAccess"], .bool(true))
+        XCTAssertEqual(scope.sandbox()["excludeSlashTmp"], .bool(true))
     }
 
     @MainActor func testEditorReloadPreservesUnsavedChangesAndUpdatesNativeSurface() throws {

@@ -64,7 +64,11 @@ final class AgentBridge {
                     for document in dirty where !(await files.save(document)) { return }
                 }
                 guard session.url == workspaceURL, agent.selectedSessionID == sessionID else { return }
-                agent.send(prompt, scope: scope, context: context(scope))
+                let deliveryMode = agent.deliveryMode
+                agent.deliveryMode = false
+                agent.send(prompt, scope: scope,
+                           context: context(scope) + (deliveryMode ? "\nModo Entrega habilitado por el usuario para este turno." : ""),
+                           deliveryMode: deliveryMode)
             } catch { agent.error = error.localizedDescription }
         }
     }

@@ -52,9 +52,11 @@ trae. Es un rediseño, no un ajuste: si alguna vez se decide, es un spec aparte.
   cambiar host o puerto invalida la credencial guardada (`CredentialStore`).
 - **TLS verificado por defecto** en MySQL, con el handler de NIOSSL comprobado en la conexión. Los modos
   compatibles con Workbench permiten cifrado sin verificación o texto plano si el usuario los elige.
-- **Sandbox propio de Codex**: `workspaceWrite` con `writableRoots` explícitas, `networkAccess: false`,
-  `excludeSlashTmp` y `excludeTmpdirEnvVar`. Las raíces escribibles nunca incluyen una ruta que el usuario
-  no aprobó viéndola.
+- **Sandbox propio de Codex**: `workspaceWrite` con `writableRoots` explícitas, `networkAccess: false`
+  por defecto, `excludeSlashTmp` y `excludeTmpdirEnvVar`. «Entrega» habilita la red solo para el turno
+  enviado; no agrega raíces escribibles. El repositorio de destino debe incorporarse como subproyecto
+  confiable. La firma usa scripts del proyecto y el perfil del Llavero; Codex no recibe secretos.
+  Las raíces escribibles nunca incluyen una ruta que el usuario no aprobó viéndola.
 - **Hijos en su propio grupo de procesos** (`POSIX_SPAWN_SETPGROUP`) y descriptores cerrados por defecto
   (`POSIX_SPAWN_CLOEXEC_DEFAULT`): al cerrar el proyecto se termina el grupo completo, no solo el proceso
   raíz, y ningún hijo hereda descriptores de la app.
