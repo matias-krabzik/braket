@@ -210,8 +210,11 @@ struct PixelStateDiff: Sendable {
         }
     }
 
-    /// Resumen para `PixelRevision.affected`.
-    func affected(result: PixelArtState) -> PixelAffected {
+    /// Resumen para `PixelRevision.affected`. Las regiones se recortan al mayor de los dos lienzos: un bloque que
+    /// existía solo en el estado base (porque un recorte lo dejó fuera) sigue siendo una región afectada.
+    func affected(base: PixelArtState, result: PixelArtState) -> PixelAffected {
+        let width = max(base.width, result.width)
+        let height = max(base.height, result.height)
         var layers = Set(changedLayerProperties.keys).union(addedLayers).union(removedLayers)
         var frames = addedFrames.union(removedFrames).union(changedDurations)
         var regions: [PixelRegion] = []
@@ -220,8 +223,8 @@ struct PixelStateDiff: Sendable {
             frames.insert(key.frameID)
             for coord in coords.sorted() {
                 regions.append(PixelRegion(layerID: key.layerID, frameID: key.frameID, x: coord.x * PxaTile.side, y: coord.y * PxaTile.side,
-                                           width: min(PxaTile.side, result.width - coord.x * PxaTile.side),
-                                           height: min(PxaTile.side, result.height - coord.y * PxaTile.side)))
+                                           width: max(0, min(PxaTile.side, width - coord.x * PxaTile.side)),
+                                           height: max(0, min(PxaTile.side, height - coord.y * PxaTile.side))))
             }
         }
         let entries = addedEntries.union(removedEntries).union(editedEntries.keys).sorted()

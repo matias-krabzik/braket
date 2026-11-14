@@ -357,7 +357,7 @@ struct PixelProposalAnalysis: Equatable, Sendable {
         let changes = ids.map { id in
             PixelPaletteChange(id: id, before: core.state.palette.entry(id), after: proposed.palette.entry(id))
         }
-        return PixelProposalAnalysis(affected: diff.affected(result: proposed), paletteChanges: changes,
+        return PixelProposalAnalysis(affected: diff.affected(base: core.state, result: proposed), paletteChanges: changes,
                                      newObjects: probe.count - before, newBytes: probe.totalBytes - bytesBefore)
     }
 }

@@ -177,7 +177,7 @@ struct PixelDocumentCore: Sendable {
         let ref = PixelArtStateCodec.encode(working, into: &newStore)
         var newHistory = history
         var revision = PixelRevision(afterState: ref, operationKind: transaction.operationKind, label: transaction.label,
-                                     source: transaction.source, affected: diff.affected(result: working),
+                                     source: transaction.source, affected: diff.affected(base: state, result: working),
                                      assistantRecord: transaction.assistantRecord, focusBefore: transaction.focusBefore,
                                      focusAfter: transaction.focusAfter)
         revision = try newHistory.commit(revision, storageBytes: newStore.totalBytes)

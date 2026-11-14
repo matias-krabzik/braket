@@ -556,6 +556,25 @@ final class PixelArtOperationsTests: XCTestCase {
         assertRejected(core, tx(core, [.resizeCanvas(width: 5_000, height: 5, offsetX: 0, offsetY: 0)]), .limit)
     }
 
+    /// Regresión: un recorte que deja fuera un bloque dejaba su región con tamaño negativo en `affected`, y el
+    /// archivo guardado no se podía volver a abrir. Lo encontró la secuencia aleatoria de la semilla 1.
+    func testACropThatDropsATileStillSavesAndReopens() throws {
+        var document = try PixelArtDocument(width: 40, height: 40)
+        let layer = document.state.layers[0].id
+        let frame = document.state.frames[0].id
+        try document.core.apply(PixelTransaction(label: "p", operationKind: "t", scope: .document(document.state),
+                                                 operations: [.writePixels(layer: layer, frame: frame,
+                                                                           writes: [PixelWrite(x: 35, y: 35, value: .free(red))])]))
+        let revision = try XCTUnwrap(try document.core.apply(PixelTransaction(label: "recorte", operationKind: "t",
+                                                                              scope: .document(document.state),
+                                                                              operations: [.resizeCanvas(width: 30, height: 30, offsetX: 0,
+                                                                                                         offsetY: 0)])))
+        XCTAssertTrue(revision.affected.regions.allSatisfy { $0.width >= 0 && $0.height >= 0 })
+        let reopened = try PixelArtFile.read(try PixelArtFile.snapshot(of: document).data)
+        XCTAssertEqual(reopened.state, document.state)
+        XCTAssertEqual(reopened.core.history, document.core.history)
+    }
+
     func testStateRoundTripsThroughTheStoreAfterManyOperations() throws {
         var core = try makeCore()
         try core.apply(tx(core,
