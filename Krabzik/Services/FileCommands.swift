@@ -25,6 +25,7 @@ final class FileCommands {
     private static let scriptsDirectoriesKey = "sql.projectScriptsDirectories.v1"
     var requestNewFile: ((URL?) -> Void)?
     var didSaveDraft: ((EditorDocument) -> Void)?
+    var onOpen: (() -> Void)?
 
     init(session: WorkspaceSession, docs: DocumentStore, defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -72,6 +73,7 @@ final class FileCommands {
         Task {
             do {
                 try await docs.open(url) { self.session.url == currentWorkspace }
+                if session.url == currentWorkspace, docs.selectedID == url.standardizedFileURL { onOpen?() }
             } catch {
                 session.errors.report(error)
             }

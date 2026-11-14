@@ -4,7 +4,7 @@ struct WorkspaceView: View {
     @Bindable var controller: WorkspaceController
 
     private var showsSQLResults: Bool {
-        guard !controller.workflowVisible, let document = controller.selectedDocument,
+        guard !controller.workflowVisible && !controller.agent.visible, let document = controller.selectedDocument,
               document.language == "SQL", controller.database.resultsVisible else { return false }
         return document.sqlExecution.isRunning || document.sqlExecution.error != nil || !document.sqlExecution.results.isEmpty
     }
@@ -16,12 +16,14 @@ struct WorkspaceView: View {
                 HStack(spacing: 0) {
                     ProjectRail(controller: controller)
                     WorkspaceModeRail(controller: controller).zIndex(1)
-                    WorkspaceVerticalSplit(showsBottom: showsSQLResults || (controller.processesVisible && !controller.workflowVisible),
+                    WorkspaceVerticalSplit(showsBottom: showsSQLResults ||
+                                           (controller.processesVisible && !controller.workflowVisible && !controller.agent.visible),
                                            isResults: showsSQLResults) {
                         HSplitView {
                             if controller.sidebarVisible {
                                 Group {
-                                    if controller.database.browserShowsDatabases { DatabaseExplorer(controller: controller) }
+                                    if controller.sessionsSidebarVisible { AgentSessionsSidebar(controller: controller) }
+                                    else if controller.database.browserShowsDatabases { DatabaseExplorer(controller: controller) }
                                     else { WorkspaceSidebar(controller: controller, workspace: workspace, url: url).id(url) }
                                 }
                                 .frame(minWidth: 230, idealWidth: 270, maxWidth: 420)
@@ -29,21 +31,18 @@ struct WorkspaceView: View {
                                 .background(SidebarWidthPersistence())
                             }
                             editorArea.frame(minWidth: 420, maxWidth: .infinity, minHeight: 180, maxHeight: .infinity)
-                            if controller.agent.visible && !controller.workflowVisible {
-                                AgentPanel(controller: controller).frame(minWidth: 300, idealWidth: 350, maxWidth: 460)
-                            }
                         }
                     } bottom: {
                         if showsSQLResults, let document = controller.selectedDocument {
                             SQLResultsPanel(execution: document.sqlExecution, controller: controller) {
                                 controller.database.resultsVisible = false
                             }.frame(minHeight: 220, idealHeight: 360, maxHeight: .infinity)
-                        } else if controller.processesVisible && !controller.workflowVisible {
+                        } else if controller.processesVisible && !controller.workflowVisible && !controller.agent.visible {
                             ProcessPanel(controller: controller).frame(minHeight: 150, idealHeight: 240, maxHeight: 440)
                         }
                     }
                 }
-                EditorStatusBar(document: controller.workflowVisible ? nil : controller.selectedDocument)
+                EditorStatusBar(document: controller.workflowVisible || controller.agent.visible ? nil : controller.selectedDocument)
             } else {
                 WelcomeView(controller: controller)
             }
@@ -71,7 +70,7 @@ struct WorkspaceView: View {
                 }
                 if !controller.workflowVisible {
                     ToolbarItem(placement: .primaryAction) {
-                        Button { controller.agent.visible.toggle() } label: { Image(systemName: "sparkles") }
+                        Button { controller.openAgent() } label: { Image(systemName: "sparkles") }
                             .help("Mostrar Codex").accessibilityLabel("Mostrar Codex")
                             .disabled(controller.isReadOnly)
                     }
@@ -138,7 +137,7 @@ struct WorkspaceView: View {
 
     private var editorArea: some View {
         VStack(spacing: 0) {
-            if !controller.documents.isEmpty || controller.workflowTabOpen {
+            if !controller.documents.isEmpty || controller.workflowTabOpen || controller.agent.tabOpen {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 4) {
                         ForEach(controller.documents) { document in
@@ -146,13 +145,24 @@ struct WorkspaceView: View {
                                                icon: Image(nsImage: FileIcons.file(document.url)),
                                                tooltip: document.isDraft ? "Borrador SQL · sin guardar" : document.url.path,
                                                isDirty: document.isDirty,
-                                               selected: !controller.workflowVisible && controller.selectedDocumentID == document.id,
+                                               selected: !controller.workflowVisible && !controller.agent.visible
+                                                   && controller.selectedDocumentID == document.id,
                                                select: { controller.selectedDocumentID = document.id },
                                                close: { controller.closeDocument(document) })
                                 .contextMenu {
                                     Button("Renombrar…") { controller.renameFile(document.url) }.disabled(document.isDraft)
                                         .disabled(controller.isReadOnly)
                                 }
+                        }
+                        if controller.agent.tabOpen {
+                            WorkspaceEditorTab(title: controller.agent.sessionTitle,
+                                               icon: Image(systemName: "sparkles"), tooltip: "Codex · " + controller.agent.sessionTitle,
+                                               selected: controller.agent.visible,
+                                               select: { controller.openAgent() },
+                                               close: {
+                                                   controller.agent.visible = false
+                                                   controller.agent.tabOpen = false
+                                               })
                         }
                         if controller.workflowTabOpen {
                             WorkspaceEditorTab(title: controller.workflows.selected?.name ?? "Automatización",
@@ -169,12 +179,11 @@ struct WorkspaceView: View {
                 }.background(Theme.bar)
                 Rectangle().fill(Theme.border).frame(height: 1)
             }
-            if controller.workflowVisible, let url = controller.workspaceURL {
+            if controller.agent.visible {
+                AgentPanel(controller: controller)
+            } else if controller.workflowVisible, let url = controller.workspaceURL {
                 WorkflowView(controller: controller, workspaceURL: url)
             } else { editor }
-        }
-        .onChange(of: controller.selectedDocumentID) { old, new in
-            if new != old, new != nil { controller.workflowVisible = false }
         }
         .onChange(of: controller.workspaceURL) { _, _ in
             controller.workflowVisible = false

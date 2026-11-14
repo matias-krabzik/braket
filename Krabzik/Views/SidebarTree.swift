@@ -91,6 +91,8 @@ struct SidebarTree<Value, Content: View>: View {
     let nodes: [SidebarTreeNode<Value>]
     let name: (Value) -> String
     var activate: (Value) -> Void = { _ in }
+    var selectedID: String?
+    var activateOnSingleClick = false
     @ViewBuilder let content: (Value) -> Content
     @State private var expanded: Set<String> = []
     @State private var selected: String?
@@ -123,6 +125,7 @@ struct SidebarTree<Value, Content: View>: View {
     private func rowView(_ row: Row) -> some View {
         let open = expanded.contains(row.id)
         let depth = CGFloat(row.ancestors.count)
+        let isSelected = (selectedID ?? selected) == row.id
         return HStack(spacing: 0) {
             Color.clear.frame(width: Theme.zoom(depth * SidebarTreeStyle.indent + SidebarTreeStyle.iconLeading))
             content(row.node.value)
@@ -134,10 +137,13 @@ struct SidebarTree<Value, Content: View>: View {
             selected = row.id
             activate(row.node.value)
         }
-        .onTapGesture { selected = row.id }
-        .accessibilityAddTraits(selected == row.id ? .isSelected : [])
+        .onTapGesture {
+            selected = row.id
+            if activateOnSingleClick { activate(row.node.value) }
+        }
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
         .background(alignment: .leading) {
-            if selected == row.id {
+            if isSelected {
                 RoundedRectangle(cornerRadius: 5).fill(.primary.opacity(0.14))
                     .padding(.leading, Theme.zoom(depth * SidebarTreeStyle.indent + SidebarTreeStyle.iconLeading))
                     .padding(.trailing, Theme.zoom(8)).padding(.vertical, Theme.zoom(2))

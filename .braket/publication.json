@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "product": "Braket",
+  "technology": "macos-swift",
+  "lastPublished": {
+    "version": "0.5.14",
+    "ref": "f74f9b6706c0a881d34b7baad61345e695eb67a6",
+    "notes": [
+      "docs/releases/0.5.14.md"
+    ]
+  },
+  "languages": [
+    "es",
+    "en"
+  ],
+  "versionBump": "patch",
+  "site": {
+    "path": "/Users/mati/Projects/Webs/krabzik.com",
+    "feed": "public/apps/krabzik-ide/appcast.xml"
+  }
+}

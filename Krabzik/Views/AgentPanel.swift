@@ -22,15 +22,18 @@ struct AgentPanel: View {
                 Text("Codex").font(.system(size: Theme.zoom(12), weight: .semibold))
                 Spacer()
                 Text(agent.account).font(.system(size: Theme.zoom(10))).foregroundStyle(.secondary).help(agent.model)
-                Button { agent.clearConversation() } label: { Image(systemName: "square.and.pencil") }
-                    .disabled(agent.isRunning || agent.messages.isEmpty)
+                Button { controller.openAgent(newSession: true) } label: { Image(systemName: "square.and.pencil") }
+                    .disabled(agent.isBusy)
                     .help("Nueva conversación")
                     .accessibilityLabel("Nueva conversación")
                 Button {
                     if let onClose { onClose() }
-                    else { agent.visible = false }
+                    else {
+                        agent.visible = false
+                        agent.tabOpen = false
+                    }
                 } label: { Image(systemName: "xmark") }
-                    .help("Cerrar panel Codex").accessibilityLabel("Cerrar panel Codex")
+                    .help("Cerrar pestaña Codex").accessibilityLabel("Cerrar pestaña Codex")
             }.buttonStyle(.plain).padding(.horizontal, 14).frame(height: 39).background(Theme.bar)
             Divider()
             if agent.isConnecting {
@@ -55,13 +58,26 @@ struct AgentPanel: View {
                     else { Button("Iniciar sesión con ChatGPT", action: agent.login) }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                Picker("Subproyectos", selection: $agent.selectedProjectID) {
+                Picker("Subproyectos", selection: Binding(get: { agent.selectedProjectID }, set: { id in
+                    agent.newSession()
+                    agent.selectedProjectID = id
+                })) {
                     Text("Todos los subproyectos").tag(nil as UUID?)
                     ForEach(controller.workspace?.projects ?? []) { project in Text(project.name).tag(Optional(project.id)) }
-                }.labelsHidden().pickerStyle(.menu).disabled(agent.isRunning).padding(10)
+                }.labelsHidden().pickerStyle(.menu).disabled(agent.isBusy).padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 18) {
+                        if agent.isLoadingSession {
+                            ProgressView("Recuperando sesión…").controlSize(.small)
+                        } else if agent.messages.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("¿En qué trabajamos?").font(.title3.weight(.medium))
+                                Text("Codex usa el archivo activo y la selección para empezar, "
+                                     + "y busca el contexto que necesite en el proyecto.")
+                                    .font(.callout).foregroundStyle(.secondary)
+                            }.padding(.vertical, 24)
+                        }
                         ForEach(agent.messages) { message in AgentMessageView(message: message) }
                         if agent.isRunning {
                             HStack(alignment: .top, spacing: 8) {
@@ -104,7 +120,7 @@ struct AgentPanel: View {
                 }
                 Divider()
                 VStack(spacing: 8) {
-                    AgentComposer(text: $agent.draft, enabled: !agent.isRunning, theme: AppSettings.shared.theme,
+                    AgentComposer(text: $agent.draft, enabled: !agent.isBusy, theme: AppSettings.shared.theme,
                                   send: controller.bridge.send).frame(height: 82)
                         .overlay(alignment: .topLeading) {
                             if agent.draft
@@ -114,13 +130,17 @@ struct AgentPanel: View {
                                 .allowsHitTesting(false) }
                         }
                     HStack {
+                        Label("Contexto automático", systemImage: "doc.text.magnifyingglass")
+                            .font(.system(size: Theme.zoom(10))).foregroundStyle(.secondary)
+                            .help("Archivo activo, selección, archivos abiertos y salida reciente de procesos del alcance elegido.")
                         Spacer()
                         if agent.isRunning {
                             Button(action: agent.stop) { Image(systemName: "stop.fill") }
                                 .disabled(agent.isStopping).help("Detener Codex").accessibilityLabel("Detener Codex")
                         } else {
                             Button(action: controller.bridge.send) { Image(systemName: "arrow.up") }
-                                .disabled(agent.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || controller.workspace?
+                                .disabled(agent.isLoadingSession || agent.draft.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    .isEmpty || controller.workspace?
                                     .projects.isEmpty != false)
                                 .help("Enviar a Codex (⌘↩)").accessibilityLabel("Enviar a Codex")
                         }
@@ -134,8 +154,9 @@ struct AgentPanel: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading).padding(12)
             }
-        }.background(Theme.background).task(id: controller.workspaceURL) { await agent.connect() }
-        .onChange(of: agent.selectedProjectID) { _, _ in agent.clearConversation() }
+        }.background(Theme.background).task(id: controller.workspaceURL) {
+            if !controller.isReadOnly { await agent.connect() }
+        }
         .sheet(isPresented: $showingDiagnostics) {
             VStack(spacing: 0) {
                 HStack {
@@ -217,7 +238,9 @@ private struct AgentRequestView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
-            if request.isQuestion { questions } else { approval }
+            if request.isQuestion { questions }
+            else if request.isPermissions { permissionsApproval }
+            else { approval }
         }.buttonStyle(.bordered).controlSize(.small)
     }
 
@@ -299,6 +322,31 @@ private struct AgentRequestView: View {
                 Spacer()
                 Button("Rechazar") { agent.answer(request, accept: false) }
                 Button("Permitir una vez") { agent.answer(request, accept: true) }
+                if request.canAllowForSession {
+                    Button("Permitir siempre en esta sesión") { agent.answer(request, accept: true, forSession: true) }
+                        .help("Codex recordará esta aprobación hasta cerrar la sesión actual.")
+                } else if request.method == "item/commandExecution/requestApproval" {
+                    Button("Permitir siempre en esta tarea") { agent.answer(request, accept: true, remainingTurn: true) }
+                        .help("Braket aprobará los demás comandos de este turno sin volver a preguntar.")
+                }
+            }
+        }
+    }
+
+    private var permissionsApproval: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Acceso adicional solicitado").font(.system(size: Theme.zoom(12), weight: .medium))
+            if let reason = request.params["reason"].string {
+                Text(ModelText.display(reason, limit: 2_000)).textSelection(.enabled)
+            }
+            ScrollView {
+                modelBlock(ModelText.display(request.params["permissions"].pretty, limit: 100_000))
+            }.frame(maxHeight: 130)
+            HStack {
+                Spacer()
+                Button("Rechazar") { agent.answer(request, accept: false) }
+                Button("Permitir una vez") { agent.answer(request, accept: true) }
+                Button("Permitir siempre en esta sesión") { agent.answer(request, accept: true, forSession: true) }
             }
         }
     }

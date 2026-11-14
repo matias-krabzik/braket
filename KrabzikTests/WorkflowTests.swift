@@ -145,6 +145,53 @@ import XCTest
         XCTAssertEqual(WorkflowJSON.decode(restored.outputJSON[scriptID] ?? "")["exitCode"] as? Int, 0)
     }
 
+    func testPublicationContextSurvivesLaterScriptAndDecision() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let workspace = root.appendingPathComponent("Example.kzk")
+        let model = WorkflowController()
+        model.configure(workspace, root: root)
+        let flow = try XCTUnwrap(model.selected)
+        let first = try XCTUnwrap(flow.nodes.first { $0.kind == .script })
+        let decision = try XCTUnwrap(flow.nodes.first { $0.kind == .decision })
+        let command = "python3 -c 'import json,os; "
+            + "print(json.loads(os.environ[\"BRAKET_INPUT\"])[\"context\"][\"baseCommit\"])'"
+        let second = WorkflowNode(kind: .script, title: "Read context", command: command,
+                                  x: 400, y: 100, next: decision.id)
+        let index = try XCTUnwrap(model.file.workflows[0].nodes.firstIndex { $0.id == first.id })
+        model.file.workflows[0].nodes[index].command = "printf '{\"baseCommit\":\"abc123\"}'"
+        model.file.workflows[0].nodes[index].settings.capturesContext = true
+        model.file.workflows[0].nodes[index].next = second.id
+        model.file.workflows[0].nodes.append(second)
+        let runner = ProcessRunner()
+        defer { runner.terminateImmediately() }
+        model.confirmCommand = { _ in .once }
+        model.run(workspace: workspace, root: root, runner: runner, trusted: true,
+                  approvals: try approvingStore())
+        let deadline = Date().addingTimeInterval(8)
+        while model.isRunning, Date() < deadline { try await Task.sleep(for: .milliseconds(30)) }
+        XCTAssertFalse(model.isRunning)
+        let input = WorkflowJSON.decode(model.inputJSON[second.id] ?? "")
+        let runID = (input["run"] as? [String: String])?["id"]
+        XCTAssertNotNil(UUID(uuidString: runID ?? ""))
+        XCTAssertEqual((input["context"] as? [String: Any])?["baseCommit"] as? String, "abc123")
+        XCTAssertEqual(input["stdout"] as? String, "")
+        let output = WorkflowJSON.decode(model.outputJSON[second.id] ?? "")
+        XCTAssertEqual(output["stdout"] as? String, "abc123")
+        XCTAssertEqual((output["context"] as? [String: Any])?["baseCommit"] as? String, "abc123")
+        XCTAssertEqual((output["run"] as? [String: String])?["id"], runID)
+        let step = (output["steps"] as? [String: [String: Any]])?[first.id.uuidString]
+        XCTAssertEqual(step?["successful"] as? Bool, true)
+        XCTAssertEqual(model.results[decision.id]?.summary, "Sí")
+        model.run(workspace: workspace, root: root, runner: runner, trusted: true,
+                  approvals: try approvingStore())
+        let secondDeadline = Date().addingTimeInterval(8)
+        while model.isRunning, Date() < secondDeadline { try await Task.sleep(for: .milliseconds(30)) }
+        let nextRunID = (WorkflowJSON.decode(model.inputJSON[second.id] ?? "")["run"] as? [String: String])?["id"]
+        XCTAssertNotEqual(nextRunID, runID)
+    }
+
     func testScriptTimeoutMarksStepAsFailed() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -288,7 +335,9 @@ import XCTest
         XCTAssertFalse(model.isRunning)
         XCTAssertEqual(model.results[decision.id]?.summary, "Sí")
         XCTAssertEqual(model.executionOrder, [decision.id])
-        XCTAssertEqual(model.inputJSON[decision.id], model.outputJSON[decision.id])
+        XCTAssertEqual(WorkflowJSON.decode(model.inputJSON[decision.id] ?? "")["stdout"] as? String, "abc")
+        let decisionSteps = WorkflowJSON.decode(model.outputJSON[decision.id] ?? "")["steps"] as? [String: [String: Any]]
+        XCTAssertEqual(decisionSteps?[decision.id.uuidString]?["summary"] as? String, "Sí")
         XCTAssertEqual(WorkflowJSON.decode(model.outputJSON[decision.id] ?? "")["stdout"] as? String, "abc")
 
         model.testNode(decision.id, input: "{\"stdout\":\"\",\"exitCode\":0}",
@@ -331,6 +380,39 @@ import XCTest
         settings.outputMode = .file
         settings.outputPath = "../afuera.md"
         XCTAssertThrowsError(try WorkflowAIOutput.deliver("No", settings: settings, root: root))
+    }
+
+    func testCodexRequiredFilesRejectsIncompleteResponseBeforeWriting() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let settings = WorkflowAISettings(requiredFiles: [
+            WorkflowAIRequiredFile(name: "notes.es.md", mimeType: "text/markdown"),
+            WorkflowAIRequiredFile(name: "notes.en.md", mimeType: "text/markdown")
+        ])
+        let valid = """
+        {"text":"Ready","files":[{"name":"notes.es.md","content":"# ES","mimeType":"text/markdown"},
+        {"name":"notes.en.md","content":"# EN","mimeType":"text/markdown"}]}
+        """
+        XCTAssertNoThrow(try WorkflowAIOutput.deliver(valid, settings: settings, root: root))
+        let invalid = [
+            "plain text",
+            ##"{"text":"Ready","files":[{"name":"notes.es.md","content":"# ES","mimeType":"text/markdown"}]}"##,
+            valid.replacingOccurrences(of: "notes.en.md", with: "notes.es.md"),
+            valid.replacingOccurrences(of: "# EN", with: "  "),
+            valid.replacingOccurrences(of: "text/markdown", with: "text/plain")
+        ]
+        for response in invalid {
+            XCTAssertThrowsError(try WorkflowAIOutput.deliver(response, settings: settings, root: root))
+        }
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: root.path).isEmpty)
+    }
+
+    func testRequiredFilesDecodeWithoutInternalIDs() throws {
+        let data = Data(#"{"prompt":"notes","requiredFiles":[{"name":"notes.es.md","mimeType":"text/markdown"}]}"#.utf8)
+        let settings = try JSONDecoder().decode(WorkflowAISettings.self, from: data)
+        XCTAssertEqual(settings.requiredFiles.first?.name, "notes.es.md")
+        XCTAssertNotNil(settings.requiredFiles.first?.id)
     }
 
     func testFileNodePreviewsThenWritesAndNumbersCollisions() throws {

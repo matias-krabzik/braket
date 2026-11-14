@@ -14,13 +14,20 @@ final class AgentBridge {
     private let agent: AgentController
     private let docs: DocumentStore
     private let files: FileCommands
+    private let runner: ProcessRunner
 
-    init(session: WorkspaceSession, agent: AgentController, docs: DocumentStore, files: FileCommands) {
+    init(session: WorkspaceSession, agent: AgentController, docs: DocumentStore, files: FileCommands, runner: ProcessRunner) {
         self.session = session
         self.agent = agent
         self.docs = docs
         self.files = files
+        self.runner = runner
         agent.onFilesChanged = { [weak self] scope in self?.refresh(scope) }
+        agent.contextProvider = { [weak self] scope in self?.context(scope) ?? "Proyecto cerrado." }
+        agent.scopeProvider = { [weak self] in
+            guard let self, self.session.trust == .trusted else { throw AgentFailure("Confiá en el proyecto para abrir la sesión.") }
+            return try self.makeScope()
+        }
     }
 
     /// Deja el agente listo para otro proyecto: sin conversación, sin subproyecto elegido
@@ -30,7 +37,7 @@ final class AgentBridge {
     /// aportar su propio ejecutable de Codex. El panel se esconde si el proyecto entró en
     /// solo lectura: ahí no hay nada que Codex pueda hacer.
     func reset(for project: Workspace, at url: URL, trust: TrustStore.Trust) {
-        agent.clearConversation()
+        agent.configureSessions(workspace: url)
         agent.selectedProjectID = nil
         agent.excludedRoots = project.projects.map { $0.directory(relativeTo: url) }
         agent.visible = agent.visible && trust == .trusted
@@ -44,7 +51,8 @@ final class AgentBridge {
             agent.error = "El proyecto está en solo lectura. Confiá en él para trabajar con Codex."
             return
         }
-        guard let workspaceURL = session.url, !agent.isRunning else { return }
+        guard let workspaceURL = session.url, !agent.isBusy else { return }
+        let sessionID = agent.selectedSessionID
         let prompt = agent.draft
         guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         Task {
@@ -55,10 +63,15 @@ final class AgentBridge {
                     guard session.dialogs.confirmSaveBeforeSending(dirty.map { $0.url.lastPathComponent }) else { return }
                     for document in dirty where !(await files.save(document)) { return }
                 }
-                guard session.url == workspaceURL else { return }
-                agent.send(prompt, scope: scope)
+                guard session.url == workspaceURL, agent.selectedSessionID == sessionID else { return }
+                agent.send(prompt, scope: scope, context: context(scope))
             } catch { agent.error = error.localizedDescription }
         }
+    }
+
+    private func context(_ scope: AgentScope) -> String {
+        guard session.trust == .trusted, let workspace = session.workspace, let url = session.url else { return "Proyecto cerrado." }
+        return AgentContext.capture(scope: scope, docs: docs, workspace: workspace, url: url, runner: runner)
     }
 
     /// Abre un archivo que Codex nombró. Una ruta de fuera del scope se rechaza con un

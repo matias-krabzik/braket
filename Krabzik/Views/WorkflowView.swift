@@ -961,6 +961,15 @@ private struct WorkflowInspector: View {
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                         }
+                        WorkflowSettingsCard(title: "Contexto del flujo", symbol: "curlybraces.square") {
+                            Toggle("Usar salida JSON como contexto", isOn: $node.settings.capturesContext)
+                                .disabled(!canEdit)
+                            Text("""
+                            Conserva el objeto en context para los siguientes bloques. \
+                            La salida normal queda en stdout si esta opción está desactivada.
+                            """)
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
                         WorkflowSettingsCard(title: "Variables de entorno", symbol: "curlybraces") {
                             ForEach($node.settings.environment) { $variable in
                                 HStack(spacing: 8) {
@@ -1019,6 +1028,31 @@ private struct WorkflowInspector: View {
                             Text("Devuelve JSON con text y files. Cada archivo tiene name, content y mimeType; puede haber varios.")
                                 .font(.caption).foregroundStyle(.secondary)
                             Text("Los archivos se entregan al siguiente bloque. Este bloque no los guarda.")
+                                .font(.caption2).foregroundStyle(.secondary)
+                            ForEach($node.ai.requiredFiles) { $file in
+                                HStack(spacing: 6) {
+                                    TextField("Nombre requerido", text: $file.name)
+                                    TextField("Tipo MIME", text: $file.mimeType)
+                                    if canEdit {
+                                        Button {
+                                            node.ai.requiredFiles.removeAll { $0.id == file.id }
+                                        } label: { Image(systemName: "minus.circle") }
+                                            .buttonStyle(.plain)
+                                            .accessibilityLabel("Quitar archivo requerido \(file.name)")
+                                    }
+                                }.font(.system(size: Theme.zoom(11))).disabled(!canEdit)
+                            }
+                            if canEdit {
+                                Button {
+                                    node.ai.requiredFiles.append(WorkflowAIRequiredFile())
+                                } label: { Label("Archivo requerido", systemImage: "plus") }
+                                    .buttonStyle(.plain)
+                                    .disabled(node.ai.requiredFiles.count >= 20)
+                            }
+                            Text("""
+                            Con archivos requeridos, una respuesta incompleta o con otros nombres \
+                            detiene este bloque antes de guardar.
+                            """)
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
                         WorkflowSettingsCard(title: "Continuación", symbol: "arrow.right") {

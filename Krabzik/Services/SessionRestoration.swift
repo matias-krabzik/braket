@@ -11,6 +11,10 @@ struct SavedWorkspaceState: Codable, Equatable {
     let selectedProjectID: UUID?
     let sidebarVisible: Bool
     let processesVisible: Bool
+    var agentTabOpen: Bool?
+    var agentVisible: Bool?
+    var agentSessionID: UUID?
+    var sessionsSidebarVisible: Bool?
 }
 
 @MainActor
@@ -57,7 +61,9 @@ extension WorkspaceController {
         return SavedWorkspaceState(workspaceURL: workspaceURL, openFiles: documents.filter { !$0.isDraft }.map(\.url),
                                    selectedFile: selectedDocument?.isDraft == true ? nil : selectedDocumentID,
                                    selectedProjectID: selectedProjectID,
-                                   sidebarVisible: sidebarVisible, processesVisible: processesVisible)
+                                   sidebarVisible: sidebarVisible, processesVisible: processesVisible,
+                                   agentTabOpen: agent.tabOpen, agentVisible: agent.visible, agentSessionID: agent.selectedSessionID,
+                                   sessionsSidebarVisible: sessionsSidebarVisible)
     }
 
     func saveSessionState(_ state: SavedWorkspaceState?) {
@@ -98,6 +104,12 @@ extension WorkspaceController {
         }
         sidebarVisible = state.sidebarVisible
         processesVisible = state.processesVisible
+        sessionsSidebarVisible = state.sessionsSidebarVisible ?? false
+        if !isReadOnly {
+            if let id = state.agentSessionID { agent.selectSession(id) }
+            agent.tabOpen = state.agentTabOpen ?? false
+            agent.visible = agent.tabOpen && state.agentVisible == true
+        }
         if unavailable > 0 {
             errors.report(message: "Se recuperó el proyecto, pero \(unavailable) archivos no están disponibles o no se pueden leer.")
         }

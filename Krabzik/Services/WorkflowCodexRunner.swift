@@ -11,7 +11,13 @@ enum WorkflowAIOutput {
             throw WorkflowError.invalid("La respuesta de Codex excede 120 KB.")
         }
         let parsed = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any]
+        if !settings.requiredFiles.isEmpty && parsed == nil {
+            throw WorkflowError.invalid("Codex debe devolver un objeto JSON con text y files.")
+        }
         let responseText = parsed?["text"] as? String ?? (parsed == nil ? text : "")
+        if !settings.requiredFiles.isEmpty && !(parsed?["text"] is String) {
+            throw WorkflowError.invalid("La respuesta de Codex necesita text como texto.")
+        }
         if parsed?["files"] != nil && !(parsed?["files"] is [[String: Any]]) {
             throw WorkflowError.invalid("files debe ser una lista de archivos JSON.")
         }
@@ -31,6 +37,19 @@ enum WorkflowAIOutput {
                 throw WorkflowError.invalid("Cada archivo debe tener name, content y mimeType válidos.")
             }
             return ["name": name, "content": content, "mimeType": mimeType]
+        }
+        if !settings.requiredFiles.isEmpty {
+            let expected = Dictionary(uniqueKeysWithValues: settings.requiredFiles.map { ($0.name, $0.mimeType) })
+            guard Set(prepared.compactMap { $0["name"] }).count == prepared.count else {
+                throw WorkflowError.invalid("Codex devolvió nombres de archivo repetidos.")
+            }
+            guard prepared.count == expected.count, prepared.allSatisfy({ file in
+                guard let name = file["name"], let mimeType = file["mimeType"],
+                      let content = file["content"] else { return false }
+                return expected[name] == mimeType && !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }) else {
+                throw WorkflowError.invalid("Codex debe entregar exactamente los archivos requeridos, con contenido y tipo MIME correctos.")
+            }
         }
         let payload: [String: Any] = ["text": responseText, "files": prepared]
         let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys, .prettyPrinted])

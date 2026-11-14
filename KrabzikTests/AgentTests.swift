@@ -75,6 +75,57 @@ final class AgentTests: XCTestCase {
         XCTAssertEqual(hostile.diff, "-a\n+b\n")
     }
 
+    @MainActor func testAllowForSessionUsesCodexDecisionAndDoesNotApplyToQuestions() async throws {
+        let base = try fixture()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let script = base.appendingPathComponent("server.py")
+        try fakeServer.write(to: script, atomically: true, encoding: .utf8)
+        let agent = AgentController()
+        defer { agent.shutdown() }
+        try agent.transport.start(executable: URL(fileURLWithPath: "/usr/bin/python3"), arguments: ["-u", script.path])
+        agent.connected = true
+        agent.account = "ChatGPT"
+        agent.send("Verificar permiso", scope: AgentScope(names: ["Test"], roots: [base]))
+        try await until { !agent.requests.isEmpty }
+        let request = try XCTUnwrap(agent.requests.first)
+        XCTAssertTrue(request.canAllowForSession)
+        agent.answer(request, accept: true, forSession: true)
+        try await until { !agent.isRunning }
+        XCTAssertNil(agent.error)
+        XCTAssertEqual(agent.changes.count, 2)
+        let question = AgentRequest(id: "question", rpcID: .number(3), method: "item/tool/requestUserInput", params: .null)
+        XCTAssertFalse(question.canAllowForSession)
+        let restricted = AgentRequest(id: "restricted", rpcID: .number(4), method: request.method,
+                                      params: .object(["availableDecisions": .array([.string("accept")])]))
+        XCTAssertFalse(restricted.canAllowForSession)
+    }
+
+    @MainActor func testAllowForTaskApprovesLaterCommandsOnlyUntilTurnEnds() async throws {
+        let base = try fixture()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let script = base.appendingPathComponent("server.py")
+        try automaticApprovalServer.write(to: script, atomically: true, encoding: .utf8)
+        let agent = AgentController()
+        defer { agent.shutdown() }
+        try agent.transport.start(executable: URL(fileURLWithPath: "/usr/bin/python3"), arguments: ["-u", script.path])
+        agent.connected = true
+        agent.account = "ChatGPT"
+        let scope = AgentScope(names: ["Test"], roots: [base])
+        agent.send("Primera tarea", scope: scope)
+        try await until { agent.requests.count == 1 }
+        let first = try XCTUnwrap(agent.requests.first)
+        XCTAssertFalse(first.canAllowForSession)
+        agent.answer(first, accept: true, remainingTurn: true)
+        try await until { !agent.isRunning }
+        XCTAssertNil(agent.error)
+        XCTAssertTrue(agent.requests.isEmpty)
+        agent.send("Segunda tarea", scope: scope)
+        try await until { agent.requests.count == 1 }
+        XCTAssertTrue(agent.isRunning, "La aprobación de la tarea anterior no debe extenderse al turno siguiente")
+        agent.answer(agent.requests[0], accept: false)
+        try await until { !agent.isRunning }
+    }
+
     /// Si el canal de escritura está roto, responder una solicitud falla. Antes se perdía
     /// con `try?` y el turno quedaba esperando algo que nunca iba a llegar (C6).
     @MainActor func testBrokenTransportFinishesTurnWithError() async throws {
@@ -86,6 +137,8 @@ final class AgentTests: XCTestCase {
 
         agent.receive(RPCMessage(id: .number(7), method: "item/permissions/requestApproval",
                                  params: .object([:])))
+        XCTAssertEqual(agent.requests.count, 1)
+        agent.answer(agent.requests[0], accept: true, forSession: true)
 
         XCTAssertFalse(agent.isRunning, "el turno no puede seguir corriendo")
         XCTAssertEqual(agent.error, "Se perdió la conexión con Codex al responder una solicitud.")
@@ -385,7 +438,7 @@ for line in sys.stdin:
        'params':{'threadId':'thread-test','turnId':'turn-test',
                  'itemId':'cmd','command':'test command'}})
  elif i=='approve-1':
-  if v.get('result',{}).get('decision')!='accept': continue
+  if v.get('result',{}).get('decision') not in ('accept','acceptForSession'): continue
   cambios=[{'path':'hello.txt','kind':{'type':'update'},'diff':'-viejo\n+nuevo'},
            {'path':'api/\u202Eevil\u0007.swift','kind':{'type':'update'},'diff':'-a\u0000\n+b\n'}]
   note('item/completed',{'item':{'id':'file','type':'fileChange','status':'completed',
@@ -398,5 +451,30 @@ for line in sys.stdin:
  elif method=='turn/interrupt':
   out({'id':i,'result':{}})
   note('turn/completed',{'turn':{'id':'turn-test','status':'interrupted'}})
+"""# }
+
+    private var automaticApprovalServer: String { #"""
+import sys,json
+turn=0
+def out(v): print(json.dumps(v),flush=True)
+def approval(step):
+ out({'id':step+'-'+str(turn),'method':'item/commandExecution/requestApproval',
+      'params':{'threadId':'thread-test','turnId':'turn-'+str(turn),'command':'echo '+step,
+                'availableDecisions':['accept','decline']}})
+def done():
+ out({'method':'turn/completed','params':{'threadId':'thread-test',
+      'turnId':'turn-'+str(turn),'turn':{'id':'turn-'+str(turn),'status':'completed'}}})
+for line in sys.stdin:
+ v=json.loads(line);m=v.get('method');i=v.get('id')
+ if m=='thread/start':out({'id':i,'result':{'thread':{'id':'thread-test'}}})
+ elif m=='turn/start':
+  turn+=1
+  out({'id':i,'result':{'turn':{'id':'turn-'+str(turn)}}})
+  approval('first')
+ elif i=='first-'+str(turn):
+  if v.get('result',{}).get('decision')=='accept':approval('second')
+  else:done()
+ elif i=='second-'+str(turn):
+  if v.get('result',{}).get('decision')=='accept':done()
 """# }
 }

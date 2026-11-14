@@ -260,7 +260,7 @@ final class WorkspaceSessionTests: XCTestCase {
         let docs = DocumentStore()
         let files = FileCommands(session: session, docs: docs)
         let bridge = AgentBridge(session: session, agent: AgentController(defaults: defaults),
-                                 docs: docs, files: files)
+                                 docs: docs, files: files, runner: ProcessRunner())
         let root = directory.appendingPathComponent("servidor")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         var workspace = Workspace(name: "p")

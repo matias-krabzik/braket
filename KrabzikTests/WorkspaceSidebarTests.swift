@@ -75,4 +75,42 @@ final class WorkspaceSidebarTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(coordinator.roots.first).isDirectory)
         XCTAssertFalse(try XCTUnwrap(coordinator.roots.first).loading)
     }
+
+    func testAgentUsesEditorTabsAndRestoresItsSessionWithoutLosingTheActiveFile() async throws {
+        let root = try directory()
+        let suite = UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        addTeardownBlock { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let controller = WorkspaceController(defaults: defaults)
+        let url = root.appendingPathComponent("test.kzk")
+        try Workspace(name: "Test").write(to: url)
+        controller.trust.markTrusted(url)
+        await controller.openWorkspace(url)
+        let file = root.appendingPathComponent("test.swift")
+        try "let test = 1".write(to: file, atomically: true, encoding: .utf8)
+        try await controller.docs.open(file)
+        controller.openAgent(newSession: true)
+        controller.agent.draft = "Revisar selección"
+        XCTAssertEqual(controller.selectedDocumentID, file)
+        XCTAssertTrue(controller.agent.visible)
+        XCTAssertTrue(controller.agent.tabOpen)
+        XCTAssertTrue(controller.sessionsSidebarVisible)
+        controller.workflowVisible = true
+        XCTAssertFalse(controller.agent.visible)
+        controller.openAgent()
+        XCTAssertFalse(controller.workflowVisible)
+        controller.selectedDocumentID = file
+        XCTAssertFalse(controller.agent.visible)
+        XCTAssertTrue(controller.agent.tabOpen)
+        controller.openAgent()
+        let state = try XCTUnwrap(controller.captureSessionState())
+        controller.agent.shutdown()
+        let restored = WorkspaceController(defaults: defaults)
+        await restored.restoreSession(state)
+        XCTAssertTrue(restored.agent.visible)
+        XCTAssertTrue(restored.agent.tabOpen)
+        XCTAssertEqual(restored.agent.selectedSessionID, controller.agent.selectedSessionID)
+        XCTAssertEqual(restored.agent.draft, "Revisar selección")
+        XCTAssertEqual(restored.selectedDocumentID, file)
+    }
 }

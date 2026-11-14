@@ -6,21 +6,25 @@ struct WorkspaceModeRail: View {
         VStack(spacing: 12) {
             mode("Archivos", icon: "folder", databases: false)
             mode("Bases de datos", icon: "externaldrive", databases: true)
+            mode("Sesiones de Codex", icon: "bubble.left.and.bubble.right", databases: nil)
             Spacer()
         }
         .padding(.top, 14).frame(width: Theme.zoom(38)).background(Theme.bar)
         .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 1) }
     }
-    private func mode(_ label: String, icon: String, databases: Bool) -> some View {
-        Button {
-            controller.database.browserShowsDatabases = databases
+    private func mode(_ label: String, icon: String, databases: Bool?) -> some View {
+        let selected = databases.map { !controller.sessionsSidebarVisible && controller.database.browserShowsDatabases == $0 }
+            ?? controller.sessionsSidebarVisible
+        return Button {
+            controller.sessionsSidebarVisible = databases == nil
+            if let databases { controller.database.browserShowsDatabases = databases }
             controller.sidebarVisible = true
         } label: {
             Image(systemName: icon).font(.system(size: Theme.zoom(15)))
-                .foregroundStyle(controller.database.browserShowsDatabases == databases ? Theme.accent : .secondary)
+                .foregroundStyle(selected ? Theme.accent : .secondary)
                 .frame(width: Theme.zoom(30), height: Theme.zoom(30))
                 .contentShape(Rectangle())
-                .background(controller.database.browserShowsDatabases == databases ? Theme.accent.opacity(0.12) : .clear,
+                .background(selected ? Theme.accent.opacity(0.12) : .clear,
                             in: RoundedRectangle(cornerRadius: 5))
         }.buttonStyle(.plain).help(label).accessibilityLabel(label)
     }

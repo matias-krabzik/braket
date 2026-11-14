@@ -41,7 +41,7 @@ struct KrabzikApp: App {
             CommandGroup(replacing: .windowSize) {
                 Button("Mostrar explorador") { controller.sidebarVisible.toggle() }.keyboardShortcut("1", modifiers: [.command, .option])
                 Button("Mostrar panel inferior") { controller.processesVisible.toggle() }.keyboardShortcut("j")
-                Button("Mostrar Codex") { controller.agent.visible.toggle() }.keyboardShortcut("a", modifiers: [.command, .option])
+                Button("Mostrar Codex") { controller.openAgent() }.keyboardShortcut("a", modifiers: [.command, .option])
                     .disabled(controller.workspace == nil || controller.isReadOnly)
             }
             CommandGroup(after: .toolbar) {

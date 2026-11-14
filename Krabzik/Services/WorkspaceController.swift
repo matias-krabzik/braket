@@ -32,17 +32,31 @@ final class WorkspaceController {
     var newFileDirectory: URL?
     var fileOperation: FileOperationStatus?
     var sidebarVisible = true
+    var sessionsSidebarVisible = false
     var processesVisible = true
     var commandProject: CodeProject?
     var closingProjectURL: URL?
     var showingProjectWizard = false
     let runner = ProcessRunner()
     let workflows = WorkflowController()
-    var workflowVisible = false
+    var workflowVisible = false {
+        didSet { if workflowVisible { agent.visible = false } }
+    }
     var workflowTabOpen = false
     var workflowRoot: URL {
         workspace?.projects.first?.directory(relativeTo: workspaceURL ?? URL(fileURLWithPath: "/")) ?? workspaceURL?
         .deletingLastPathComponent() ?? URL(fileURLWithPath: "/") }
+    func openAgent(sessionID: UUID? = nil, newSession: Bool = false) {
+        guard !isReadOnly else { return }
+        if newSession { agent.newSession() }
+        else if let sessionID { agent.selectSession(sessionID) }
+        agent.tabOpen = true
+        agent.visible = true
+        workflowVisible = false
+        sessionsSidebarVisible = true
+        sidebarVisible = true
+    }
+
     func openWorkflowFile(_ path: URL) {
         guard path.lastPathComponent.hasSuffix(".flow.json"), let workspaceURL else { return }
         workflows.configure(workspaceURL, root: workflowRoot, selectedFile: path)
@@ -84,7 +98,10 @@ final class WorkspaceController {
     var selectedDocumentID: URL? {
         get { docs.selectedID }
         set { docs.selectedID = newValue
-            if newValue != nil { workflowVisible = false } }
+            if newValue != nil {
+                workflowVisible = false
+                agent.visible = false
+            } }
     }
 
     var selectedProject: CodeProject? {
@@ -104,13 +121,18 @@ final class WorkspaceController {
         files.didSaveDraft = { [connections] document in
             connections.persistDraftSelection(document)
         }
-        bridge = AgentBridge(session: session, agent: agent, docs: docs, files: files)
+        bridge = AgentBridge(session: session, agent: agent, docs: docs, files: files, runner: runner)
         files.requestNewFile = { [weak self] directory in
             guard let self, self.fileOperation == nil else { return }
             self.database.browserShowsDatabases = false
+            self.sessionsSidebarVisible = false
             self.sidebarVisible = true
             self.newFileDirectory = directory
             self.newFileRequest = UUID()
+        }
+        files.onOpen = { [weak self] in
+            self?.workflowVisible = false
+            self?.agent.visible = false
         }
         // Lo que el usuario ya venía usando se considera confiable, una sola vez.
         trust.migrateIfNeeded(recentProjects: recents.urls)
@@ -214,6 +236,9 @@ final class WorkspaceController {
         workspaceStates.removeValue(forKey: closing)
         openWorkspaceModels.removeValue(forKey: closing)
         docs.closeAll()
+        agent.clearConversation()
+        agent.visible = false
+        agent.tabOpen = false
         selectedProjectID = nil
         commandProject = nil
         connections.install([])
@@ -236,6 +261,7 @@ final class WorkspaceController {
         openWorkspaceModels[normalized] = project
         connections.install(project.connections)
         bridge.reset(for: project, at: url, trust: decided)
+        sessionsSidebarVisible = false
         projects.warmUp(project.projects)
         selectedProjectID = runnableProjects.first?.id
         recents.remember(url)

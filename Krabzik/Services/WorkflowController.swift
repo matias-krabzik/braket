@@ -210,6 +210,10 @@ final class WorkflowController {
         var previousSucceeded = true
         var previousOutput = initialPayload["stdout"] as? String ?? initialPayload["text"] as? String ?? ""
         var payload = initialPayload
+        let runInfo: [String: Any] = ["id": UUID().uuidString,
+                                      "flowID": flow.id.uuidString,
+                                      "startedAt": ISO8601DateFormatter().string(from: Date())]
+        payload["run"] = runInfo
         var previousExitCode: Int32? = (initialPayload["exitCode"] as? NSNumber).map { $0.int32Value }
         var transitions = 0
         while let id = current, !cancelled {
@@ -227,7 +231,8 @@ final class WorkflowController {
                 visited[id] = .exited(0)
                 results[id] = WorkflowStepResult(summary: "OK", detail: "Disparador activado.", successful: true)
                 previousOutput = "ok"
-                payload = ["project": root.lastPathComponent, "trigger": node.kind.rawValue]
+                payload = ["project": root.lastPathComponent, "trigger": node.kind.rawValue,
+                           "run": runInfo]
                 outputJSON[id] = WorkflowJSON.encode(payload)
                 previousExitCode = 0
                 current = node.next
@@ -318,7 +323,32 @@ final class WorkflowController {
                 else if case .exited(let code) = run.status { previousExitCode = code }
                 else { previousExitCode = 1 }
                 previousSucceeded = !timedOut && run.status == .exited(0)
-                payload = ["stdout": previousOutput, "stderr": "", "exitCode": Int(previousExitCode ?? 1)]
+                var nextPayload: [String: Any] = ["stdout": previousOutput, "stderr": "",
+                                                  "exitCode": Int(previousExitCode ?? 1)]
+                if let context = payload["context"] { nextPayload["context"] = context }
+                if let steps = payload["steps"] { nextPayload["steps"] = steps }
+                nextPayload["run"] = runInfo
+                if node.settings.capturesContext && previousSucceeded {
+                    guard let data = previousOutput.data(using: .utf8),
+                          let context = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                        let message = "El script de contexto debe devolver un objeto JSON válido."
+                        visited[id] = .failed(message)
+                        results[id] = WorkflowStepResult(summary: "Contexto inválido", detail: message, successful: false)
+                        nextPayload["exitCode"] = 1
+                        previousExitCode = 1
+                        previousSucceeded = false
+                        log += "Error: \(message)\n"
+                        payload = nextPayload
+                        outputJSON[id] = WorkflowJSON.encode(payload)
+                        current = node.next
+                        recordTransition(from: id, to: current, isNo: false)
+                        break
+                    }
+                    nextPayload["context"] = context
+                    // The context is available once, without duplicating it in stdout.
+                    nextPayload["stdout"] = ""
+                }
+                payload = nextPayload
                 outputJSON[id] = WorkflowJSON.encode(payload)
                 current = node.next
                 recordTransition(from: id, to: current, isNo: false)
@@ -368,8 +398,12 @@ final class WorkflowController {
                     if cancelled { break }
                     let delivered = try WorkflowAIOutput.deliver(text, settings: node.ai, root: root)
                     previousOutput = delivered.output
-                    payload = WorkflowJSON.decode(delivered.output)
-                    outputJSON[id] = delivered.output
+                    var nextPayload = WorkflowJSON.decode(delivered.output)
+                    if let context = payload["context"] { nextPayload["context"] = context }
+                    if let steps = payload["steps"] { nextPayload["steps"] = steps }
+                    nextPayload["run"] = runInfo
+                    payload = nextPayload
+                    outputJSON[id] = WorkflowJSON.encode(payload)
                     previousExitCode = 0
                     previousSucceeded = true
                     visited[id] = .exited(0)
@@ -380,7 +414,8 @@ final class WorkflowController {
                     activeAI = false
                     let message = cancelled ? "Ejecución detenida." : error.localizedDescription
                     previousOutput = ""
-                    payload = ["error": message]
+                    payload = ["error": message, "context": payload["context"] ?? [:],
+                               "steps": payload["steps"] ?? [:], "run": runInfo]
                     outputJSON[id] = WorkflowJSON.encode(payload)
                     previousExitCode = 1
                     previousSucceeded = false
@@ -392,6 +427,14 @@ final class WorkflowController {
                 if cancelled { break }
                 current = node.next
                 recordTransition(from: id, to: current, isNo: false)
+            }
+            if let result = results[id] {
+                var steps = payload["steps"] as? [String: [String: Any]] ?? [:]
+                steps[id.uuidString] = ["title": node.title, "successful": result.successful,
+                                        "summary": result.summary,
+                                        "exitCode": Int(previousExitCode ?? (result.successful ? 0 : 1))]
+                payload["steps"] = steps
+                outputJSON[id] = WorkflowJSON.encode(payload)
             }
             if singleStep { break }
         }

@@ -29,6 +29,28 @@ struct WorkflowScriptSettings: Codable, Equatable {
     /// Zero disables the time limit.
     var timeoutSeconds = 0
     var environment: [WorkflowEnvironmentVariable] = []
+    /// Treat this script's JSON stdout as the run context, kept across later nodes.
+    var capturesContext = false
+
+    init(workingDirectory: String = "", timeoutSeconds: Int = 0,
+         environment: [WorkflowEnvironmentVariable] = [], capturesContext: Bool = false) {
+        self.workingDirectory = workingDirectory
+        self.timeoutSeconds = timeoutSeconds
+        self.environment = environment
+        self.capturesContext = capturesContext
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case workingDirectory, timeoutSeconds, environment, capturesContext
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        workingDirectory = try values.decodeIfPresent(String.self, forKey: .workingDirectory) ?? ""
+        timeoutSeconds = try values.decodeIfPresent(Int.self, forKey: .timeoutSeconds) ?? 0
+        environment = try values.decodeIfPresent([WorkflowEnvironmentVariable].self, forKey: .environment) ?? []
+        capturesContext = try values.decodeIfPresent(Bool.self, forKey: .capturesContext) ?? false
+    }
 }
 
 enum WorkflowAIOutputMode: String, Codable, CaseIterable {
@@ -42,12 +64,58 @@ enum WorkflowAIOutputMode: String, Codable, CaseIterable {
     }
 }
 
+struct WorkflowAIRequiredFile: Codable, Equatable, Identifiable {
+    var id = UUID()
+    var name = ""
+    var mimeType = "text/markdown"
+
+    init(id: UUID = UUID(), name: String = "", mimeType: String = "text/markdown") {
+        self.id = id
+        self.name = name
+        self.mimeType = mimeType
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, name, mimeType }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try values.decodeIfPresent(String.self, forKey: .name) ?? ""
+        mimeType = try values.decodeIfPresent(String.self, forKey: .mimeType) ?? "text/markdown"
+    }
+}
+
 struct WorkflowAISettings: Codable, Equatable {
     var prompt = ""
     /// Empty selects the account's default model; Luna is the low-cost starting point.
     var model = "gpt-6-luna"
     var outputMode: WorkflowAIOutputMode = .output
     var outputPath = "docs/releases/notes.md"
+    var requiredFiles: [WorkflowAIRequiredFile] = []
+
+    init(prompt: String = "", model: String = "gpt-6-luna",
+         outputMode: WorkflowAIOutputMode = .output,
+         outputPath: String = "docs/releases/notes.md",
+         requiredFiles: [WorkflowAIRequiredFile] = []) {
+        self.prompt = prompt
+        self.model = model
+        self.outputMode = outputMode
+        self.outputPath = outputPath
+        self.requiredFiles = requiredFiles
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case prompt, model, outputMode, outputPath, requiredFiles
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        prompt = try values.decodeIfPresent(String.self, forKey: .prompt) ?? ""
+        model = try values.decodeIfPresent(String.self, forKey: .model) ?? "gpt-6-luna"
+        outputMode = try values.decodeIfPresent(WorkflowAIOutputMode.self, forKey: .outputMode) ?? .output
+        outputPath = try values.decodeIfPresent(String.self, forKey: .outputPath) ?? "docs/releases/notes.md"
+        requiredFiles = try values.decodeIfPresent([WorkflowAIRequiredFile].self, forKey: .requiredFiles) ?? []
+    }
 }
 
 enum WorkflowEmptyFilesBehavior: String, Codable, CaseIterable {
@@ -296,6 +364,11 @@ struct WorkflowFile: Codable {
                 guard !node.title.isEmpty, node.title.count <= 100, node.command.utf8.count <= 8000,
                       node.ai.prompt.utf8.count <= 16_000, node.ai.model.utf8.count <= 100,
                       node.ai.outputPath.utf8.count <= 2_048,
+                      node.ai.requiredFiles.count <= 20,
+                      node.ai.requiredFiles.allSatisfy({ !$0.name.isEmpty && !$0.mimeType.isEmpty &&
+                          $0.name.utf8.count <= 255 && $0.mimeType.utf8.count <= 100 &&
+                          !$0.name.contains("/") && !$0.name.contains("\\") }),
+                      Set(node.ai.requiredFiles.map(\.name)).count == node.ai.requiredFiles.count,
                       node.fileSettings.sourcePath.utf8.count <= 256,
                       node.fileSettings.destination.utf8.count <= 2_048,
                       node.fileSettings.namePattern.utf8.count <= 256,
