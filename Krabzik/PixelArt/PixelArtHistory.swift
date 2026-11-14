@@ -249,9 +249,10 @@ struct PixelHistory: Equatable, Sendable {
         var verified = Set<UUID>([rootID])
         for start in revisions.keys {
             var walk: [UUID] = []
+            var onWalk = Set<UUID>()
             var current: UUID? = start
             while let id = current, verified.contains(id) == false {
-                guard walk.contains(id) == false else { throw PixelArtError.invalid("historial", "hay un ciclo de padres") }
+                guard onWalk.insert(id).inserted else { throw PixelArtError.invalid("historial", "hay un ciclo de padres") }
                 walk.append(id)
                 current = revisions[id]?.parentID
             }

@@ -40,16 +40,35 @@ enum PixelArtStateCodec {
     }
 
     private static func encode(_ palette: PixelPalette, into store: inout PxaObjectStore) -> PxaObjectRef {
-        let entries = palette.entries.sorted { $0.id < $1.id }.map { entry -> PixelArtJSON in
-            var fields: [String: PixelArtJSON] = [
-                "id": .int(Int(entry.id)), "color": .array(entry.color.bytes.map { .int(Int($0)) }), "locked": .bool(entry.locked)
-            ]
-            if entry.name.isEmpty == false { fields["name"] = .string(entry.name) }
-            return .object(fields)
-        }
+        let entries = palette.entries.sorted { $0.id < $1.id }.map(entryJSON)
         return store.put(.palette, fields: ["name": .string(palette.name),
                                             "order": .array(palette.entries.map { .int(Int($0.id)) }),
                                             "entries": .array(entries)])
+    }
+
+    /// Entrada de paleta como JSON. La comparten la paleta, las propuestas y sus tablas de cambios.
+    static func entryJSON(_ entry: PaletteEntry) -> PixelArtJSON {
+        var fields: [String: PixelArtJSON] = [
+            "id": .int(Int(entry.id)), "color": .array(entry.color.bytes.map { .int(Int($0)) }), "locked": .bool(entry.locked)
+        ]
+        if entry.name.isEmpty == false { fields["name"] = .string(entry.name) }
+        return .object(fields)
+    }
+
+    static func decodeEntry(_ json: PixelArtJSON, section: String) throws -> PaletteEntry {
+        let entry = try PixelArtFields(json, section: section)
+        let id = try entry.int("id", in: 1...Int(PxaLimits.paletteEntryIDMax))
+        let channels = try entry.array("color").map { value -> UInt8 in
+            guard case .int(let number) = value, (0...255).contains(number) else {
+                throw PixelArtError.invalid(section, "canal de color fuera de 0–255")
+            }
+            return UInt8(number)
+        }
+        guard let color = PixelRGBA(bytes: channels) else { throw PixelArtError.invalid(section, "un color necesita 4 canales") }
+        let parsed = PaletteEntry(id: UInt32(id), name: try entry.optionalString("name") ?? "", color: color,
+                                  locked: try entry.bool("locked"))
+        try entry.finish()
+        return parsed
     }
 
     private static func encode(_ sequences: [PixelSequence], into store: inout PxaObjectStore) -> PxaObjectRef {
@@ -64,6 +83,14 @@ enum PixelArtStateCodec {
     // MARK: Decodificar
 
     static func decode(_ ref: PxaObjectRef, from store: PxaObjectStore) throws -> PixelArtState {
+        var cache = PixelDecodeCache()
+        return try decode(ref, from: store, cache: &cache)
+    }
+
+    /// Decodifica compartiendo lo ya verificado entre estados: al validar un historial entero, las celdas y los
+    /// bloques que dos revisiones comparten se leen y se validan una sola vez.
+    static func decode(_ ref: PxaObjectRef, from store: PxaObjectStore, cache: inout PixelDecodeCache) throws -> PixelArtState {
+        cache.trimIfNeeded()
         let fields = try store.fields(ref)
         let width = try fields.int("width", in: 1...PxaLimits.canvasAxis)
         let height = try fields.int("height", in: 1...PxaLimits.canvasAxis)
@@ -78,9 +105,9 @@ enum PixelArtStateCodec {
         guard layerRefs.count <= PxaLimits.layers, frameRefs.count <= PxaLimits.frames else {
             throw PixelArtError.limit(fields.section, "demasiadas capas o fotogramas")
         }
-        let palette = try decodePalette(paletteRef, store: store)
-        let context = TileContext(width: width, height: height, paletteIDs: palette.ids)
-        var cache: [String: PixelTile] = [:]
+        let palette = try cache.palettes[paletteRef.hash] ?? decodePalette(paletteRef, store: store)
+        cache.palettes[paletteRef.hash] = palette
+        let context = TileContext(width: width, height: height, paletteIDs: palette.ids, paletteHash: paletteRef.hash)
         let state = PixelArtState(width: width, height: height,
                                   layers: try layerRefs.map { try decodeLayer($0, store: store) },
                                   frames: try frameRefs.map { try decodeFrame($0, store: store, context: context, cache: &cache) },
@@ -94,6 +121,10 @@ enum PixelArtStateCodec {
         var width: Int
         var height: Int
         var paletteIDs: Set<UInt32>
+        var paletteHash: String
+
+        /// Lo validado depende del lienzo y de la paleta: dos estados con otra paleta no comparten resultado.
+        var cachePrefix: String { "\(width)x\(height)|\(paletteHash)" }
     }
 
     private static func decodeLayer(_ ref: PxaObjectRef, store: PxaObjectStore) throws -> PixelLayer {
@@ -109,7 +140,9 @@ enum PixelArtStateCodec {
     }
 
     private static func decodeFrame(_ ref: PxaObjectRef, store: PxaObjectStore, context: TileContext,
-                                    cache: inout [String: PixelTile]) throws -> PixelFrame {
+                                    cache: inout PixelDecodeCache) throws -> PixelFrame {
+        let cacheKey = "\(ref.hash)|\(context.cachePrefix)"
+        if let cached = cache.frames[cacheKey] { return cached }
         let fields = try store.fields(ref)
         let id = try fields.uuid("id")
         let duration = try fields.int("duration", in: PxaLimits.minDurationMS...PxaLimits.maxDurationMS)
@@ -123,11 +156,15 @@ enum PixelArtStateCodec {
             let celRef = try PxaObjectRef(json: value, section: "\(fields.section).cels", expecting: .cel)
             cels[layerID] = try decodeCel(celRef, store: store, context: context, cache: &cache)
         }
-        return PixelFrame(id: id, duration: duration, cels: cels)
+        let frame = PixelFrame(id: id, duration: duration, cels: cels)
+        cache.frames[cacheKey] = frame
+        return frame
     }
 
     private static func decodeCel(_ ref: PxaObjectRef, store: PxaObjectStore, context: TileContext,
-                                  cache: inout [String: PixelTile]) throws -> PixelCel {
+                                  cache: inout PixelDecodeCache) throws -> PixelCel {
+        let celKey = "\(ref.hash)|\(context.cachePrefix)"
+        if let cached = cache.cels[celKey] { return cached }
         let fields = try store.fields(ref)
         let tileMap = try fields.object("tiles")
         try fields.finish()
@@ -143,18 +180,20 @@ enum PixelArtStateCodec {
             }
             // Un bloque interior se valida una vez por hash; uno de borde depende de su posición.
             let isEdge = (coord.x + 1) * PxaTile.side > context.width || (coord.y + 1) * PxaTile.side > context.height
-            let cacheKey = "\(tileRef.hash)|\(isEdge ? key : "inner")"
-            if let cached = cache[cacheKey] {
+            let cacheKey = "\(tileRef.hash)|\(isEdge ? key : "inner")|\(context.cachePrefix)"
+            if let cached = cache.tiles[cacheKey] {
                 tiles[coord] = cached
                 continue
             }
             let tile = try PixelTile.validate(try store.data(tileRef), at: coord, width: context.width, height: context.height,
                                               paletteIDs: context.paletteIDs, section: "bloque \(tileRef.hash.prefix(8))")
             guard tile.isEmpty == false else { throw PixelArtError.invalid(fields.section, "bloque vacío en \(key)") }
-            cache[cacheKey] = tile
+            cache.tiles[cacheKey] = tile
             tiles[coord] = tile
         }
-        return PixelCel(tiles: tiles)
+        let cel = PixelCel(tiles: tiles)
+        cache.cels[celKey] = cel
+        return cel
     }
 
     private static func decodePalette(_ ref: PxaObjectRef, store: PxaObjectStore) throws -> PixelPalette {
@@ -168,20 +207,9 @@ enum PixelArtStateCodec {
         }
         var byID: [UInt32: PaletteEntry] = [:]
         for item in entryJSON {
-            let entry = try PixelArtFields(item, section: "\(fields.section).entries")
-            let id = try entry.int("id", in: 1...Int(PxaLimits.paletteEntryIDMax))
-            let channels = try entry.array("color").map { value -> UInt8 in
-                guard case .int(let number) = value, (0...255).contains(number) else {
-                    throw PixelArtError.invalid(fields.section, "canal de color fuera de 0–255")
-                }
-                return UInt8(number)
-            }
-            guard let color = PixelRGBA(bytes: channels) else { throw PixelArtError.invalid(fields.section, "un color necesita 4 canales") }
-            let parsed = PaletteEntry(id: UInt32(id), name: try entry.optionalString("name") ?? "", color: color,
-                                      locked: try entry.bool("locked"))
-            try entry.finish()
+            let parsed = try decodeEntry(item, section: "\(fields.section).entries")
             guard byID.updateValue(parsed, forKey: parsed.id) == nil else {
-                throw PixelArtError.invalid(fields.section, "ID de entrada repetido \(id)")
+                throw PixelArtError.invalid(fields.section, "ID de entrada repetido \(parsed.id)")
             }
         }
         let ordered = try order.map { item -> PaletteEntry in
@@ -211,6 +239,25 @@ enum PixelArtStateCodec {
                                          playback: playback, loops: try entry.bool("loop"))
             try entry.finish()
             return sequence
+        }
+    }
+}
+
+/// Lo ya decodificado y verificado, reutilizable entre estados. Se vacía al crecer demasiado para no
+/// retener en memoria todas las revisiones a la vez al abrir un historial grande.
+struct PixelDecodeCache {
+    var tiles: [String: PixelTile] = [:]
+    var cels: [String: PixelCel] = [:]
+    var frames: [String: PixelFrame] = [:]
+    var palettes: [String: PixelPalette] = [:]
+
+    private static let maxEntries = 20_000
+
+    mutating func trimIfNeeded() {
+        if tiles.count + cels.count + frames.count > Self.maxEntries {
+            tiles.removeAll(keepingCapacity: true)
+            cels.removeAll(keepingCapacity: true)
+            frames.removeAll(keepingCapacity: true)
         }
     }
 }

@@ -112,23 +112,67 @@ struct PixelDocumentCore: Sendable {
     /// artístico: no se crean revisiones vacías. Cualquier error deja el documento intacto.
     @discardableResult
     mutating func apply(_ transaction: PixelTransaction) throws -> PixelRevision? {
+        try checkBase(transaction)
+        guard transaction.operations.isEmpty == false else { return nil }
+        let nextID = nextPaletteEntryID
+        let used = everUsedEntryIDs
+        let context = PixelOperationContext(scope: transaction.scope,
+                                            isFreshEntryID: { id in id >= 1 && id < nextID && used.contains(id) == false })
+        return try publish(try materialize(transaction.operations, context: context), transaction)
+    }
+
+    /// Estado resultante de aplicar operaciones a una copia, sin publicar nada. Sirve para preparar
+    /// una propuesta: el resultado se valida después con las mismas reglas que una edición manual.
+    func materialize(_ operations: [PixelOperation], scope: PixelScope) throws -> PixelArtState {
+        let nextID = nextPaletteEntryID
+        let used = everUsedEntryIDs
+        let context = PixelOperationContext(scope: scope,
+                                            isFreshEntryID: { id in id >= 1 && id < nextID && used.contains(id) == false })
+        return try materialize(operations, context: context)
+    }
+
+    private func materialize(_ operations: [PixelOperation], context: PixelOperationContext) throws -> PixelArtState {
+        var working = state
+        for operation in operations { try operation.apply(to: &working, context: context) }
+        return working
+    }
+
+    /// Publica un estado propuesto ya calculado, con las mismas reglas de alcance, bloqueo e historial que
+    /// una edición manual (PXA-04 §1): la propuesta de Codex y el trazo a mano comparten camino.
+    @discardableResult
+    mutating func applyProposedState(_ proposed: PixelArtState, transaction: PixelTransaction) throws -> PixelRevision? {
+        try checkBase(transaction)
+        return try publish(proposed, transaction)
+    }
+
+    /// Guarda en el almacén los objetos de un estado propuesto, sin crear revisión ni tocar el estado actual.
+    /// Quedan retenidos mientras alguna propuesta los referencie y se recolectan si se descarta.
+    mutating func storeProposedState(_ proposed: PixelArtState) throws -> PxaObjectRef {
+        try proposed.validate()
+        return PixelArtStateCodec.encode(proposed, into: &store)
+    }
+
+    /// Guarda el registro de procedencia de una propuesta aceptada (PXA-02 §8).
+    mutating func storeAssistantRecord(fields: [String: PixelArtJSON]) -> PxaObjectRef {
+        store.put(.assistantRecord, fields: fields)
+    }
+
+    private func checkBase(_ transaction: PixelTransaction) throws {
         if let base = transaction.base, base != token {
             throw PixelArtError(kind: .stale, section: "propuesta", cause: "el documento cambió desde que se preparó el cambio")
         }
         if case .exceeded(let resource) = PixelHistoryBudget.evaluate(revisions: history.count, storageBytes: store.totalBytes) {
             throw PixelArtError(kind: .capacity, section: "historial", cause: "se alcanzó el límite de \(resource)")
         }
-        guard transaction.operations.isEmpty == false else { return nil }
-        let nextID = nextPaletteEntryID
-        let used = everUsedEntryIDs
-        let context = PixelOperationContext(scope: transaction.scope,
-                                            isFreshEntryID: { id in id >= 1 && id < nextID && used.contains(id) == false })
-        var working = state
-        for operation in transaction.operations { try operation.apply(to: &working, context: context) }
+    }
+
+    private mutating func publish(_ working: PixelArtState, _ transaction: PixelTransaction) throws -> PixelRevision? {
         let diff = PixelStateDiff.between(state, working)
         guard diff.isEmpty == false else { return nil }
         try PixelArtRules.check(base: state, result: working, diff: diff, scope: transaction.scope, source: transaction.source)
-
+        for id in diff.addedEntries where isFreshEntryID(id) == false {
+            throw PixelArtError.invalid("paleta", "el ID \(id) no está reservado o ya se usó en este documento")
+        }
         var newStore = store
         let ref = PixelArtStateCodec.encode(working, into: &newStore)
         var newHistory = history

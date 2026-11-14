@@ -89,7 +89,7 @@ enum PixelHistoryCodec {
         return store.put(.revision, fields: fields)
     }
 
-    private static func encode(_ affected: PixelAffected) -> PixelArtJSON {
+    static func encode(_ affected: PixelAffected) -> PixelArtJSON {
         .object([
             "layers": .array(affected.layers.map { .string($0.uuidString) }),
             "frames": .array(affected.frames.map { .string($0.uuidString) }),
@@ -165,7 +165,7 @@ enum PixelHistoryCodec {
         return revision
     }
 
-    private static func decodeAffected(_ json: PixelArtJSON, section: String) throws -> PixelAffected {
+    static func decodeAffected(_ json: PixelArtJSON, section: String) throws -> PixelAffected {
         let fields = try PixelArtFields(json, section: "\(section).affected")
         let entries = try fields.array("paletteEntries").map { value -> UInt32 in
             guard case .int(let number) = value, (1...Int(PxaLimits.paletteEntryIDMax)).contains(number) else {

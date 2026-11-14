@@ -72,6 +72,19 @@ final class PxaContainerTests: XCTestCase {
         XCTAssertThrowsError(try PxaZip.read(Data("esto no es un zip, solo texto largo para pasar el mínimo".utf8)))
     }
 
+    /// El CRC se comprueba aunque los datos y los tamaños sean coherentes: un dato alterado que descomprime
+    /// bien no puede pasar por íntegro.
+    func testRejectsAWrongCRCEvenWhenSizesAndDataAreCoherent() throws {
+        let archive = try PxaZip.write([entry("manifest.json", "{}")])
+        var forged = archive
+        let central = try XCTUnwrap(forged.range(of: Data([0x50, 0x4B, 0x01, 0x02])))
+        forged[central.lowerBound + 16] ^= 0xFF
+        XCTAssertThrowsError(try PxaZip.read(forged)) { error in
+            XCTAssertEqual((error as? PixelArtError)?.kind, .integrity)
+            XCTAssertTrue(error.localizedDescription.contains("CRC"))
+        }
+    }
+
     func testRejectsLyingSizesBeforeAllocating() throws {
         let archive = try PxaZip.write([objectEntry(Data(repeating: 1, count: 5_000))])
         var forged = archive
