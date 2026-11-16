@@ -45,6 +45,7 @@ Dos hallazgos de la auditoría se resolvieron durante esa ventana y los specs ya
 | [S5](S5-contenido-del-modelo.md) | Marcar y sanear el contenido que viene del modelo | Baja | **resuelto** |
 | [S6](S6-sandbox-y-firma.md) | Decidir y documentar sandbox, firma y distribución | Estructural | **resuelto** |
 | [S7](S7-gobernanza-fork-mysqlnio.md) | Gobernanza del fork local de MySQLNIO | Proceso | **resuelto** |
+| [S8](S8-guarda-de-escritura-mysql.md) | Guarda de escritura por perfil de conexión MySQL | Media | **resuelto** |
 
 ## Calidad y prácticas
 
@@ -134,6 +135,12 @@ que el spec diseña —`RecentProjectsStore`, `ErrorCenter`, `DocumentStore`, `S
 `FileCommands` y `AgentBridge`. Los seis criterios cumplidos. Lo que quedó en el controlador es lo que
 necesita a todos a la vez: abrir, crear y cerrar un proyecto, el cableado de `install` y el orden de
 `prepareToLeave`.
+
+**S8 resuelto** el 2026-11-15 (commits `a34f549` y `b688020`): cada perfil de conexión declara qué le
+permite al editor. `readOnly` rechaza las escrituras sin abrir la conexión, `confirm` pregunta una vez por
+ejecución mostrando destino y sentencias, y `unrestricted` —lo que vale todo perfil ya guardado— no clasifica
+nada. La clasificación falla cerrada: lo que no se reconoce como lectura cuenta como escritura. De paso, el
+recorrido léxico quedó en un solo lugar: `SQLPagination` dejó su copia privada y usa `SQLScript.scan(_:)`.
 
 Al cerrar un spec, marcarlo en la tabla de este índice y dejar en el propio spec una sección `## Resuelto`
 con la fecha, los commits y los criterios verificados.

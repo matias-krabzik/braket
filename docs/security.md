@@ -16,6 +16,7 @@ un agente externo. Eso define la frontera.
 | Un flujo plantado en `.braket/automations/` —por un repositorio ajeno o por el agente, que puede escribir ahí— | Confiar en el proyecto no alcanza: cada script se aprueba por hash de **comando, carpeta y variables de entorno**, y cambiar cualquiera vuelve a preguntar. El diálogo muestra la carpeta real (resuelta, marcando las de fuera del proyecto) y el entorno completo. Se rechazan `DYLD_*`, `LD_*`, `ZDOTDIR`, `BASH_ENV`, `ENV`, `SHELL`, `IFS` y `PROMPT_COMMAND`, y no se siguen enlaces simbólicos en `.braket` ni en los archivos de flujo | [Aprobación de flujos](workflows.md#aprobación-de-scripts) |
 | Un binario `codex` plantado en el PATH o en el proyecto | Se rechaza lo que sea escribible por grupo u otros, lo que no sea del usuario o de root, y lo que esté dentro del workspace. La identidad y la firma se muestran antes del primer lanzamiento y se recuerdan | [S2](specs/S2-verificar-ejecutable-codex.md) |
 | Credenciales de base de datos viajando en claro | «Require and Verify Identity» es el valor predeterminado. «If available» y «No» permiten texto plano por elección explícita y muestran una advertencia | [S3](specs/S3-tls-solo-loopback.md) |
+| Un `DELETE` sin `WHERE`, un `DROP` o un `TRUNCATE` mandados al perfil de producción porque era el que estaba elegido en el script | Cada perfil declara su política de escritura. `readOnly` rechaza las escrituras **sin abrir la conexión**; `confirm` muestra destino, cantidad y las primeras sentencias que escriben, con el botón destructivo no predeterminado; la clasificación falla cerrada —lo que no se reconoce como lectura cuenta como escritura— y también apaga la edición de la grilla. Es una barrera local y evitable: no reemplaza a los `GRANT` del servidor | [S8](specs/S8-guarda-de-escritura-mysql.md) |
 | La contraseña viva en memoria más de lo necesario | No se retiene durante la sesión; se relee del llavero cuando hace falta | [S4](specs/S4-no-retener-password.md) |
 | Texto del modelo que se hace pasar por interfaz de la app | Todo lo que viene del modelo se sanea (control, bidi, zero-width), se acota y se muestra marcado como contenido del modelo | [S5](specs/S5-contenido-del-modelo.md) |
 
@@ -48,6 +49,10 @@ trae. Es un rediseño, no un ajuste: si alguna vez se decide, es un spec aparte.
   `allow-unsigned-executable-memory`. Si el build empieza a pedir una, algo cambió de forma relevante: hay
   que revisar este documento antes de agregarla. Las únicas apariciones de esos nombres en el repo son el
   spec S6 y esta línea, que los nombran para prohibirlos.
+- **Guarda de escritura por perfil de conexión**: la política vive en el perfil (`writePolicy`), se clasifica
+  cada sentencia del script antes de abrir la conexión y la confirmación es por ejecución, nunca por sesión.
+  El campo es opcional: un perfil guardado antes de que existiera se comporta como antes (`unrestricted`), y
+  una política que esta versión no reconoce se lee como solo lectura.
 - **Contraseñas en el llavero**, con `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` y ligadas al endpoint:
   cambiar host, puerto, usuario o modo de TLS invalida la credencial guardada (`CredentialStore`). La cuenta
   incluye además una huella de los parámetros que deciden **a quién se le cree** —CA, nombre TLS y certificado
