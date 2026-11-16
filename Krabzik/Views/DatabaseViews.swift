@@ -95,7 +95,8 @@ struct ConnectionsSettingsView: View {
                     .font(.caption).foregroundStyle(state.status == .connected ? Color.green : .secondary)
             }
             HStack {
-                Text(connection.username + " · " + connection.tls.label)
+                Text(connection.username + " · " + connection.tls.label
+                    + (connection.effectiveWritePolicy.badge.map { " · " + $0 } ?? ""))
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 Spacer()
                 Button("Editar") { editing = connection }
@@ -205,6 +206,16 @@ struct ConnectionSheet: View {
                 }.textFieldStyle(.roundedBorder)
                 Text("Timeout: 1–300 s para TCP y para autenticación. CA: solo en modos con verificación. "
                      + "Certificado y clave cliente: archivos PEM, clave sin contraseña. Se guardan las rutas, no su contenido.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }.disabled(busy)
+            VStack(alignment: .leading, spacing: 6) {
+                Picker("Escritura", selection: Binding(get: { connection.effectiveWritePolicy },
+                                                       set: { connection.writePolicy = $0.rawValue })) {
+                        ForEach(DatabaseConnection.WritePolicy.allCases, id: \.self) { policy in
+                            Text(policy.label).tag(policy)
+                        }
+                    }.pickerStyle(.radioGroup)
+                Text(connection.effectiveWritePolicy.detail + " La guarda es local: no reemplaza los permisos del servidor.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }.disabled(busy)
             SidebarTintEditor(hex: $connection.tintHex, strength: $connection.tintStrength,
@@ -367,6 +378,10 @@ struct SQLToolbar: View {
                     Text("·")
                     Text(state.destination(for: connection)).lineLimit(1).truncationMode(.middle).help(state.destination(for: connection))
                     if state.inTransaction { Text("· Transacción abierta").foregroundStyle(.orange) }
+                    if let badge = connection.effectiveWritePolicy.badge {
+                        Label(badge, systemImage: connection.effectiveWritePolicy.icon)
+                            .foregroundStyle(.orange).help(connection.effectiveWritePolicy.detail)
+                    }
                 } else {
                     Text("Elegí una conexión para ejecutar este archivo.")
                 }

@@ -86,6 +86,7 @@ final class DatabaseController {
             resultsVisible = true
             return
         }
+        guard allowsExecution(query, connection: connection, state: state, execution: execution) else { return }
         let retainedBytes = execution.results.reduce(0) { total, result in
             total + result.rows.reduce(0) { $0 + $1.reduce(0) { $0 + 16 + ($1?.utf8.count ?? 0) } }
         }
@@ -180,6 +181,69 @@ final class DatabaseController {
         }
     }
 
+    /// Aplica la política de escritura del perfil **antes** de cualquier trabajo de
+    /// conexión: acá todavía no se leyó el llavero ni se abrió una sesión, así que un
+    /// perfil en solo lectura rechaza sin tocar el servidor. Ver
+    /// docs/specs/S8-guarda-de-escritura-mysql.md.
+    ///
+    /// Devuelve `false` cuando no hay que ejecutar, y deja el motivo en `execution.error`
+    /// salvo cuando el usuario canceló el diálogo: eso no necesita explicación.
+    private func allowsExecution(_ query: (text: String, startingLine: Int), connection: DatabaseConnection,
+                                 state: DatabaseState, execution: SQLExecution) -> Bool {
+        // `unrestricted` no clasifica nada: el camino tiene que ser exactamente el de
+        // antes de que existiera la guarda, incluido cómo se informa un script que no se
+        // puede partir.
+        guard connection.effectiveWritePolicy != .unrestricted else { return true }
+        let audit: SQLWriteGuard.Audit
+        do {
+            audit = try SQLWriteGuard.audit(query.text, startingLine: query.startingLine,
+                                            noBackslashEscapes: state.noBackslashEscapes)
+        } catch {
+            execution.error = MySQLClient.message(error)
+            resultsVisible = true
+            return false
+        }
+        guard audit.hasWrites else { return true }
+        guard connection.effectiveWritePolicy != .readOnly else {
+            execution.error = Self.rejection(audit, connection: connection)
+            resultsVisible = true
+            return false
+        }
+        return confirmWrites(audit, connection: connection, state: state)
+    }
+
+    private static func rejection(_ audit: SQLWriteGuard.Audit, connection: DatabaseConnection) -> String {
+        let detail = audit.writes.count == 1
+            ? "la sentencia escribe"
+            : "\(audit.writes.count) de \(audit.total) sentencias escriben"
+        let first = audit.preview(limit: 1).first.map { $0 + ". " } ?? ""
+        return "No se ejecutó nada: el perfil «\(connection.name)» está en solo lectura y \(detail). "
+            + first + "No se abrió ninguna conexión."
+    }
+
+    /// Pregunta antes de mandar un script que escribe. Es **por ejecución**: la respuesta
+    /// no se recuerda ni para la próxima ejecución ni para el resto de la sesión.
+    private func confirmWrites(_ audit: SQLWriteGuard.Audit, connection: DatabaseConnection,
+                               state: DatabaseState) -> Bool {
+        let shown = 3
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = audit.writes.count == 1
+            ? "¿Ejecutar una sentencia que escribe?"
+            : "¿Ejecutar \(audit.writes.count) sentencias que escriben?"
+        let rest = audit.writes.count > shown ? "\n… y \(audit.writes.count - shown) más." : ""
+        alert.informativeText = "Destino: \(connection.name) · \(state.destination(for: connection))\n"
+            + "El script tiene \(audit.total) sentencias en total.\n\n"
+            + audit.preview(limit: shown).joined(separator: "\n") + rest
+        let run = alert.addButton(withTitle: "Ejecutar")
+        let cancel = alert.addButton(withTitle: "Cancelar")
+        run.hasDestructiveAction = true
+        // El botón destructivo no es el predeterminado: ⏎ cancela.
+        run.keyEquivalent = ""
+        cancel.keyEquivalent = "\r"
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
     func selectDatabase(_ name: String, connection: DatabaseConnection) {
         let state = state(connection.id)
         guard !state.busy, state.status != .connecting else { return }
@@ -201,6 +265,10 @@ final class DatabaseController {
     func submit(_ draft: SQLResultDraft, profiles: [DatabaseConnection]) {
         guard let connection = draft.result.connection, profiles.contains(connection), let table = draft.table else {
             draft.error = "La conexión cambió. Ejecutá la consulta nuevamente antes de enviar."
+            return
+        }
+        guard connection.effectiveWritePolicy != .readOnly else {
+            draft.error = "El perfil «\(connection.name)» está en solo lectura: no se envían cambios."
             return
         }
         let state = state(connection.id)

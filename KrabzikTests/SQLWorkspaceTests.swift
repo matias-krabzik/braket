@@ -319,4 +319,95 @@ final class SQLWorkspaceTests: XCTestCase {
         throw error }
         await client.shutdown()
     }
+
+    private func policy(_ name: String, _ level: DatabaseConnection.WritePolicy) -> DatabaseConnection {
+        var connection = DatabaseConnection(name: name)
+        connection.writePolicy = level.rawValue
+        return connection
+    }
+
+    /// La `Task` de `execute` hereda el main actor: cancelarla sin ceder el hilo garantiza
+    /// que no llegue a leer el llavero ni a abrir una conexión. Lo que se comprueba es que
+    /// la guarda la dejó arrancar.
+    @MainActor private func cancelBeforeItRuns(_ execution: SQLExecution) async {
+        let task = execution.task
+        task?.cancel()
+        await task?.value
+    }
+
+    @MainActor func testReadOnlyProfileRejectsAWriteWithoutOpeningAConnection() async throws {
+        let database = DatabaseController()
+        let connection = policy("Ventas (producción)", .readOnly)
+        let document = try EditorDocument(url: URL(fileURLWithPath: "/tmp/solo-lectura.sql"),
+                                          data: Data("SELECT 1".utf8))
+        let execution = document.sqlExecution
+        database.execute(document, connection: connection, queryOverride: "UPDATE users SET name = 'x'")
+        XCTAssertFalse(execution.isRunning)
+        XCTAssertNil(execution.task)
+        XCTAssertTrue(execution.results.isEmpty)
+        let error = execution.error ?? ""
+        XCTAssertTrue(error.contains("Ventas (producción)"), error)
+        XCTAssertTrue(error.contains("solo lectura"), error)
+        XCTAssertTrue(error.contains("No se abrió ninguna conexión"), error)
+        XCTAssertTrue(error.contains("UPDATE users"), error)
+        XCTAssertEqual(database.state(connection.id).status, .disconnected)
+        XCTAssertFalse(database.state(connection.id).busy)
+        let session = await database.client.info(connection.id)
+        XCTAssertNil(session)
+    }
+
+    @MainActor func testWriteGuardCountsEveryStatementOfTheScriptBeforeRejecting() throws {
+        let database = DatabaseController()
+        let connection = policy("Producción", .readOnly)
+        let document = try EditorDocument(url: URL(fileURLWithPath: "/tmp/mixto.sql"), data: Data("SELECT 1".utf8))
+        let script = "SELECT 1;\nUPDATE a SET b = 1;\nSELECT 2;\nDROP TABLE c;"
+        database.execute(document, connection: connection, queryOverride: script)
+        XCTAssertTrue(document.sqlExecution.error?.contains("2 de 4 sentencias escriben") == true,
+                      document.sqlExecution.error ?? "")
+        // Un script que no se puede partir se rechaza con el motivo, sin conectar.
+        database.execute(document, connection: connection, queryOverride: "SELECT 'sin cerrar")
+        XCTAssertNotNil(document.sqlExecution.error)
+        XCTAssertNil(document.sqlExecution.task)
+    }
+
+    @MainActor func testReadOnlyLetsReadsThroughAndUnrestrictedIsNotClassified() async throws {
+        let database = DatabaseController()
+        let document = try EditorDocument(url: URL(fileURLWithPath: "/tmp/lectura.sql"), data: Data("SELECT 1".utf8))
+        let execution = document.sqlExecution
+        database.execute(document, connection: policy("Reportes", .readOnly), queryOverride: "SELECT * FROM users")
+        XCTAssertTrue(execution.isRunning)
+        XCTAssertNil(execution.error)
+        await cancelBeforeItRuns(execution)
+        // Sin restricciones: una escritura arranca igual que antes de que existiera la guarda.
+        let unrestricted = DatabaseConnection(name: "Local")
+        XCTAssertNil(unrestricted.writePolicy)
+        XCTAssertEqual(unrestricted.effectiveWritePolicy, .unrestricted)
+        execution.error = nil
+        database.execute(document, connection: unrestricted, queryOverride: "DELETE FROM users")
+        XCTAssertTrue(execution.isRunning)
+        XCTAssertNil(execution.error)
+        await cancelBeforeItRuns(execution)
+    }
+
+    @MainActor func testReadOnlyProfileBlocksGridEditingAndSubmitting() throws {
+        let (original, table) = fixture()
+        var result = original
+        result.connection = policy("Producción", .readOnly)
+        let reason = SQLResultDraft.readOnlyReason(result, table: table)
+        XCTAssertEqual(reason, "Solo lectura: el perfil «Producción» no permite escrituras.")
+        let draft = SQLResultDraft(result: result)
+        draft.configure(table)
+        XCTAssertFalse(draft.canEdit)
+        XCTAssertFalse(draft.canInsert)
+        draft.set(.text("Changed"), row: 0, column: 1)
+        XCTAssertFalse(draft.hasChanges)
+        let database = DatabaseController()
+        database.submit(draft, profiles: [try XCTUnwrap(result.connection)])
+        XCTAssertEqual(draft.error, "El perfil «Producción» está en solo lectura: no se envían cambios.")
+        XCTAssertFalse(draft.sending)
+        // Con `confirm` la grilla sigue editable: su hoja de revisión ya pregunta.
+        var confirming = original
+        confirming.connection = policy("Staging", .confirm)
+        XCTAssertNil(SQLResultDraft.readOnlyReason(confirming, table: table))
+    }
 }

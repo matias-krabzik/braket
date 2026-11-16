@@ -75,6 +75,10 @@ final class SQLResultDraft {
     }
 
     static func readOnlyReason(_ result: SQLResult, table: SQLSchemaTable?) -> String? {
+        // La política del perfil manda sobre todo lo demás: ver S8.
+        if let connection = result.connection, connection.effectiveWritePolicy == .readOnly {
+            return "Solo lectura: el perfil «\(connection.name)» no permite escrituras."
+        }
         guard !result.origins.isEmpty, result.origins.allSatisfy({ !$0.table.isEmpty && !$0.column.isEmpty }) else {
             return "Solo lectura: resultado calculado o sin tabla de origen."
         }
