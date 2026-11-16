@@ -7,6 +7,21 @@ import XCTest
 /// coordinador. Ver docs/specs/C5-dividir-workspacecontroller.md.
 @MainActor
 final class DocumentStoreTests: XCTestCase {
+    func testMovingTabsPreservesSelectionAndDocumentIdentity() async throws {
+        let base = try directory()
+        let store = DocumentStore()
+        let urls = try ["a.txt", "b.txt", "c.txt"].map { try file($0, $0, in: base) }
+        for url in urls { try await store.open(url) }
+        let selected = store.selected
+        store.moveTab(urls[0], before: urls[2])
+        XCTAssertEqual(store.documents.map(\.url), [urls[1], urls[2], urls[0]])
+        XCTAssertTrue(store.selected === selected)
+        store.moveTab(urls[2], before: urls[1])
+        XCTAssertEqual(store.documents.map(\.url), [urls[2], urls[1], urls[0]])
+        store.moveTab(urls[2], before: urls[2])
+        XCTAssertEqual(store.documents.map(\.url), [urls[2], urls[1], urls[0]])
+    }
+
     private func directory() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("krabzik-docs-\(UUID())")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

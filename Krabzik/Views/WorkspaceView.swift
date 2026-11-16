@@ -1,8 +1,10 @@
 import CoreGraphics
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct WorkspaceView: View {
     @Bindable var controller: WorkspaceController
+    @State private var draggedTabID: URL?
 
     private var showsSQLResults: Bool {
         guard !controller.workflowVisible, let document = controller.selectedDocument,
@@ -144,8 +146,37 @@ struct WorkspaceView: View {
                                                isDirty: document.isDirty,
                                                selected: !controller.workflowVisible && controller.selectedDocumentID == document.id,
                                                select: { controller.selectedDocumentID = document.id },
-                                               close: { controller.closeDocument(document) })
+                                               close: { controller.closeDocument(document) },
+                                               drag: {
+                                                   draggedTabID = document.id
+                                                   return NSItemProvider(object: document.id.absoluteString as NSString)
+                                               })
+                                .onDrop(of: [UTType.plainText.identifier], isTargeted: nil) { _ in
+                                    guard let source = draggedTabID else { return false }
+                                    controller.moveTab(source, before: document.id)
+                                    draggedTabID = nil
+                                    return true
+                                }
                                 .contextMenu {
+                                    Button("Cerrar") { controller.closeDocument(document) }
+                                    Button("Cerrar pestañas a la derecha") {
+                                        let tabs = controller.documents
+                                        guard let index = tabs.firstIndex(where: { $0.id == document.id }) else { return }
+                                        controller.closeTabs(Array(tabs.dropFirst(index + 1)), closeWorkflow: controller.workflowTabOpen)
+                                    }
+                                    Button("Cerrar pestañas a la izquierda") {
+                                        let tabs = controller.documents
+                                        guard let index = tabs.firstIndex(where: { $0.id == document.id }) else { return }
+                                        controller.closeTabs(Array(tabs.prefix(index)))
+                                    }
+                                    Button("Cerrar las demás") {
+                                        controller.closeTabs(controller.documents.filter { $0.id != document.id },
+                                                             closeWorkflow: controller.workflowTabOpen)
+                                    }
+                                    Button("Cerrar todas") {
+                                        controller.closeTabs(controller.documents, closeWorkflow: controller.workflowTabOpen)
+                                    }
+                                    Divider()
                                     Button("Renombrar…") { controller.renameFile(document.url) }.disabled(document.isDraft)
                                         .disabled(controller.isReadOnly)
                                 }
@@ -160,6 +191,15 @@ struct WorkspaceView: View {
                                                    controller.workflowVisible = false
                                                    controller.workflowTabOpen = false
                                                })
+                            .contextMenu {
+                                Button("Cerrar") {
+                                    controller.workflowVisible = false
+                                    controller.workflowTabOpen = false
+                                }
+                                Button("Cerrar pestañas a la izquierda") { controller.closeTabs(controller.documents) }
+                                Button("Cerrar las demás") { controller.closeTabs(controller.documents) }
+                                Button("Cerrar todas") { controller.closeTabs(controller.documents, closeWorkflow: true) }
+                            }
                         }
                     }.padding(.horizontal, 9).padding(.vertical, 7)
                 }.background(Theme.bar)
@@ -1426,6 +1466,7 @@ private struct WorkspaceEditorTab: View {
     let selected: Bool
     let select: () -> Void
     let close: () -> Void
+    var drag: (() -> NSItemProvider)? = nil
     @State private var hovered = false
     @State private var closeHovered = false
     @FocusState private var closeFocused: Bool
@@ -1451,6 +1492,7 @@ private struct WorkspaceEditorTab: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .onDrag { drag?() ?? NSItemProvider() }
             .accessibilityAddTraits(selected ? .isSelected : [])
             Button(action: close) {
                 Image(systemName: showsDirtyIndicator ? "circle.fill" : "xmark")

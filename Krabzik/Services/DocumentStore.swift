@@ -23,6 +23,13 @@ final class DocumentStore {
 
     var selected: EditorDocument? { documents.first { $0.id == selectedID } }
 
+    func moveTab(_ source: URL, before target: URL) {
+        guard source != target, let from = documents.firstIndex(where: { $0.id == source }),
+              let to = documents.firstIndex(where: { $0.id == target }) else { return }
+        let document = documents.remove(at: from)
+        documents.insert(document, at: to)
+    }
+
     func contains(_ url: URL) -> Bool {
         let url = url.standardizedFileURL
         return documents.contains { $0.id == url }

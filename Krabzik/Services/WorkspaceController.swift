@@ -373,4 +373,20 @@ final class WorkspaceController {
     func closeDocument(_ document: EditorDocument) {
         Task { await files.close(document, cancelQuery: database.cancel) }
     }
+
+    func closeTabs(_ targets: [EditorDocument], closeWorkflow: Bool = false) {
+        Task {
+            for document in targets {
+                guard await files.close(document, cancelQuery: database.cancel) else { return }
+            }
+            if closeWorkflow {
+                workflowVisible = false
+                workflowTabOpen = false
+            }
+        }
+    }
+
+    func moveTab(_ source: URL, before target: URL) {
+        docs.moveTab(source, before: target)
+    }
 }
