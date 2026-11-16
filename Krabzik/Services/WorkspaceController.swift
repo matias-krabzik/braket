@@ -374,6 +374,13 @@ final class WorkspaceController {
         Task { await files.close(document, cancelQuery: database.cancel) }
     }
 
+    func navigatePixelHistory(redo: Bool) {
+        guard let document = selectedDocument, document.pixelArt != nil,
+              !isReadOnly, document.pixelArt?.isReadOnly != true else { return }
+        do { try document.navigatePixelHistory(redo: redo) }
+        catch { errors.report(error) }
+    }
+
     func closeTabs(_ targets: [EditorDocument], closeWorkflow: Bool = false) {
         Task {
             for document in targets {

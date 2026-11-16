@@ -20,6 +20,16 @@ struct KrabzikApp: App {
         .windowToolbarStyle(.unifiedCompact)
         .commands {
             CommandGroup(after: .appInfo) { CheckForUpdatesButton() }
+            CommandGroup(before: .undoRedo) {
+                if controller.selectedDocument?.pixelArt != nil {
+                    Button("Deshacer") { controller.navigatePixelHistory(redo: false) }
+                        .keyboardShortcut("z", modifiers: .command)
+                        .disabled(controller.isReadOnly || controller.selectedDocument?.pixelArt?.isReadOnly == true)
+                    Button("Rehacer") { controller.navigatePixelHistory(redo: true) }
+                        .keyboardShortcut("z", modifiers: [.command, .shift])
+                        .disabled(controller.isReadOnly || controller.selectedDocument?.pixelArt?.isReadOnly == true)
+                }
+            }
             CommandGroup(replacing: .newItem) {
                 Button("Nuevo proyecto…", action: controller.createWorkspace).keyboardShortcut("n", modifiers: [.command, .shift])
                 Button("Abrir proyecto…", action: controller.chooseWorkspace).keyboardShortcut("o")
