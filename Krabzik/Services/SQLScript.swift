@@ -20,11 +20,22 @@ private enum Byte {
     static let doubleQuote: UInt8 = 34
     static let hash: UInt8 = 35
     static let singleQuote: UInt8 = 39
+    static let openParen: UInt8 = 40
+    static let closeParen: UInt8 = 41
     static let asterisk: UInt8 = 42
     static let hyphen: UInt8 = 45
     static let slash: UInt8 = 47
+    static let zero: UInt8 = 48
+    static let nine: UInt8 = 57
+    static let uppercaseA: UInt8 = 65
+    /// `/*M!` es la variante de MariaDB del comentario ejecutable.
+    static let uppercaseM: UInt8 = 77
+    static let uppercaseZ: UInt8 = 90
     static let backslash: UInt8 = 92
+    static let underscore: UInt8 = 95
     static let backtick: UInt8 = 96
+    static let lowercaseA: UInt8 = 97
+    static let lowercaseZ: UInt8 = 122
 }
 
 /// Corta un script en sentencias, solo en los delimitadores que están fuera de cadenas y
@@ -172,5 +183,108 @@ struct SQLScript {
             }
         }
         return nil
+    }
+}
+
+/// Una palabra desnuda del SQL: el token en mayúsculas, dónde empieza —en bytes— y a qué
+/// profundidad de paréntesis aparece. `depth == 0` es el nivel externo de la sentencia.
+struct SQLWord: Sendable, Equatable {
+    let word: String
+    let offset: Int
+    let depth: Int
+}
+
+/// Lo que queda de una sentencia cuando se saltea todo lo que no es código.
+struct SQLWordScan: Sendable {
+    /// Las palabras desnudas, en orden de aparición.
+    var words: [SQLWord] = []
+    /// `true` si hay un comentario ejecutable (`/*!` o `/*M!`) fuera de cadenas: eso es
+    /// SQL que el servidor ejecuta, no decoración.
+    var hasExecutableComment = false
+
+    /// Las palabras del nivel externo, que son las que identifican la forma de la sentencia.
+    var outer: [String] { words.filter { $0.depth == 0 }.map(\.word) }
+}
+
+extension SQLScript {
+    /// Recorre `sql` con las mismas reglas de cadenas, identificadores entre backticks y
+    /// comentarios que `next()`, y devuelve las palabras que quedan afuera.
+    ///
+    /// Es el **único** recorrido léxico del proyecto: lo usan la paginación, para reconocer
+    /// cláusulas externas, y `SQLWriteGuard`, para decidir si una sentencia escribe. Un
+    /// segundo recorrido con sus propias reglas sería garantizar que se separen.
+    static func scan(_ sql: String, noBackslashEscapes: Bool = false) -> SQLWordScan {
+        let bytes = Array(sql.utf8)
+        var index = 0, depth = 0
+        var scan = SQLWordScan()
+        while index < bytes.count {
+            let byte = bytes[index]
+            let following = index + 1 < bytes.count ? bytes[index + 1] : 0
+            if byte == Byte.singleQuote || byte == Byte.doubleQuote || byte == Byte.backtick {
+                index = skipQuoted(bytes, from: index, noBackslashEscapes: noBackslashEscapes)
+            } else if byte == Byte.hash
+                || (byte == Byte.hyphen && following == Byte.hyphen
+                    && (index + 2 == bytes.count || bytes[index + 2] <= Byte.space)) {
+                while index < bytes.count, bytes[index] != Byte.newline { index += 1 }
+            } else if byte == Byte.slash && following == Byte.asterisk {
+                if executableComment(bytes, at: index) { scan.hasExecutableComment = true }
+                index += 2
+                while index + 1 < bytes.count, !(bytes[index] == Byte.asterisk && bytes[index + 1] == Byte.slash) {
+                    index += 1
+                }
+                index = min(index + 2, bytes.count)
+            } else if byte == Byte.openParen {
+                depth += 1
+                index += 1
+            } else if byte == Byte.closeParen {
+                depth -= 1
+                index += 1
+            } else if isLetter(byte) || byte == Byte.underscore {
+                let start = index
+                while index < bytes.count, isWordByte(bytes[index]) { index += 1 }
+                let word = String(decoding: bytes[start..<index], as: UTF8.self).uppercased()
+                scan.words.append(SQLWord(word: word, offset: start, depth: depth))
+            } else {
+                index += 1
+            }
+        }
+        return scan
+    }
+
+    /// Devuelve el índice que sigue a la cadena o identificador que empieza en `start`.
+    /// Un backslash escapa el cierre salvo dentro de backticks o con `NO_BACKSLASH_ESCAPES`,
+    /// y el delimitador duplicado no cierra: las mismas reglas que `next()`.
+    private static func skipQuoted(_ bytes: [UInt8], from start: Int, noBackslashEscapes: Bool) -> Int {
+        let quote = bytes[start]
+        var index = start + 1
+        while index < bytes.count {
+            let byte = bytes[index]
+            if byte == Byte.backslash, quote != Byte.backtick, !noBackslashEscapes {
+                index += 2
+                continue
+            }
+            if byte == quote {
+                index += 1
+                guard index < bytes.count, bytes[index] == quote else { return index }
+                index += 1
+                continue
+            }
+            index += 1
+        }
+        return index
+    }
+
+    private static func executableComment(_ bytes: [UInt8], at index: Int) -> Bool {
+        guard index + 2 < bytes.count else { return false }
+        if bytes[index + 2] == Byte.exclamation { return true }
+        return index + 3 < bytes.count && bytes[index + 2] == Byte.uppercaseM && bytes[index + 3] == Byte.exclamation
+    }
+
+    private static func isLetter(_ byte: UInt8) -> Bool {
+        (Byte.uppercaseA...Byte.uppercaseZ).contains(byte) || (Byte.lowercaseA...Byte.lowercaseZ).contains(byte)
+    }
+
+    private static func isWordByte(_ byte: UInt8) -> Bool {
+        isLetter(byte) || (Byte.zero...Byte.nine).contains(byte) || byte == Byte.underscore
     }
 }

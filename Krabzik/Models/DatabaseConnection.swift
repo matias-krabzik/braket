@@ -18,6 +18,12 @@ struct DatabaseConnection: Identifiable, Codable, Equatable, Sendable {
     var tintStrength: Double?
 
     // Opcionales para conservar la lectura de proyectos anteriores.
+    /// La política de escritura, guardada como texto y no como enum a propósito: un valor
+    /// que esta versión no conozca no puede impedir que el proyecto se abra.
+    /// `effectiveWritePolicy` lo interpreta y, si no lo reconoce, se queda con el nivel
+    /// más restrictivo. Ausente —los perfiles guardados antes de que existiera el campo—
+    /// significa `unrestricted`, que es exactamente lo que hacían.
+    var writePolicy: String?
     var connectTimeoutSeconds: Int?
     var tlsCAPath: String?
     var tlsServerName: String?
@@ -25,6 +31,53 @@ struct DatabaseConnection: Identifiable, Codable, Equatable, Sendable {
     var tlsClientKeyPath: String?
 
     var effectiveConnectTimeout: Int { connectTimeoutSeconds ?? 10 }
+
+    /// La política vigente. Falla cerrada: lo que no se reconoce es solo lectura.
+    var effectiveWritePolicy: WritePolicy {
+        guard let writePolicy else { return .unrestricted }
+        return WritePolicy(rawValue: writePolicy) ?? .readOnly
+    }
+
+    /// Qué puede mandar el editor con este perfil.
+    ///
+    /// Antes de esto la única señal de «esto es producción» era el color del perfil, y la
+    /// protección real quedaba toda en los `GRANT` del servidor. Ver
+    /// docs/specs/S8-guarda-de-escritura-mysql.md.
+    enum WritePolicy: String, Codable, CaseIterable, Sendable {
+        /// Sin barreras: lo que el editor manda, se ejecuta.
+        case unrestricted
+        /// Pregunta antes de mandar un script que escribe, una vez por ejecución.
+        case confirm
+        /// Rechaza las escrituras sin abrir la conexión.
+        case readOnly
+
+        var label: String {
+            switch self {
+            case .unrestricted: "Sin restricciones"
+            case .confirm: "Confirmar antes de escribir"
+            case .readOnly: "Solo lectura"
+            }
+        }
+
+        var detail: String {
+            switch self {
+            case .unrestricted: "El editor manda cualquier sentencia sin preguntar."
+            case .confirm: "Antes de mandar un script que escribe, se muestra el destino y qué sentencias escriben."
+            case .readOnly: "Se rechazan las escrituras del editor y de la grilla, sin abrir la conexión."
+            }
+        }
+
+        /// Etiqueta corta para la barra de ejecución. `nil` cuando no hay nada que avisar.
+        var badge: String? {
+            switch self {
+            case .unrestricted: nil
+            case .confirm: "Confirmar escrituras"
+            case .readOnly: "Solo lectura"
+            }
+        }
+
+        var icon: String { self == .readOnly ? "lock.fill" : "exclamationmark.shield" }
+    }
 
     /// Política de cifrado y verificación elegida explícitamente para este perfil.
     enum TLSMode: String, Codable, CaseIterable, Sendable {
@@ -86,6 +139,13 @@ struct DatabaseConnection: Identifiable, Codable, Equatable, Sendable {
         }
         guard (1...300).contains(value.effectiveConnectTimeout) else {
             throw DatabaseFailure("El tiempo de conexión debe estar entre 1 y 300 segundos.")
+        }
+        value.writePolicy = Self.clean(writePolicy)
+        // Al GUARDAR, un valor que no es una política es un error. Al LEER un proyecto no:
+        // `effectiveWritePolicy` ya lo trata como solo lectura, y rechazarlo acá dejaría el
+        // proyecto sin abrir por un campo que solo puede restringir.
+        if level == .strict, let policy = value.writePolicy, WritePolicy(rawValue: policy) == nil {
+            throw DatabaseFailure("La política de escritura de la conexión no es válida.")
         }
         value.tlsCAPath = Self.clean(tlsCAPath)
         value.tlsServerName = Self.clean(tlsServerName)
