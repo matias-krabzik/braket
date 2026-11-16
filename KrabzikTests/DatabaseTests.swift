@@ -457,6 +457,67 @@ final class DatabaseTests: XCTestCase {
         XCTAssertEqual(try CredentialStore.read(for: config), "")
     }
 
+    /// Fija el formato histórico de la cuenta. Un perfil sin parámetros avanzados de TLS
+    /// tiene que seguir buscando su contraseña donde la dejó: si esta cadena cambia, las
+    /// credenciales ya guardadas quedan inaccesibles y el usuario las vuelve a tipear.
+    func testKeychainAccountKeepsItsShapeWithoutTLSTrustParameters() throws {
+        var config = DatabaseConnection()
+        config.id = try XCTUnwrap(UUID(uuidString: "6B2A9C1E-0000-4000-8000-00000000AB01"))
+        config.host = "Db.Example"
+        config.port = 3307
+        config.username = "app"
+        config.tls = .verified
+        XCTAssertEqual(CredentialStore.account(for: config),
+                       "6B2A9C1E-0000-4000-8000-00000000AB01|db.example|3307|app|verified")
+        // Vacío y ausente son lo mismo: `validated()` limpia, y una ruta en blanco no es
+        // una identidad distinta.
+        config.tlsServerName = ""
+        XCTAssertEqual(CredentialStore.account(for: config),
+                       "6B2A9C1E-0000-4000-8000-00000000AB01|db.example|3307|app|verified")
+        config.tlsServerName = "db.interno"
+        XCTAssertTrue(CredentialStore.account(for: config)
+            .hasPrefix("6B2A9C1E-0000-4000-8000-00000000AB01|db.example|3307|app|verified|"),
+                      "la huella se agrega al final, sin reescribir lo anterior")
+    }
+
+    /// La credencial también queda atada a los parámetros que deciden a quién se le cree:
+    /// otra CA, otro nombre TLS u otro certificado de cliente no pueden reusar la
+    /// contraseña guardada. Ver la tabla del modelo de amenaza en docs/security.md.
+    @MainActor func testCredentialsStayBoundToTLSTrustParameters() throws {
+        var config = DatabaseConnection()
+        config.tlsCAPath = "/etc/ssl/krabzik-prueba-ca.pem"
+        defer { try? CredentialStore.remove(for: config) }
+        try CredentialStore.save("Krabzik ephemeral test", for: config)
+        XCTAssertEqual(try CredentialStore.read(for: config), "Krabzik ephemeral test")
+
+        var plantada = config
+        plantada.tlsCAPath = "/tmp/plantada.pem"
+        XCTAssertEqual(try CredentialStore.read(for: plantada), "",
+                       "una CA distinta no puede reusar la contraseña del perfil")
+
+        var otroNombre = config
+        otroNombre.tlsServerName = "otro.example"
+        XCTAssertEqual(try CredentialStore.read(for: otroNombre), "",
+                       "desviar la verificación de nombre tampoco hereda la contraseña")
+
+        var conCertificado = config
+        conCertificado.tlsClientCertificatePath = "/tmp/cliente.pem"
+        conCertificado.tlsClientKeyPath = "/tmp/cliente.key"
+        XCTAssertEqual(try CredentialStore.read(for: conCertificado), "")
+
+        var sinCA = config
+        sinCA.tlsCAPath = nil
+        XCTAssertEqual(try CredentialStore.read(for: sinCA), "",
+                       "quitar la CA es otro extremo: vuelve a la cuenta sin huella")
+
+        XCTAssertEqual(try CredentialStore.read(for: config), "Krabzik ephemeral test",
+                       "el perfil original conserva la suya")
+        XCTAssertTrue(ConnectionStore.endpointChanged(from: config, to: plantada))
+        XCTAssertTrue(ConnectionStore.endpointChanged(from: config, to: otroNombre))
+        XCTAssertTrue(ConnectionStore.endpointChanged(from: config, to: conCertificado))
+        XCTAssertFalse(ConnectionStore.endpointChanged(from: config, to: config))
+    }
+
     /// Cubre el parche 0003 del vendoring: plazos de conexión y autenticación, y cierre
     /// del canal cuando el servidor corta antes de terminar.
     /// Ver patches/0003-connection-deadlines-and-channel-cleanup.patch

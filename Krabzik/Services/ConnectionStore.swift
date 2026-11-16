@@ -80,11 +80,19 @@ final class ConnectionStore {
         }
     }
 
+    /// Qué cuenta como «otro extremo» y obliga a soltar la credencial anterior. Incluye
+    /// los parámetros avanzados de TLS: deciden contra qué identidad se verifica el
+    /// servidor, así que cambiarlos cambia en quién se confía. Tiene que seguir a
+    /// `CredentialStore.account(for:)`, que es la que decide dónde queda guardada.
     static func endpointChanged(from previous: DatabaseConnection, to connection: DatabaseConnection) -> Bool {
         previous.host.lowercased() != connection.host.lowercased()
             || previous.port != connection.port
             || previous.username != connection.username
             || previous.tls != connection.tls
+            || previous.tlsCAPath != connection.tlsCAPath
+            || previous.tlsServerName != connection.tlsServerName
+            || previous.tlsClientCertificatePath != connection.tlsClientCertificatePath
+            || previous.tlsClientKeyPath != connection.tlsClientKeyPath
     }
 
     func save(_ connection: DatabaseConnection, password: String) async throws {

@@ -49,7 +49,12 @@ trae. Es un rediseño, no un ajuste: si alguna vez se decide, es un spec aparte.
   que revisar este documento antes de agregarla. Las únicas apariciones de esos nombres en el repo son el
   spec S6 y esta línea, que los nombran para prohibirlos.
 - **Contraseñas en el llavero**, con `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` y ligadas al endpoint:
-  cambiar host o puerto invalida la credencial guardada (`CredentialStore`).
+  cambiar host, puerto, usuario o modo de TLS invalida la credencial guardada (`CredentialStore`). La cuenta
+  incluye además una huella de los parámetros que deciden **a quién se le cree** —CA, nombre TLS y certificado
+  de cliente—, porque el modo de TLS dice cuánto se exige pero no contra qué identidad: sin eso, un `.kzk`
+  ajeno con el mismo extremo y otra CA podía reusar la contraseña guardada y verificar al servidor contra una
+  raíz plantada. Los perfiles sin parámetros avanzados conservan su cuenta histórica; al primero que se les
+  agregue, la contraseña se vuelve a pedir una vez.
 - **TLS verificado por defecto** en MySQL, con el handler de NIOSSL comprobado en la conexión. Los modos
   compatibles con Workbench permiten cifrado sin verificación o texto plano si el usuario los elige.
 - **Sandbox propio de Codex**: `workspaceWrite` con `writableRoots` explícitas, `networkAccess: false`
