@@ -91,6 +91,13 @@ todas las sentencias del script:
 
 La confirmación es **por ejecución**: no se recuerda nada entre ejecuciones ni durante la sesión.
 
+La pregunta entra por `askBeforeWriting`, una propiedad con la implementación real —el `NSAlert`— por
+omisión. Es un punto de inyección a propósito: un diálogo modal no se puede ejercitar en una prueba, cuelga
+la corrida, y sin poder ejercitarlo el criterio «pregunta una vez por ejecución» no se puede verificar. Las
+pruebas reemplazan la pregunta y cuentan las veces que se hace; el diálogo en sí se arma en
+`DatabaseController.writeAlert(...)`, que se prueba aparte —textos y botones— sin mostrarlo. Es el mismo
+recurso que ya usa `MySQLClient` con el lector de credenciales.
+
 ### 4. Ediciones de la grilla
 
 El camino de `apply(...)` ya tiene su propia hoja de revisión, y con `confirm` eso alcanza. Con `readOnly`
@@ -123,8 +130,10 @@ invisible.
 `KrabzikTests/SQLWriteGuardTests.swift`: la clasificación sobre lecturas, escrituras, casos ambiguos,
 cadenas, comentarios, `DELIMITER`, rutinas y `NO_BACKSLASH_ESCAPES`; el round trip del perfil con y sin el
 campo; la política desconocida en un `.kzk` real. `KrabzikTests/SQLWorkspaceTests.swift`: que `readOnly`
-rechace un `UPDATE` sin abrir conexión ni leer el llavero, que deje pasar un `SELECT` y que `unrestricted`
-no clasifique nada.
+rechace un `UPDATE` sin abrir conexión ni leer el llavero, que deje pasar un `SELECT`, que `unrestricted`
+no clasifique nada, que `confirm` pregunte una vez por ejecución y obedezca la respuesta —sin recordarla
+para la siguiente—, que no pregunte por una lectura, y que el diálogo nombre el destino y no tenga al botón
+destructivo como predeterminado.
 
 ## Riesgos y compatibilidad
 

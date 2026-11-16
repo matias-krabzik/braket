@@ -410,4 +410,66 @@ final class SQLWorkspaceTests: XCTestCase {
         confirming.connection = policy("Staging", .confirm)
         XCTAssertNil(SQLResultDraft.readOnlyReason(confirming, table: table))
     }
+
+    @MainActor func testConfirmProfileAsksOncePerExecutionAndObeysTheAnswer() async throws {
+        let database = DatabaseController()
+        let connection = policy("Staging", .confirm)
+        let document = try EditorDocument(url: URL(fileURLWithPath: "/tmp/confirmar.sql"), data: Data("SELECT 1".utf8))
+        let execution = document.sqlExecution
+        var asked: [Int] = []
+        var answer = false
+        database.askBeforeWriting = { audit, profile, destination in
+            asked.append(audit.writes.count)
+            XCTAssertEqual(profile.name, "Staging")
+            XCTAssertFalse(destination.isEmpty)
+            return answer
+        }
+        // Una lectura no pregunta nada.
+        database.execute(document, connection: connection, queryOverride: "SELECT * FROM users")
+        XCTAssertTrue(asked.isEmpty)
+        await cancelBeforeItRuns(execution)
+        // Dice que no: no arranca y no se abre ninguna conexión.
+        database.execute(document, connection: connection, queryOverride: "DELETE FROM users; UPDATE users SET a = 1")
+        XCTAssertEqual(asked, [2])
+        XCTAssertFalse(execution.isRunning)
+        XCTAssertNil(execution.task)
+        let session = await database.client.info(connection.id)
+        XCTAssertNil(session)
+        // Dice que sí: arranca. Y la próxima ejecución vuelve a preguntar: la respuesta no
+        // se recuerda ni para la próxima ni para el resto de la sesión.
+        answer = true
+        database.execute(document, connection: connection, queryOverride: "DELETE FROM users")
+        XCTAssertEqual(asked, [2, 1])
+        XCTAssertTrue(execution.isRunning)
+        await cancelBeforeItRuns(execution)
+        execution.error = nil
+        database.execute(document, connection: connection, queryOverride: "DELETE FROM users")
+        XCTAssertEqual(asked, [2, 1, 1])
+        await cancelBeforeItRuns(execution)
+    }
+
+    @MainActor func testWriteAlertNamesTheDestinationAndDoesNotDefaultToTheDestructiveButton() throws {
+        let audit = try SQLWriteGuard.audit("""
+        DELETE FROM users WHERE id = 1;
+        UPDATE users SET name = 'x';
+        DROP TABLE viejos;
+        TRUNCATE TABLE registros;
+        SELECT 1;
+        """)
+        let connection = policy("Ventas (producción)", .confirm)
+        let alert = DatabaseController.writeAlert(audit, connection: connection, destination: "db.ejemplo.com:3306 / ventas")
+        XCTAssertEqual(alert.messageText, "¿Ejecutar 4 sentencias que escriben?")
+        XCTAssertTrue(alert.informativeText.contains("Ventas (producción) · db.ejemplo.com:3306 / ventas"),
+                      alert.informativeText)
+        XCTAssertTrue(alert.informativeText.contains("5 sentencias en total"), alert.informativeText)
+        XCTAssertTrue(alert.informativeText.contains("Línea 1: DELETE FROM users WHERE id = 1"), alert.informativeText)
+        XCTAssertTrue(alert.informativeText.contains("Línea 3: DROP TABLE viejos"), alert.informativeText)
+        XCTAssertFalse(alert.informativeText.contains("TRUNCATE"), alert.informativeText)
+        XCTAssertTrue(alert.informativeText.hasSuffix("… y 1 más."), alert.informativeText)
+        XCTAssertEqual(alert.buttons.count, 2)
+        XCTAssertTrue(alert.buttons[0].hasDestructiveAction)
+        // ⏎ cancela: el botón destructivo no es el predeterminado.
+        XCTAssertEqual(alert.buttons[0].keyEquivalent, "")
+        XCTAssertEqual(alert.buttons[1].keyEquivalent, "\r")
+    }
 }

@@ -12,6 +12,18 @@ final class DatabaseController {
     var resultsVisible = true
     var browserShowsDatabases = false
     let schema = SQLSchemaStore()
+    /// Cómo se pide la confirmación de escritura, con el destino ya redactado. Es un punto
+    /// de inyección a propósito: un `NSAlert` modal no se puede ejercitar en una prueba
+    /// —cuelga la corrida—, así que las pruebas reemplazan la pregunta y comprueban que se
+    /// haga una vez por ejecución. El diálogo real se arma en `writeAlert(...)`, que sí se
+    /// prueba.
+    @ObservationIgnored
+    var askBeforeWriting: (SQLWriteGuard.Audit, DatabaseConnection, String) -> Bool = { audit, connection, destination in
+        // `DatabaseController` y no `Self`: en el inicializador de una propiedad almacenada
+        // no se puede nombrar el tipo covariante.
+        DatabaseController.writeAlert(audit, connection: connection, destination: destination)
+            .runModal() == .alertFirstButtonReturn
+    }
     @ObservationIgnored let client = MySQLClient()
     @ObservationIgnored private var connectionTasks: [UUID: Task<Void, Never>] = [:]
 
@@ -209,7 +221,7 @@ final class DatabaseController {
             resultsVisible = true
             return false
         }
-        return confirmWrites(audit, connection: connection, state: state)
+        return askBeforeWriting(audit, connection, state.destination(for: connection))
     }
 
     private static func rejection(_ audit: SQLWriteGuard.Audit, connection: DatabaseConnection) -> String {
@@ -221,10 +233,13 @@ final class DatabaseController {
             + first + "No se abrió ninguna conexión."
     }
 
-    /// Pregunta antes de mandar un script que escribe. Es **por ejecución**: la respuesta
-    /// no se recuerda ni para la próxima ejecución ni para el resto de la sesión.
-    private func confirmWrites(_ audit: SQLWriteGuard.Audit, connection: DatabaseConnection,
-                               state: DatabaseState) -> Bool {
+    /// El diálogo que pregunta antes de mandar un script que escribe. Dice a dónde va,
+    /// cuántas sentencias escriben y cuáles son las primeras.
+    ///
+    /// La pregunta es **por ejecución**: no se recuerda la respuesta ni para la próxima
+    /// ejecución ni para el resto de la sesión, así que no hay nada que guardar acá.
+    static func writeAlert(_ audit: SQLWriteGuard.Audit, connection: DatabaseConnection,
+                           destination: String) -> NSAlert {
         let shown = 3
         let alert = NSAlert()
         alert.alertStyle = .warning
@@ -232,7 +247,7 @@ final class DatabaseController {
             ? "¿Ejecutar una sentencia que escribe?"
             : "¿Ejecutar \(audit.writes.count) sentencias que escriben?"
         let rest = audit.writes.count > shown ? "\n… y \(audit.writes.count - shown) más." : ""
-        alert.informativeText = "Destino: \(connection.name) · \(state.destination(for: connection))\n"
+        alert.informativeText = "Destino: \(connection.name) · \(destination)\n"
             + "El script tiene \(audit.total) sentencias en total.\n\n"
             + audit.preview(limit: shown).joined(separator: "\n") + rest
         let run = alert.addButton(withTitle: "Ejecutar")
@@ -241,7 +256,7 @@ final class DatabaseController {
         // El botón destructivo no es el predeterminado: ⏎ cancela.
         run.keyEquivalent = ""
         cancel.keyEquivalent = "\r"
-        return alert.runModal() == .alertFirstButtonReturn
+        return alert
     }
 
     func selectDatabase(_ name: String, connection: DatabaseConnection) {
