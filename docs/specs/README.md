@@ -1,5 +1,25 @@
 # Especificaciones de mejora · Krabzik IDE
 
+## Editor de pixel art
+
+Los [specs del editor `.pxa`](pixel-art/README.md), documentados el **2026-11-14**, cubren:
+
+- Etapa 1: formato autocontenido, historial persistente, color libre/vinculado y operaciones con Codex.
+- [Etapa 2](pixel-art/ETAPA-02.md): integración documental y visual en Braket, apertura, guardado,
+  conflictos, recuperación y restauración de sesión.
+- [Etapa 3](pixel-art/ETAPA-03.md): dibujo, selección, transformaciones y capas.
+- [Etapa 4](pixel-art/ETAPA-04.md): inspector de paletas, extracción y reducción.
+- [Etapa 5](pixel-art/ETAPA-05.md): fotogramas, secuencias, reproducción y onion skin.
+- [Etapa 6](pixel-art/ETAPA-06.md): importación PNG/sprites y exportación PNG/GIF/spritesheet con JSON.
+- [Etapa 7](pixel-art/ETAPA-07.md): conexión, herramientas gráficas, panel y calidad de Codex.
+- [Etapa 8](pixel-art/ETAPA-08.md): rendimiento, accesibilidad, validación integral e instalación Release.
+
+El [mapa de alcance](pixel-art/MAPA-DE-ALCANCE.md) conecta las capacidades con los 21 contratos.
+El [estado por etapa](pixel-art/ESTADO-IMPLEMENTACION.md) separa las specs terminadas de la
+implementación y de la validación de Claude.
+
+## Auditoría original
+
 Specs derivados de la auditoría de código, seguridad y prácticas del **2026-11-09**.
 Un archivo por hallazgo. Cada spec es autocontenido: se puede implementar sin leer los demás,
 salvo las dependencias que declara en su encabezado.
@@ -135,12 +155,6 @@ que el spec diseña —`RecentProjectsStore`, `ErrorCenter`, `DocumentStore`, `S
 `FileCommands` y `AgentBridge`. Los seis criterios cumplidos. Lo que quedó en el controlador es lo que
 necesita a todos a la vez: abrir, crear y cerrar un proyecto, el cableado de `install` y el orden de
 `prepareToLeave`.
-
-**S8 resuelto** el 2026-11-15 (commits `a34f549` y `b688020`): cada perfil de conexión declara qué le
-permite al editor. `readOnly` rechaza las escrituras sin abrir la conexión, `confirm` pregunta una vez por
-ejecución mostrando destino y sentencias, y `unrestricted` —lo que vale todo perfil ya guardado— no clasifica
-nada. La clasificación falla cerrada: lo que no se reconoce como lectura cuenta como escritura. De paso, el
-recorrido léxico quedó en un solo lugar: `SQLPagination` dejó su copia privada y usa `SQLScript.scan(_:)`.
 
 Al cerrar un spec, marcarlo en la tabla de este índice y dejar en el propio spec una sección `## Resuelto`
 con la fecha, los commits y los criterios verificados.

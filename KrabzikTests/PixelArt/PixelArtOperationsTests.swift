@@ -6,6 +6,54 @@ final class PixelArtOperationsTests: XCTestCase {
     private let red = PixelRGBA(255, 0, 0)
     private let blue = PixelRGBA(0, 0, 255)
 
+    func testFastStrokeFillsEveryPixelBetweenPointerSamples() {
+        let start = PixelWrite(x: 1, y: 2, value: .free(red))
+        let end = PixelWrite(x: 5, y: 2, value: .free(red))
+        XCTAssertEqual(PixelStroke.line(from: start, to: end).map(\.x), [1, 2, 3, 4, 5])
+        let diagonal = PixelStroke.line(from: start, to: PixelWrite(x: 4, y: 5, value: .free(red)))
+        XCTAssertEqual(diagonal.map { [$0.x, $0.y] }, [[1, 2], [2, 3], [3, 4], [4, 5]])
+    }
+
+    func testShapeAndBrushToolsGenerateClippedPixels() {
+        let start = PixelWrite(x: 1, y: 1, value: .free(red))
+        let end = PixelWrite(x: 4, y: 3, value: .free(red))
+        let rectangle = PixelToolGeometry.outline(from: start, to: end, tool: "rectangle")
+        XCTAssertEqual(Set(rectangle.map { PixelPoint(x: $0.x, y: $0.y) }).count, 10)
+        XCTAssertTrue(rectangle.contains { $0.x == 1 && $0.y == 3 })
+        XCTAssertTrue(rectangle.contains { $0.x == 4 && $0.y == 1 })
+        let ellipse = PixelToolGeometry.outline(from: start, to: end, tool: "ellipse")
+        XCTAssertFalse(ellipse.isEmpty)
+        XCTAssertTrue(ellipse.allSatisfy { (1...4).contains($0.x) && (1...3).contains($0.y) })
+        let brush = PixelToolGeometry.brush([start], size: 4, width: 3, height: 3)
+        XCTAssertEqual(Set(brush.map { PixelPoint(x: $0.x, y: $0.y) }).count, 9)
+    }
+
+    func testFillStopsAtOtherColorsAndRespectsSelection() throws {
+        var state = PixelArtState.blank(width: 5, height: 3)
+        let layer = state.layers[0].id, frame = state.frames[0].id
+        var cel = PixelCel()
+        for y in 0..<3 { cel.setPixel(x: 2, y: y, to: .free(blue)) }
+        state.frames[0].cels[layer] = cel
+        let selection = PixelSelection.rectangle(x: 0, y: 0, width: 2, height: 2,
+                                                 canvasWidth: 5, canvasHeight: 3)
+        let writes = try PixelToolGeometry.floodFill(state, layer: layer, frame: frame,
+                                                     at: PixelPoint(x: 0, y: 0), value: .free(red),
+                                                     selection: selection)
+        XCTAssertEqual(Set(writes.map { PixelPoint(x: $0.x, y: $0.y) }).count, 4)
+        XCTAssertFalse(writes.contains { $0.x == 3 || $0.y == 2 })
+        XCTAssertFalse(selection.contains(x: -1, y: 0))
+        XCTAssertFalse(selection.contains(x: 0, y: -1))
+    }
+
+    func testLassoSelectsInteriorPixels() {
+        let polygon = [PixelPoint(x: 1, y: 1), PixelPoint(x: 5, y: 1),
+                       PixelPoint(x: 5, y: 5), PixelPoint(x: 1, y: 5)]
+        let selection = PixelToolGeometry.lassoSelection(polygon, width: 8, height: 8)
+        XCTAssertTrue(selection.contains(x: 3, y: 3))
+        XCTAssertFalse(selection.contains(x: 0, y: 0))
+        XCTAssertFalse(selection.contains(x: 6, y: 6))
+    }
+
     /// 40 × 40, dos capas, dos fotogramas y paleta con 7 «piel» y 9 «madera», ambas rojas.
     private func makeCore() throws -> PixelDocumentCore {
         var state = PixelArtState.blank(width: 40, height: 40)

@@ -1,4 +1,5 @@
 @testable import Krabzik
+import ImageIO
 import XCTest
 
 /// Archivo `.pxa` completo: ida y vuelta, validación, cambios pendientes, copias, guardado y recuperación.
@@ -429,4 +430,84 @@ final class PixelArtFileTests: XCTestCase {
     }
 
     // La recuperación por trabajo (PXA-08) se prueba en PixelArtRecoveryTests.
+
+    @MainActor
+    func testDocumentStoreCreatesDrawsSavesAndReopensPixelArt() async throws {
+        let documents = DocumentStore()
+        let draft = try documents.createPixelDraft(width: 16, height: 16)
+        let initial = try XCTUnwrap(draft.pixelArt)
+        let layer = try XCTUnwrap(initial.editor.activeLayerID)
+        let frame = try XCTUnwrap(initial.editor.activeFrameID)
+        try draft.applyPixelArt(.writePixels(layer: layer, frame: frame,
+                                            writes: [PixelWrite(x: 3, y: 4, value: .free(red))]),
+                                label: "Lápiz", kind: "pencil", scope: .cel(layer: layer, frame: frame))
+        let url = directory.appendingPathComponent("dibujo.pxa")
+        let saved = try await documents.savePixelDraft(draft, to: url)
+        XCTAssertFalse(saved.isDirty)
+        XCTAssertEqual(saved.pixelArt?.state.pixel(layer: layer, frame: frame, x: 3, y: 4), .free(red))
+        documents.close(saved)
+        try await documents.open(url)
+        let reopened = try XCTUnwrap(documents.selected)
+        XCTAssertEqual(reopened.pixelArt?.state.pixel(layer: layer, frame: frame, x: 3, y: 4), .free(red))
+        try reopened.navigatePixelHistory(redo: false)
+        XCTAssertEqual(reopened.pixelArt?.state.pixel(layer: layer, frame: frame, x: 3, y: 4), .empty)
+        XCTAssertTrue(reopened.isDirty)
+        let didSave = try await documents.save(reopened)
+        XCTAssertTrue(didSave)
+        XCTAssertFalse(reopened.isDirty)
+    }
+
+    @MainActor
+    func testEditorSwitchesFramesWithoutRecomposingOnToolChange() throws {
+        let documents = DocumentStore()
+        let draft = try documents.createPixelDraft(width: 8, height: 8)
+        let first = try XCTUnwrap(draft.pixelArt?.editor.activeFrameID)
+        let second = PixelFrame(duration: 125)
+        let initial = try XCTUnwrap(draft.pixelArt)
+        try draft.applyPixelArt(.addFrame(second, at: 1), label: "Fotograma", kind: "frame.add",
+                                scope: .document(initial.state))
+        let afterAdd = draft.previewRevision
+        draft.updatePixelEditor { $0.tool = "eraser" }
+        XCTAssertEqual(draft.pixelArt?.editor.tool, "eraser")
+        XCTAssertEqual(draft.previewRevision, afterAdd)
+        draft.updatePixelEditor { $0.activeFrameID = second.id }
+        XCTAssertEqual(draft.pixelArt?.editor.activeFrameID, second.id)
+        XCTAssertEqual(draft.previewRevision, afterAdd + 1)
+        draft.updatePixelEditor { $0.activeFrameID = first }
+        XCTAssertEqual(draft.pixelArt?.editor.activeFrameID, first)
+        XCTAssertEqual(draft.previewRevision, afterAdd + 2)
+    }
+
+    func testFullSizePNGExportKeepsCanvasDimensions() throws {
+        let document = try PixelArtDocument(width: 40, height: 24)
+        let data = try XCTUnwrap(PixelArtPreview.fullSizePNG(of: document.state,
+                                                              frame: document.state.frames[0].id))
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(data as CFData, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(image.width, 40)
+        XCTAssertEqual(image.height, 24)
+    }
+
+    @MainActor
+    func testDocumentStorePersistsLayersFramesAndPalette() async throws {
+        let documents = DocumentStore()
+        let draft = try documents.createPixelDraft(width: 8, height: 8)
+        let initial = try XCTUnwrap(draft.pixelArt)
+        let layer = PixelLayer(name: "Tinta")
+        let frame = PixelFrame(duration: 125)
+        try draft.applyPixelArt(.addLayer(layer, at: 1), label: "Capa", kind: "layer.add",
+                                scope: .document(initial.state))
+        let afterLayer = try XCTUnwrap(draft.pixelArt)
+        try draft.applyPixelArt(.addFrame(frame, at: 1), label: "Fotograma", kind: "frame.add",
+                                scope: .document(afterLayer.state))
+        try draft.addPixelPaletteColor(red)
+        let url = directory.appendingPathComponent("estructura.pxa")
+        let saved = try await documents.savePixelDraft(draft, to: url)
+        documents.close(saved)
+        try await documents.open(url)
+        let state = try XCTUnwrap(documents.selected?.pixelArt?.state)
+        XCTAssertEqual(state.layers.map(\.name), ["Capa 1", "Tinta"])
+        XCTAssertEqual(state.frames.count, 2)
+        XCTAssertEqual(state.palette.entries.first?.color, red)
+    }
 }

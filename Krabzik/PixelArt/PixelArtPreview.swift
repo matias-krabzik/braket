@@ -38,6 +38,24 @@ enum PixelArtPreview {
         return CGImageDestinationFinalize(destination) ? output as Data : nil
     }
 
+    /// Exporta el fotograma a tamaño real. El fondo transparente no forma parte de la imagen.
+    static func fullSizePNG(of state: PixelArtState, frame: UUID) -> Data? {
+        let bitmap = PixelArtRenderer.render(state, frame: frame)
+        guard let provider = CGDataProvider(data: Data(bitmap.rgba) as CFData),
+              let image = CGImage(width: bitmap.width, height: bitmap.height, bitsPerComponent: 8,
+                                  bitsPerPixel: 32, bytesPerRow: bitmap.width * 4,
+                                  space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue),
+                                  provider: provider, decode: nil, shouldInterpolate: false,
+                                  intent: .defaultIntent) else { return nil }
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(output, UTType.png.identifier as CFString, 1, nil) else {
+            return nil
+        }
+        CGImageDestinationAddImage(destination, image, nil)
+        return CGImageDestinationFinalize(destination) ? output as Data : nil
+    }
+
     /// Comprobación barata: firma PNG y un IHDR con dimensiones dentro del tope. No decodifica la imagen.
     static func isAcceptable(_ data: Data) -> Bool {
         guard data.count >= 33, Array(data.prefix(8)) == pngSignature, data.count <= PxaLimits.imageBytes else { return false }

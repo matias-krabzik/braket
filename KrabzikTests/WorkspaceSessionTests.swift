@@ -25,6 +25,66 @@ final class WorkspaceSessionTests: XCTestCase {
         WorkspaceSession(trustStore: TrustStore(defaults: defaults), errors: errors)
     }
 
+    func testPixelArtCreatedInsideProjectTreeOpensAsDocumentTab() async throws {
+        let (directory, defaults) = try environment()
+        let sprites = directory.appendingPathComponent("Sprites", isDirectory: true)
+        try FileManager.default.createDirectory(at: sprites, withIntermediateDirectories: true)
+        var workspace = Workspace(name: "Prueba")
+        workspace.projects = [CodeProject(name: "Archivos", path: "Sprites", kind: .files, command: "")]
+        let host = session(defaults)
+        host.open(workspace, at: directory.appendingPathComponent("Prueba.kzk"), trust: .trusted)
+        let documents = DocumentStore()
+        let files = FileCommands(session: host, docs: documents, defaults: defaults)
+
+        let created = try await files.createPixelArtFile(named: "bosque", in: sprites, width: 16, height: 32)
+        XCTAssertEqual(created.url, sprites.appendingPathComponent("bosque.pxa"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: created.url.path))
+        XCTAssertFalse(created.isDraft)
+        XCTAssertEqual(created.pixelArt?.state.width, 16)
+        XCTAssertEqual(created.pixelArt?.state.height, 32)
+        XCTAssertTrue(documents.selected === created)
+        XCTAssertEqual(documents.documents.count, 1)
+
+        try await documents.open(created.url)
+        XCTAssertEqual(documents.documents.count, 1, "abrir desde el árbol enfoca la pestaña existente")
+        do {
+            _ = try await files.createPixelArtFile(named: "fuera", in: directory)
+            XCTFail("no se debe crear fuera de las carpetas montadas")
+        } catch is ExplorerFileError {
+            // La ruta fuera del árbol se rechaza antes de escribir.
+        }
+    }
+
+    func testRepeatedDefaultPixelArtNameCreatesSiblingWithoutReplacingExistingFile() async throws {
+        let (directory, defaults) = try environment()
+        let sprites = directory.appendingPathComponent("Sprites", isDirectory: true)
+        try FileManager.default.createDirectory(at: sprites, withIntermediateDirectories: true)
+        var workspace = Workspace(name: "Prueba")
+        workspace.projects = [CodeProject(name: "Archivos", path: "Sprites", kind: .files, command: "")]
+        let host = session(defaults)
+        host.open(workspace, at: directory.appendingPathComponent("Prueba.kzk"), trust: .trusted)
+        let files = FileCommands(session: host, docs: DocumentStore(), defaults: defaults)
+        let original = try await files.createPixelArtFile(named: "Sin título.pxa", in: sprites, width: 8, height: 8)
+        let originalData = try Data(contentsOf: original.url)
+        let system = ExplorerFileSystem(roots: [sprites])
+        let suggested = try system.availableName(for: "Sin título.pxa", in: sprites)
+        XCTAssertEqual(suggested, "Sin título 2.pxa")
+
+        let second = try await files.createPixelArtFile(named: suggested, in: sprites, width: 16, height: 16)
+        XCTAssertEqual(second.url.lastPathComponent, suggested)
+        XCTAssertEqual(second.pixelArt?.state.width, 16)
+        XCTAssertEqual(try Data(contentsOf: original.url), originalData)
+
+        let freshFiles = FileCommands(session: host, docs: DocumentStore(), defaults: defaults)
+        do {
+            _ = try await freshFiles.createPixelArtFile(named: "Sin título.pxa", in: sprites)
+            XCTFail("no se debe reemplazar el archivo existente")
+        } catch let error as ExplorerFileError {
+            XCTAssertEqual(error, .alreadyExists)
+        }
+        XCTAssertEqual(try Data(contentsOf: original.url), originalData)
+    }
+
     // MARK: - Confianza (S1)
 
     func testTrustingRegistersTheDecisionSoItIsAskedOnlyOnce() throws {

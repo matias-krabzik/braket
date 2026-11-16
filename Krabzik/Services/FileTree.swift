@@ -82,6 +82,9 @@ struct FileTree: NSViewRepresentable {
         if let request = controller.newFileRequest {
             context.coordinator.requestNewFile(request, in: controller.newFileDirectory)
         }
+        if let request = controller.newPixelArtRequest {
+            context.coordinator.requestNewPixelArt(request, in: controller.newPixelArtDirectory)
+        }
     }
 
     /// Dueño del árbol: qué nodos hay, cuándo se leen y qué se observa.
@@ -104,6 +107,7 @@ struct FileTree: NSViewRepresentable {
         private var pendingSelectionURL: URL?
         private var pendingRenameURL: URL?
         private var lastCreationRequest: UUID?
+        private var lastPixelArtRequest: UUID?
         private let queue = DispatchQueue(label: "com.krabzik.files", qos: .userInitiated)
         nonisolated private static let excluded: Set<String> = [
             ".git",
@@ -326,8 +330,13 @@ struct FileTree: NSViewRepresentable {
             let selection = selectedNodes(clicked: node)
             if selection.count == 1, node.isDirectory, (try? fileSystem.checkedFolder(node.url)) != nil {
                 add("Nuevo archivo…", to: menu, action: #selector(newFile(_:)), represented: node)
+                add("Nueva imagen pixel art…", to: menu, action: #selector(newPixelArt(_:)), represented: node)
                 add("Nueva carpeta…", to: menu, action: #selector(newFolder(_:)), represented: node)
                 add("Pegar", to: menu, action: #selector(pasteHere(_:)), represented: node)
+                menu.addItem(.separator())
+            }
+            if selection.count == 1, !node.isDirectory, node.url.pathExtension.lowercased() == "pxa" {
+                add("Abrir imagen pixel art", to: menu, action: #selector(openPixelArt(_:)), represented: node)
                 menu.addItem(.separator())
             }
             if let project = node.project, selection.count == 1 {
@@ -353,13 +362,20 @@ struct FileTree: NSViewRepresentable {
                 add("Copiar ruta relativa", to: menu, action: #selector(copyPath(_:)), represented: node)
                 add("Mostrar en Finder", to: menu, action: #selector(reveal(_:)), represented: node)
             }
-            for item in menu.items where item.action != #selector(reveal(_:)) && item.action != #selector(copyPath(_:)) {
+            for item in menu.items where item.action != #selector(reveal(_:)) && item.action != #selector(copyPath(_:))
+                && item.action != #selector(openPixelArt(_:)) {
                 item.isEnabled = !controller.isReadOnly && controller.fileOperation == nil
             }
         }
 
         @objc func newFile(_ item: NSMenuItem) {
             if let node = item.representedObject as? FileNode { create(in: node, directory: false) }
+        }
+        @objc func newPixelArt(_ item: NSMenuItem) {
+            if let node = item.representedObject as? FileNode { createPixelArt(in: node.url) }
+        }
+        @objc func openPixelArt(_ item: NSMenuItem) {
+            if let node = item.representedObject as? FileNode { controller.files.open(node.url) }
         }
         @objc func newFolder(_ item: NSMenuItem) {
             if let node = item.representedObject as? FileNode { create(in: node, directory: true) }
@@ -430,6 +446,45 @@ struct FileTree: NSViewRepresentable {
             }
         }
 
+        func requestNewPixelArt(_ request: UUID, in directory: URL?) {
+            guard lastPixelArtRequest != request else { return }
+            lastPixelArtRequest = request
+            Task { [weak self] in
+                guard let self, self.controller.newPixelArtRequest == request else { return }
+                self.controller.newPixelArtRequest = nil
+                let selected = self.selectedNodes().first
+                let folder = directory ?? selected.map { $0.isDirectory ? $0.url : $0.url.deletingLastPathComponent() }
+                    ?? self.roots.first(where: \.isDirectory)?.url
+                if let folder { self.createPixelArt(in: folder) }
+            }
+        }
+
+        private func createPixelArt(in folder: URL) {
+            guard !controller.isReadOnly, controller.fileOperation == nil,
+                  (try? fileSystem.checkedFolder(folder)) != nil,
+                  let workspaceURL = controller.workspaceURL else { return }
+            let defaultName = "Sin título.pxa"
+            let suggestedName: String
+            do {
+                let destination = try fileSystem.destination(name: defaultName, in: folder)
+                suggestedName = FileManager.default.fileExists(atPath: destination.path)
+                    ? try fileSystem.availableName(for: defaultName, in: folder) : defaultName
+            } catch {
+                report(error)
+                return
+            }
+            guard let options = WorkspacePrompts.pixelArtCanvas(name: suggestedName, width: 64, height: 64),
+                  let name = options.name else { return }
+            Task {
+                do {
+                    let document = try await controller.files.createPixelArtFile(named: name, in: folder,
+                                                                                width: options.width, height: options.height)
+                    guard controller.workspaceURL == workspaceURL else { return }
+                    showCreatedFile(document.url, in: folder, rename: false)
+                } catch { report(error) }
+            }
+        }
+
         private func createFileInline(in directory: URL?) {
             guard !controller.isReadOnly, controller.fileOperation == nil, let workspaceURL = controller.workspaceURL else { return }
             let selected = selectedNodes().first
@@ -459,7 +514,7 @@ struct FileTree: NSViewRepresentable {
             } catch { report(error) }
         }
 
-        private func showCreatedFile(_ url: URL, in folder: URL) {
+        private func showCreatedFile(_ url: URL, in folder: URL, rename: Bool = true) {
             guard let parent = findNode(at: folder), let outline else { return }
             let child = parent.children?.first { $0.url.resolvingSymlinksInPath() == url.resolvingSymlinksInPath() }
                 ?? FileNode(url: url, isDirectory: false)
@@ -479,6 +534,7 @@ struct FileTree: NSViewRepresentable {
             deferredReloads.insert(folder)
             // SwiftUI termina de insertar la pestaña antes de entregar el foco al
             // editor de nombres de AppKit; hacerlo durante ese layout lo cancela.
+            guard rename else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
                 guard let self, self.controller.selectedDocument?.url.standardizedFileURL == url.standardizedFileURL,
                       let current = self.findNode(at: folder)?.children?.first(where: {

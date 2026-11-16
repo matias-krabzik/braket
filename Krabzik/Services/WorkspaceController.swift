@@ -24,39 +24,29 @@ final class WorkspaceController {
     @ObservationIgnored let restoration: SessionRestoration
     private(set) var isRestoringSession = false
     @ObservationIgnored private(set) var requestedWorkspaceURL: URL?
+    @ObservationIgnored private var requestedPixelArtURLs: [URL] = []
     private(set) var openWorkspaceURLs: [URL] = []
     var openWorkspaceModels: [URL: Workspace] = [:]
     @ObservationIgnored var workspaceStates: [URL: SavedWorkspaceState] = [:]
     var selectedProjectID: UUID?
     var newFileRequest: UUID?
     var newFileDirectory: URL?
+    var newPixelArtRequest: UUID?
+    var newPixelArtDirectory: URL?
     var fileOperation: FileOperationStatus?
     var sidebarVisible = true
-    var sessionsSidebarVisible = false
     var processesVisible = true
+    var pixelProcessesVisible = false
     var commandProject: CodeProject?
     var closingProjectURL: URL?
     var showingProjectWizard = false
     let runner = ProcessRunner()
     let workflows = WorkflowController()
-    var workflowVisible = false {
-        didSet { if workflowVisible { agent.visible = false } }
-    }
+    var workflowVisible = false
     var workflowTabOpen = false
     var workflowRoot: URL {
         workspace?.projects.first?.directory(relativeTo: workspaceURL ?? URL(fileURLWithPath: "/")) ?? workspaceURL?
         .deletingLastPathComponent() ?? URL(fileURLWithPath: "/") }
-    func openAgent(sessionID: UUID? = nil, newSession: Bool = false) {
-        guard !isReadOnly else { return }
-        if newSession { agent.newSession() }
-        else if let sessionID { agent.selectSession(sessionID) }
-        agent.tabOpen = true
-        agent.visible = true
-        workflowVisible = false
-        sessionsSidebarVisible = true
-        sidebarVisible = true
-    }
-
     func openWorkflowFile(_ path: URL) {
         guard path.lastPathComponent.hasSuffix(".flow.json"), let workspaceURL else { return }
         workflows.configure(workspaceURL, root: workflowRoot, selectedFile: path)
@@ -93,15 +83,19 @@ final class WorkspaceController {
     var mountedProjects: [CodeProject] { session.mountedProjects }
     var documents: [EditorDocument] { docs.documents }
     var selectedDocument: EditorDocument? { docs.selected }
+    var selectedProcessesVisible: Bool {
+        selectedDocument?.pixelArt == nil ? processesVisible : pixelProcessesVisible
+    }
+    func toggleProcessesPanel() {
+        if selectedDocument?.pixelArt == nil { processesVisible.toggle() }
+        else { pixelProcessesVisible.toggle() }
+    }
     var openingFiles: Set<URL> { docs.openingFiles }
     var recentProjects: [URL] { recents.urls }
     var selectedDocumentID: URL? {
         get { docs.selectedID }
         set { docs.selectedID = newValue
-            if newValue != nil {
-                workflowVisible = false
-                agent.visible = false
-            } }
+            if newValue != nil { workflowVisible = false } }
     }
 
     var selectedProject: CodeProject? {
@@ -125,15 +119,18 @@ final class WorkspaceController {
         files.requestNewFile = { [weak self] directory in
             guard let self, self.fileOperation == nil else { return }
             self.database.browserShowsDatabases = false
-            self.sessionsSidebarVisible = false
             self.sidebarVisible = true
             self.newFileDirectory = directory
             self.newFileRequest = UUID()
         }
-        files.onOpen = { [weak self] in
-            self?.workflowVisible = false
-            self?.agent.visible = false
+        files.requestNewPixelArt = { [weak self] directory in
+            guard let self, self.fileOperation == nil else { return }
+            self.database.browserShowsDatabases = false
+            self.sidebarVisible = true
+            self.newPixelArtDirectory = directory
+            self.newPixelArtRequest = UUID()
         }
+        files.onOpen = { [weak self] in self?.workflowVisible = false }
         // Lo que el usuario ya venía usando se considera confiable, una sola vez.
         trust.migrateIfNeeded(recentProjects: recents.urls)
     }
@@ -145,7 +142,8 @@ final class WorkspaceController {
             await openWorkspace(URL(fileURLWithPath: arguments[index + 1]))
             return
         }
-        guard requestedWorkspaceURL == nil, settings.restoreLastState, let state = restoration.load() else { return }
+        guard requestedWorkspaceURL == nil, requestedPixelArtURLs.isEmpty,
+              settings.restoreLastState, let state = restoration.load() else { return }
         isRestoringSession = true
         await restoreSession(state)
         isRestoringSession = false
@@ -156,6 +154,11 @@ final class WorkspaceController {
 
     /// Un archivo abierto desde Finder tiene prioridad sobre la sesión guardada.
     func requestWorkspace(_ url: URL) {
+        if url.pathExtension.lowercased() == "pxa" {
+            requestedPixelArtURLs.append(url)
+            files.open(url)
+            return
+        }
         requestedWorkspaceURL = url
         guard !isRestoringSession else { return }
         Task { await openWorkspace(url) }
@@ -237,8 +240,6 @@ final class WorkspaceController {
         openWorkspaceModels.removeValue(forKey: closing)
         docs.closeAll()
         agent.clearConversation()
-        agent.visible = false
-        agent.tabOpen = false
         selectedProjectID = nil
         commandProject = nil
         connections.install([])
@@ -261,7 +262,6 @@ final class WorkspaceController {
         openWorkspaceModels[normalized] = project
         connections.install(project.connections)
         bridge.reset(for: project, at: url, trust: decided)
-        sessionsSidebarVisible = false
         projects.warmUp(project.projects)
         selectedProjectID = runnableProjects.first?.id
         recents.remember(url)

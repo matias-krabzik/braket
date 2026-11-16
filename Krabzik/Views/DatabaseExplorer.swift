@@ -6,18 +6,15 @@ struct WorkspaceModeRail: View {
         VStack(spacing: 12) {
             mode("Archivos", icon: "folder", databases: false)
             mode("Bases de datos", icon: "externaldrive", databases: true)
-            mode("Sesiones de Codex", icon: "bubble.left.and.bubble.right", databases: nil)
             Spacer()
         }
         .padding(.top, 14).frame(width: Theme.zoom(38)).background(Theme.bar)
         .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 1) }
     }
-    private func mode(_ label: String, icon: String, databases: Bool?) -> some View {
-        let selected = databases.map { !controller.sessionsSidebarVisible && controller.database.browserShowsDatabases == $0 }
-            ?? controller.sessionsSidebarVisible
+    private func mode(_ label: String, icon: String, databases: Bool) -> some View {
+        let selected = controller.database.browserShowsDatabases == databases
         return Button {
-            controller.sessionsSidebarVisible = databases == nil
-            if let databases { controller.database.browserShowsDatabases = databases }
+            controller.database.browserShowsDatabases = databases
             controller.sidebarVisible = true
         } label: {
             Image(systemName: icon).font(.system(size: Theme.zoom(15)))

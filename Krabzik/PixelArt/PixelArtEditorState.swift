@@ -27,6 +27,8 @@ struct PixelEditorState: Equatable, Sendable {
     var symmetry = PixelSymmetry.none
     var showsGrid = false
     var onionSkin = false
+    var onionPrevious = 2
+    var onionNext = 1
     var zoomPercent = 800
     var centerX = 0
     var centerY = 0
@@ -93,6 +95,7 @@ enum PixelEditorStateCodec {
             "selectedFrameIDs": .array(editor.selectedFrameIDs.map { .string($0.uuidString) }),
             "tool": .string(editor.tool), "brushSize": .int(editor.brushSize), "symmetry": .string(editor.symmetry.rawValue),
             "grid": .bool(editor.showsGrid), "onionSkin": .bool(editor.onionSkin), "zoomPercent": .int(editor.zoomPercent),
+            "onionPrevious": .int(editor.onionPrevious), "onionNext": .int(editor.onionNext),
             "centerX": .int(editor.centerX), "centerY": .int(editor.centerY)
         ]
         switch editor.drawColor {
@@ -125,6 +128,8 @@ enum PixelEditorStateCodec {
         editor.symmetry = symmetry
         editor.showsGrid = try fields.bool("grid")
         editor.onionSkin = try fields.bool("onionSkin")
+        if fields.has("onionPrevious") { editor.onionPrevious = try fields.int("onionPrevious", in: 0...2) }
+        if fields.has("onionNext") { editor.onionNext = try fields.int("onionNext", in: 0...2) }
         editor.zoomPercent = try fields.int("zoomPercent", in: PixelEditorState.zoomRange)
         editor.centerX = try fields.int("centerX", in: PixelEditorState.centerRange)
         editor.centerY = try fields.int("centerY", in: PixelEditorState.centerRange)

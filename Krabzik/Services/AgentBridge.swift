@@ -34,13 +34,13 @@ final class AgentBridge {
     /// y sin el borrador del anterior.
     ///
     /// `excludedRoots` son las carpetas del proyecto, para que un repositorio no pueda
-    /// aportar su propio ejecutable de Codex. El panel se esconde si el proyecto entró en
-    /// solo lectura: ahí no hay nada que Codex pueda hacer.
+    /// aportar su propio ejecutable de Codex. La interfaz de sesiones ya no se muestra.
     func reset(for project: Workspace, at url: URL, trust: TrustStore.Trust) {
         agent.configureSessions(workspace: url)
         agent.selectedProjectID = nil
         agent.excludedRoots = project.projects.map { $0.directory(relativeTo: url) }
-        agent.visible = agent.visible && trust == .trusted
+        agent.visible = false
+        agent.tabOpen = false
         agent.draft = ""
     }
 

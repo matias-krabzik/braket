@@ -6,6 +6,162 @@ struct PixelWrite: Equatable, Sendable {
     var value: PixelValue
 }
 
+enum PixelStroke {
+    /// Completa los píxeles entre dos muestras del puntero para que un gesto rápido no deje huecos.
+    static func line(from start: PixelWrite, to end: PixelWrite) -> [PixelWrite] {
+        var x = start.x, y = start.y
+        let dx = abs(end.x - start.x), dy = -abs(end.y - start.y)
+        let sx = start.x < end.x ? 1 : -1
+        let sy = start.y < end.y ? 1 : -1
+        var error = dx + dy
+        var result: [PixelWrite] = []
+        while true {
+            result.append(PixelWrite(x: x, y: y, value: end.value))
+            if x == end.x && y == end.y { return result }
+            let twice = 2 * error
+            if twice >= dy { error += dy; x += sx }
+            if twice <= dx { error += dx; y += sy }
+        }
+    }
+}
+
+struct PixelPoint: Equatable, Hashable, Sendable {
+    let x: Int
+    let y: Int
+}
+
+enum PixelToolGeometry {
+    static func outline(from start: PixelWrite, to end: PixelWrite, tool: String) -> [PixelWrite] {
+        let left = min(start.x, end.x), right = max(start.x, end.x)
+        let top = min(start.y, end.y), bottom = max(start.y, end.y)
+        switch tool {
+        case "line": return PixelStroke.line(from: start, to: end)
+        case "rectangle":
+            let corners = [PixelPoint(x: left, y: top), PixelPoint(x: right, y: top),
+                           PixelPoint(x: right, y: bottom), PixelPoint(x: left, y: bottom)]
+            return joinedOutline(corners, value: end.value)
+        case "ellipse":
+            if left == right || top == bottom { return PixelStroke.line(from: start, to: end) }
+            let radiusX = Double(right - left) / 2, radiusY = Double(bottom - top) / 2
+            let centerX = Double(left) + radiusX, centerY = Double(top) + radiusY
+            let samples = max(24, Int(8 * max(radiusX, radiusY)))
+            let points = (0..<samples).map { index -> PixelPoint in
+                let angle = Double(index) * 2 * Double.pi / Double(samples)
+                return PixelPoint(x: Int((centerX + radiusX * cos(angle)).rounded()),
+                                  y: Int((centerY + radiusY * sin(angle)).rounded()))
+            }
+            return joinedOutline(points, value: end.value)
+        default: return []
+        }
+    }
+
+    static func brush(_ centers: [PixelWrite], size: Int, width: Int, height: Int) -> [PixelWrite] {
+        let diameter = max(1, size)
+        let leading = (diameter - 1) / 2
+        var seen = Set<PixelPoint>()
+        var result: [PixelWrite] = []
+        for center in centers {
+            for y in (center.y - leading)..<(center.y - leading + diameter) {
+                for x in (center.x - leading)..<(center.x - leading + diameter) {
+                    guard (0..<width).contains(x), (0..<height).contains(y),
+                          seen.insert(PixelPoint(x: x, y: y)).inserted else { continue }
+                    result.append(PixelWrite(x: x, y: y, value: center.value))
+                }
+            }
+        }
+        return result
+    }
+
+    static func floodFill(_ state: PixelArtState, layer: UUID, frame: UUID, at start: PixelPoint,
+                          value: PixelValue, selection: PixelSelection? = nil) throws -> [PixelWrite] {
+        guard (0..<state.width).contains(start.x), (0..<state.height).contains(start.y),
+              selection?.contains(x: start.x, y: start.y) ?? true else { return [] }
+        let original = state.pixel(layer: layer, frame: frame, x: start.x, y: start.y)
+        guard original != value else { return [] }
+        let width = state.width, height = state.height
+        var visited = [UInt8](repeating: 0, count: (width * height + 7) / 8)
+        var queue = [start.y * width + start.x]
+        var cursor = 0
+        var result: [PixelWrite] = []
+        func enqueue(_ x: Int, _ y: Int) {
+            guard (0..<width).contains(x), (0..<height).contains(y),
+                  selection?.contains(x: x, y: y) ?? true else { return }
+            let index = y * width + x
+            let mask = UInt8(1) << UInt8(index % 8)
+            guard visited[index / 8] & mask == 0 else { return }
+            visited[index / 8] |= mask
+            if state.pixel(layer: layer, frame: frame, x: x, y: y) == original { queue.append(index) }
+        }
+        visited[queue[0] / 8] |= UInt8(1) << UInt8(queue[0] % 8)
+        while cursor < queue.count {
+            if Task<Never, Never>.isCancelled { throw CancellationError() }
+            let index = queue[cursor]
+            cursor += 1
+            let x = index % width, y = index / width
+            result.append(PixelWrite(x: x, y: y, value: value))
+            if result.count > 2_000_000 {
+                throw PixelArtError.limit("relleno", "el área supera 2.000.000 píxeles; reducí el lienzo o seleccioná una región")
+            }
+            enqueue(x - 1, y)
+            enqueue(x + 1, y)
+            enqueue(x, y - 1)
+            enqueue(x, y + 1)
+        }
+        return result
+    }
+
+    static func lassoSelection(_ points: [PixelPoint], width: Int, height: Int) -> PixelSelection {
+        guard let first = points.first else { return PixelSelection() }
+        guard points.count >= 3 else {
+            return .rectangle(x: first.x, y: first.y, width: 1, height: 1,
+                              canvasWidth: width, canvasHeight: height)
+        }
+        let left = max(0, points.map(\.x).min() ?? 0)
+        let right = min(width - 1, points.map(\.x).max() ?? 0)
+        let top = max(0, points.map(\.y).min() ?? 0)
+        let bottom = min(height - 1, points.map(\.y).max() ?? 0)
+        guard left <= right, top <= bottom else { return PixelSelection() }
+        var selection = PixelSelection()
+        for y in top...bottom {
+            var crossings: [Double] = []
+            for index in points.indices {
+                let a = points[index], b = points[(index + 1) % points.count]
+                guard (a.y > y) != (b.y > y) else { continue }
+                crossings.append(Double(b.x - a.x) * Double(y - a.y) / Double(b.y - a.y) + Double(a.x))
+            }
+            crossings.sort()
+            for pair in stride(from: 0, to: crossings.count - crossings.count % 2, by: 2) {
+                let from = max(left, Int(ceil(crossings[pair])))
+                let to = min(right, Int(ceil(crossings[pair + 1])) - 1)
+                guard from <= to else { continue }
+                for x in from...to {
+                    let coord = TileCoord(containing: x, y)
+                    var tile = selection.tiles[coord] ?? .empty
+                    tile[x % PxaTile.side, y % PxaTile.side] = true
+                    selection.tiles[coord] = tile
+                }
+            }
+        }
+        return selection
+    }
+
+    private static func joinedOutline(_ points: [PixelPoint], value: PixelValue) -> [PixelWrite] {
+        guard let first = points.first else { return [] }
+        var seen = Set<PixelPoint>()
+        var result: [PixelWrite] = []
+        for index in points.indices {
+            let current = points[index], next = points[(index + 1) % points.count]
+            let segment = PixelStroke.line(from: PixelWrite(x: current.x, y: current.y, value: value),
+                                           to: PixelWrite(x: next.x, y: next.y, value: value))
+            for write in segment where seen.insert(PixelPoint(x: write.x, y: write.y)).inserted {
+                result.append(write)
+            }
+        }
+        if result.isEmpty { result.append(PixelWrite(x: first.x, y: first.y, value: value)) }
+        return result
+    }
+}
+
 enum PixelLayerProperty: Equatable, Sendable {
     case name(String)
     case visible(Bool)

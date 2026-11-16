@@ -142,11 +142,6 @@ struct WorkflowView: View {
                     .frame(minHeight: 135, idealHeight: 205, maxHeight: .infinity)
             }
         }.onAppear { model.configure(workspaceURL, root: controller.workflowRoot) }
-            .task(id: workspaceURL) {
-                // The connection must not cancel/restart its own task when it
-                // publishes connected. Failures are retried explicitly in Codex.
-                await controller.agent.connect()
-            }
             .onChange(of: model.selectedID) { _, _ in
                 selectedNode = nil
                 pendingConnection = nil
@@ -205,8 +200,7 @@ struct WorkflowView: View {
                         .frame(width: 1260, height: 720)
                         .background(Theme.bar)
                         .sheet(isPresented: $showingCodexConnection) {
-                            AgentPanel(controller: controller, onClose: { showingCodexConnection = false })
-                                .frame(width: 430, height: 560)
+                            CodexConnectionSheet(controller: controller, onClose: { showingCodexConnection = false })
                         }
                 }
             }

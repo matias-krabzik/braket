@@ -54,23 +54,11 @@ personalizado y activar el efecto glass del icono. También permite agregar, edi
 subproyectos, y cambiar la ubicación del `.kzk`. Este traslado conserva las carpetas y
 scripts en su ubicación original y rechaza sobrescribir otro proyecto.
 
-## Codex con tu suscripción
+## Base de IA para el editor
 
-El botón **✦** de la barra superior abre una pestaña **Codex** en el editor (también ⌥⌘A). El IDE detecta Codex CLI o el ejecutable incluido en ChatGPT para Mac. Usa el protocolo oficial [Codex App Server](https://learn.chatgpt.com/docs/app-server) y reutiliza su sesión de ChatGPT. Si no hay sesión, **Iniciar sesión con ChatGPT** abre el flujo oficial en el navegador. Krabzik no lee ni copia los tokens de autenticación y no requiere una API key; el uso consume los límites de Codex de tu plan. Tras aprobar un ejecutable firmado, las actualizaciones en la misma ruta del mismo desarrollador conservan el acceso. Los ejecutables sin firma de desarrollador se vuelven a aprobar si cambia su contenido.
+La interfaz de conversaciones y sesiones de Codex se retiró. El editor muestra archivos y conexiones de base de datos. La integración con Codex App Server, sus modelos, el control del ejecutable y el contexto del editor permanecen en el código para incorporar correcciones con IA directamente sobre un archivo más adelante. Las sesiones existentes no se borran; las pestañas antiguas de Codex no se restauran.
 
-Elegí un subproyecto o **Todos los subproyectos**, escribí el pedido y enviá con **↑** o **⌘↩** dentro del cuadro de mensaje. Codex puede leer y cambiar los archivos en sus carpetas reales, incluso cuando están en ubicaciones distintas. Usa el modelo predeterminado de tu configuración de Codex. Los archivos modificados aparecen debajo de la conversación; **Ver cambios** abre el diff informado por Codex. Los cambios ya están aplicados en disco, no son una propuesta pendiente. **■** detiene la tarea y conserva los cambios realizados.
-
-Antes de enviar se pide guardar los archivos abiertos que tengan ediciones pendientes. Los archivos limpios se actualizan en el editor al recibir cambios del agente. Si editás mientras Codex trabaja, tu texto se conserva y se indica el cambio en disco; **Recargar** permite descartarlo explícitamente y el guardado normal sigue protegiendo frente a sobrescrituras.
-
-El agente usa el sandbox de Codex con escritura en las carpetas elegidas y sin red para los comandos por defecto. Las lecturas siguen los permisos estándar de Codex; el selector no es una barrera de confidencialidad. Las ampliaciones que Codex solicita se muestran con el comando, los cambios o el acceso pedido. Podés rechazarlas, permitirlas una vez o permitirlas durante toda la sesión cuando Codex lo admite. Si Codex no ofrece esa opción para un comando, Braket permite aprobar los demás comandos del turno actual sin volver a preguntar; la preferencia se borra al terminar la tarea. Krabzik no conecta al agente con el Llavero ni con las sesiones MySQL del IDE.
-
-El botón **Sesiones de Codex**, junto a Archivos y Bases de datos, abre el explorador de sesiones del proyecto. Usa la misma navegación lateral y el árbol compartido del IDE. **+** crea una sesión; se pueden filtrar, renombrar y retomar. Cambiar de subproyecto crea otra sesión y conserva la anterior. Mientras Codex trabaja se puede volver a los archivos; para cambiar de sesión hay que terminar o detener el turno actual.
-
-Las conversaciones se guardan en Codex y Braket conserva un índice local por proyecto con su título, alcance y borrador. Al retomar una sesión se recupera el historial del agente; la vista muestra los mensajes recientes con los límites de tamaño habituales. También se restaura la pestaña seleccionada al reiniciar. Cerrar el proyecto termina el proceso, pero conserva las sesiones. Una sesión cuyo alcance cambió no se reanuda sobre carpetas distintas: se debe crear otra.
-
-Cada pedido incluye contexto automático acotado: archivo activo, fragmento alrededor del cursor, selección, archivos abiertos y salida reciente de los procesos del alcance elegido. Los archivos de credenciales reconocibles y los que están fuera del alcance se excluyen de esta captura. Codex puede actualizar esa instantánea con `braket_get_context` y explorar el resto del código con sus herramientas. Las instrucciones priorizan investigar, implementar y verificar antes de pedir aclaraciones que el propio proyecto puede resolver. No se indexa ni se envía todo el repositorio en segundo plano.
-
-La integración se verificó con Codex CLI `0.167.0-alpha.3.2`, una cuenta ChatGPT existente y cambios reales en dos carpetas de prueba. El protocolo puede evolucionar con futuras versiones de Codex. Para una futura distribución comercial/servicio alojado, la documentación oficial indica usar **Sign in with ChatGPT**; esta entrega utiliza App Server como aplicación local.
+Las automatizaciones que usan Codex conservan una hoja pequeña para conectar la cuenta. Braket no lee ni copia los tokens de autenticación y no requiere una API key para la sesión de ChatGPT.
 
 ## MySQL y scripts SQL
 
@@ -137,8 +125,8 @@ confiar en él para que se monten. Las rutas de los scripts se normalizan, así 
 `./sql/a.sql` son la misma entrada. Los valores son holgados respecto del uso real; si tu proyecto
 legítimo supera uno, se sube el número en `WorkspaceLimits`.
 
-Un proyecto que no se abrió nunca en esta Mac arranca en **solo lectura**: no ejecuta procesos, no habilita
-Codex y no monta las carpetas de afuera hasta que confirmás que confiás en él, viendo antes las carpetas
+Un proyecto que no se abrió nunca en esta Mac arranca en **solo lectura**: no ejecuta procesos ni
+automatizaciones con Codex y no monta las carpetas de afuera hasta que confirmás que confiás en él, viendo antes las carpetas
 externas y los comandos que declara. Cada comando se aprueba por separado; editarlo vuelve a pedir
 confirmación. Ver [docs/security.md](docs/security.md).
 

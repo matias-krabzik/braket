@@ -10,6 +10,48 @@ enum ExplorerConflictDecision {
     case keepBoth, replace, skip, cancel
 }
 
+struct PixelArtCanvasOptions {
+    let name: String?
+    let width: Int
+    let height: Int
+}
+
+@MainActor
+private final class PixelArtSizeControls: NSObject, NSTextFieldDelegate {
+    static let presets = [8, 16, 32, 64, 128]
+    let widthField: NSTextField
+    let heightField: NSTextField
+    let preset: NSPopUpButton
+
+    init(width: Int, height: Int) {
+        widthField = NSTextField(string: String(width))
+        heightField = NSTextField(string: String(height))
+        preset = NSPopUpButton()
+        super.init()
+        preset.addItems(withTitles: Self.presets.map { "\($0) × \($0)" } + ["Personalizado"])
+        if width == height, let index = Self.presets.firstIndex(of: width) {
+            preset.selectItem(at: index)
+        } else {
+            preset.selectItem(at: Self.presets.count)
+        }
+        preset.target = self
+        preset.action = #selector(selectPreset(_:))
+        widthField.delegate = self
+        heightField.delegate = self
+    }
+
+    @objc private func selectPreset(_ sender: NSPopUpButton) {
+        guard Self.presets.indices.contains(sender.indexOfSelectedItem) else { return }
+        let size = Self.presets[sender.indexOfSelectedItem]
+        widthField.stringValue = String(size)
+        heightField.stringValue = String(size)
+    }
+
+    func controlTextDidChange(_ obj: Notification) {
+        preset.selectItem(at: Self.presets.count)
+    }
+}
+
 /// Los diálogos y paneles de la ventana, en la capa de vistas.
 ///
 /// Mismo reparto que `TrustPrompts`: el controlador declara **qué** pregunta y acá está
@@ -18,6 +60,12 @@ enum ExplorerConflictDecision {
 /// 4,3 horas colgada—. Ver docs/specs/C5-dividir-workspacecontroller.md.
 @MainActor
 enum WorkspacePrompts {
+    static func confirmPixelLayerDeletion(_ name: String) -> Bool {
+        confirm(message: "¿Eliminar la capa «\(name)»?",
+                detail: "Se eliminará de todos los fotogramas. Podés deshacer el cambio.",
+                accept: "Eliminar capa")
+    }
+
     static func nameForNewItem(_ title: String, suggested: String, action: String = "Crear") -> String? {
         let alert = NSAlert()
         alert.messageText = title
@@ -28,6 +76,54 @@ enum WorkspacePrompts {
         alert.accessoryView = field
         guard alert.runModal() == .alertFirstButtonReturn else { return nil }
         return field.stringValue
+    }
+
+    static func pixelArtCanvas(name: String?, width: Int, height: Int,
+                               resizing: Bool = false) -> PixelArtCanvasOptions? {
+        let alert = NSAlert()
+        alert.messageText = resizing ? "Cambiar tamaño del lienzo" : "Nueva imagen pixel art"
+        alert.informativeText = resizing
+            ? "La imagen queda anclada arriba a la izquierda. Al reducir el lienzo se recortan los bordes derecho e inferior de todas las capas y fotogramas. Podés deshacer el cambio."
+            : "Elegí un tamaño inicial o escribí un ancho y alto personalizados."
+        alert.addButton(withTitle: resizing ? "Cambiar tamaño" : "Crear")
+        alert.addButton(withTitle: "Cancelar")
+
+        let controls = PixelArtSizeControls(width: width, height: height)
+        let nameField = name.map(NSTextField.init(string:))
+        let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 350, height: nameField == nil ? 78 : 112))
+
+        func row(_ title: String, control: NSView, y: CGFloat, controlWidth: CGFloat) {
+            let label = NSTextField(labelWithString: title)
+            label.frame = NSRect(x: 0, y: y, width: 96, height: 24)
+            control.frame = NSRect(x: 108, y: y, width: controlWidth, height: 24)
+            accessory.addSubview(label)
+            accessory.addSubview(control)
+        }
+
+        if let nameField { row("Nombre", control: nameField, y: 86, controlWidth: 238) }
+        row("Tamaño", control: controls.preset, y: nameField == nil ? 50 : 52, controlWidth: 238)
+        row("Ancho", control: controls.widthField, y: nameField == nil ? 18 : 20, controlWidth: 75)
+        let heightLabel = NSTextField(labelWithString: "Alto")
+        heightLabel.frame = NSRect(x: 196, y: nameField == nil ? 18 : 20, width: 35, height: 24)
+        controls.heightField.frame = NSRect(x: 235, y: nameField == nil ? 18 : 20, width: 75, height: 24)
+        accessory.addSubview(heightLabel)
+        accessory.addSubview(controls.heightField)
+        alert.accessoryView = accessory
+
+        while alert.runModal() == .alertFirstButtonReturn {
+            let widthText = controls.widthField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            let heightText = controls.heightField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let width = Int(widthText), let height = Int(heightText),
+               (1...4_096).contains(width), (1...4_096).contains(height),
+               width * height <= 16_777_216 {
+                return PixelArtCanvasOptions(name: nameField?.stringValue, width: width, height: height)
+            }
+            let invalid = NSAlert()
+            invalid.messageText = "Tamaño de lienzo no válido"
+            invalid.informativeText = "Usá entre 1 y 4096 píxeles por lado, con un máximo de 16.777.216 píxeles en total."
+            invalid.runModal()
+        }
+        return nil
     }
 
     static func confirmTrash(_ names: [String], openFiles: Int, running: [String]) -> Bool {

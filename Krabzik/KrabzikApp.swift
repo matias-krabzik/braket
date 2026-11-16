@@ -31,18 +31,22 @@ struct KrabzikApp: App {
                     .keyboardShortcut("o", modifiers: [.command, .shift])
                     .disabled(controller.workspace == nil)
                 Button("Nuevo archivo") { controller.files.create() }.keyboardShortcut("n").disabled(controller.workspace == nil)
+                Divider()
+                Button("Nueva imagen pixel art") { controller.files.createPixelArt() }
+                    .disabled(controller.isReadOnly)
+                Button("Abrir imagen pixel art…", action: controller.files.choosePixelArt)
             }
             CommandGroup(replacing: .saveItem) {
                 Button("Guardar") { if let document = controller.selectedDocument { Task { await controller.files.save(document) } } }
                     .keyboardShortcut("s").disabled(controller.selectedDocument == nil)
                 Button("Guardar copia…", action: controller.files.saveCopy).keyboardShortcut("s", modifiers: [.command, .shift])
                     .disabled(controller.selectedDocument == nil)
+                Button("Exportar PNG…", action: controller.files.exportPixelPNG)
+                    .disabled(controller.selectedDocument?.pixelArt == nil)
             }
             CommandGroup(replacing: .windowSize) {
                 Button("Mostrar explorador") { controller.sidebarVisible.toggle() }.keyboardShortcut("1", modifiers: [.command, .option])
-                Button("Mostrar panel inferior") { controller.processesVisible.toggle() }.keyboardShortcut("j")
-                Button("Mostrar Codex") { controller.openAgent() }.keyboardShortcut("a", modifiers: [.command, .option])
-                    .disabled(controller.workspace == nil || controller.isReadOnly)
+                Button("Mostrar panel inferior") { controller.toggleProcessesPanel() }.keyboardShortcut("j")
             }
             CommandGroup(after: .toolbar) {
                 Button("Aumentar zoom") { controller.settings.zoomIn() }.keyboardShortcut("+", modifiers: .command)
@@ -74,7 +78,8 @@ struct KrabzikApp: App {
                     let item = NSMenuItem()
                     item.tag = NSTextFinder.Action.showFindInterface.rawValue
                     NSApp.sendAction(#selector(NSTextView.performFindPanelAction(_:)), to: nil, from: item)
-                }.keyboardShortcut("f").disabled(controller.selectedDocument == nil)
+                }.keyboardShortcut("f").disabled(controller.selectedDocument == nil ||
+                                                 controller.selectedDocument?.pixelArt != nil)
             }
         }
         Settings {
@@ -87,7 +92,7 @@ struct KrabzikApp: App {
     weak var controller: WorkspaceController? {
         didSet { openPendingProject() }
     }
-    private var pendingProjectURL: URL?
+    private var pendingDocumentURLs: [URL] = []
     private var requestingInitialWindow = false
     private var checkingTermination = false
 
@@ -100,9 +105,11 @@ struct KrabzikApp: App {
     }
 
     @objc private func openDocuments(_ event: NSAppleEventDescriptor, withReplyEvent reply: NSAppleEventDescriptor) {
-        guard let documents = event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject)),
-              let url = documents.atIndex(1)?.fileURLValue else { return }
-        pendingProjectURL = url
+        guard let documents = event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject)) else { return }
+        for index in 1...max(1, documents.numberOfItems) {
+            if let url = documents.atIndex(index)?.fileURLValue { pendingDocumentURLs.append(url) }
+        }
+        guard !pendingDocumentURLs.isEmpty else { return }
         openPendingProject()
         if controller == nil && !requestingInitialWindow {
             // A document launch skips the normal untitled-window event. Reopen
@@ -117,9 +124,10 @@ struct KrabzikApp: App {
     }
 
     private func openPendingProject() {
-        guard let controller, let url = pendingProjectURL else { return }
-        pendingProjectURL = nil
-        controller.requestWorkspace(url)
+        guard let controller, !pendingDocumentURLs.isEmpty else { return }
+        let urls = pendingDocumentURLs
+        pendingDocumentURLs.removeAll()
+        for url in urls { controller.requestWorkspace(url) }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }

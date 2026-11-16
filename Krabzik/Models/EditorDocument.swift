@@ -25,6 +25,8 @@ final class EditorDocument: Identifiable {
     var isSaving = false
     var hasExternalChange = false
     var previewImage: NSImage?
+    var pixelArt: PixelArtDocument?
+    @ObservationIgnored var pixelFingerprint: PixelArtFileFingerprint?
     var line = 1
     var column = 1
     var markdownMode: MarkdownMode = .edit
@@ -70,7 +72,7 @@ final class EditorDocument: Identifiable {
         return (query.text, query.line)
     }
 
-    var language: String { SyntaxLanguage.name(url) }
+    var language: String { pixelArt == nil ? SyntaxLanguage.name(url) : "Pixel Art" }
 
     init(url: URL, data: Data) throws {
         self.sqlExecution = SQLExecution()
@@ -90,6 +92,18 @@ final class EditorDocument: Identifiable {
         self.previewImage = image
     }
 
+    init(url: URL, pixelArt: PixelArtDocument, fingerprint: PixelArtFileFingerprint? = nil,
+         isDraft: Bool = false) {
+        self.sqlExecution = SQLExecution()
+        self.id = url.standardizedFileURL
+        self.cachedText = ""
+        self.originalData = Data()
+        self.pixelArt = pixelArt
+        self.pixelFingerprint = fingerprint
+        self.isDraft = isDraft
+        self.isDirty = isDraft || pixelArt.needsClosePrompt
+    }
+
     init(relocating document: EditorDocument, to url: URL) {
         self.isDraft = document.isDraft
         self.draftConnectionID = document.draftConnectionID
@@ -98,6 +112,8 @@ final class EditorDocument: Identifiable {
         self.cachedText = document.text
         self.originalData = document.originalData
         self.previewImage = document.previewImage
+        self.pixelArt = document.pixelArt
+        self.pixelFingerprint = document.pixelFingerprint
         self.isDirty = document.isDirty
         self.hasExternalChange = document.hasExternalChange
         self.line = document.line
@@ -115,7 +131,7 @@ final class EditorDocument: Identifiable {
     /// Suelta la vista nativa del documento. Se llama al cerrar el documento o el proyecto.
     /// Lee el texto antes de soltarla: después ya no hay de dónde releerlo.
     func releaseEditor() {
-        _ = text
+        if pixelArt == nil { _ = text }
         (editorStorage as? EditorSurface)?.teardown()
         editorStorage = nil
     }
@@ -138,6 +154,61 @@ final class EditorDocument: Identifiable {
         guard let image = NSImage(data: data), image.isValid else { throw WorkspaceError.invalidImage }
         previewImage = image
         hasExternalChange = false
+    }
+
+    func acceptExternalPixelArt(_ opened: PixelArtFileStore.Opened, discardEdits: Bool = false) {
+        guard (!isDirty && !isSaving) || discardEdits else {
+            hasExternalChange = true
+            return
+        }
+        pixelArt = opened.document
+        pixelFingerprint = opened.fingerprint
+        isDirty = false
+        hasExternalChange = false
+        previewRevision += 1
+    }
+
+    func applyPixelArt(_ operation: PixelOperation, label: String, kind: String,
+                       scope: PixelScope) throws {
+        guard var art = pixelArt, !art.isReadOnly else { return }
+        let transaction = PixelTransaction(label: label, operationKind: kind, scope: scope,
+                                           operations: [operation])
+        if try art.core.apply(transaction) != nil {
+            pixelArt = art
+            isDirty = art.needsClosePrompt
+            previewRevision += 1
+        }
+    }
+
+    func navigatePixelHistory(redo: Bool) throws {
+        guard var art = pixelArt, !art.isReadOnly else { return }
+        let moved = try redo ? art.core.redo() : art.core.undo()
+        guard moved != nil else { return }
+        pixelArt = art
+        isDirty = art.needsClosePrompt
+        previewRevision += 1
+    }
+
+    func updatePixelEditor(_ edit: (inout PixelEditorState) -> Void) {
+        guard var art = pixelArt else { return }
+        let previous = art.editor
+        edit(&art.editor)
+        guard art.editor != previous else { return }
+        pixelArt = art
+        if art.editor.activeFrameID != previous.activeFrameID { previewRevision += 1 }
+    }
+
+    func addPixelPaletteColor(_ color: PixelRGBA) throws {
+        guard var art = pixelArt, !art.isReadOnly else { return }
+        let id = try art.core.reserveEntryIDs(1)[0]
+        let entry = PaletteEntry(id: id, name: "Color \(art.state.palette.entries.count + 1)", color: color)
+        let transaction = PixelTransaction(label: "Agregar color", operationKind: "palette.add",
+                                           scope: .document(art.state), operations: [.addPaletteEntry(entry)])
+        guard try art.core.apply(transaction) != nil else { return }
+        art.editor.drawColor = .linked(id)
+        pixelArt = art
+        isDirty = art.needsClosePrompt
+        previewRevision += 1
     }
 }
 

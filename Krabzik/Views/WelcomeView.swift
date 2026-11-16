@@ -31,6 +31,10 @@ struct WelcomeView: View {
                               action: controller.chooseWorkspace)
                 WelcomeAction(title: "Crear proyecto…", icon: "plus", shortcut: "⇧⌘N", prominent: false,
                               action: controller.createWorkspace)
+                WelcomeAction(title: "Nueva imagen pixel art", icon: "square.grid.3x3", shortcut: "", prominent: false,
+                              action: { controller.files.createPixelArt() })
+                WelcomeAction(title: "Abrir imagen pixel art…", icon: "photo", shortcut: "", prominent: false,
+                              action: controller.files.choosePixelArt)
             }
             Spacer(minLength: 32)
             SettingsLink {

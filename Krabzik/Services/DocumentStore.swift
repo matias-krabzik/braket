@@ -76,7 +76,11 @@ final class DocumentStore {
         openingFiles.insert(url)
         defer { openingFiles.remove(url) }
         let document: EditorDocument
-        if DocumentIO.isPreviewableImage(url) {
+        if url.pathExtension.lowercased() == "pxa" {
+            let opened = try await Task.detached(priority: .userInitiated) { try PixelArtFileStore.open(url) }.value
+            guard stillValid() else { return }
+            document = EditorDocument(url: url, pixelArt: opened.document, fingerprint: opened.fingerprint)
+        } else if DocumentIO.isPreviewableImage(url) {
             let preview = try await Task.detached(priority: .userInitiated) { try DocumentIO.preview(url) }.value
             guard stillValid() else { return }
             document = try EditorDocument(url: url, previewData: preview)
@@ -100,6 +104,59 @@ final class DocumentStore {
         return document
     }
 
+    func createPixelDraft(width: Int = 64, height: Int = 64) throws -> EditorDocument {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("Braket-Drafts")
+            .appendingPathComponent(UUID().uuidString).appendingPathComponent("Sin título.pxa")
+        var art = try PixelArtDocument(width: width, height: height)
+        art.editor.zoomPercent = 800
+        let document = EditorDocument(url: url, pixelArt: art, isDraft: true)
+        documents.append(document)
+        selectedID = document.id
+        return document
+    }
+
+    func createPixelArt(at destination: URL, width: Int = 64, height: Int = 64) async throws -> EditorDocument {
+        let url = destination.standardizedFileURL
+        guard url.pathExtension.lowercased() == "pxa" else {
+            throw PixelArtError.invalid("archivo", "el archivo debe tener extensión .pxa")
+        }
+        guard !contains(url) else { throw DatabaseFailure("El archivo ya está abierto en otra pestaña.") }
+        guard !FileManager.default.fileExists(atPath: url.path) else { throw ExplorerFileError.alreadyExists }
+        var initialArt = try PixelArtDocument(width: width, height: height)
+        initialArt.editor.zoomPercent = 800
+        let art = initialArt
+        let (snapshot, fingerprint) = try await Task.detached(priority: .userInitiated) {
+            let snapshot = try PixelArtFile.snapshot(of: art)
+            let fingerprint = try PixelArtFileStore.save(snapshot, to: url, expecting: nil)
+            return (snapshot, fingerprint)
+        }.value
+        var savedArt = art
+        savedArt.markSaved(snapshot.mark)
+        let document = EditorDocument(url: url, pixelArt: savedArt, fingerprint: fingerprint)
+        documents.append(document)
+        selectedID = document.id
+        return document
+    }
+
+    func savePixelDraft(_ document: EditorDocument, to url: URL) async throws -> EditorDocument {
+        guard document.isDraft, let art = document.pixelArt, !contains(url) else {
+            throw DatabaseFailure("El archivo ya está abierto en otra pestaña.")
+        }
+        let (snapshot, fingerprint) = try await Task.detached(priority: .userInitiated) {
+            let snapshot = try PixelArtFile.snapshot(of: art)
+            let fingerprint = try PixelArtFileStore.save(snapshot, to: url, expecting: nil)
+            return (snapshot, fingerprint)
+        }.value
+        let saved = EditorDocument(relocating: document, to: url)
+        saved.isDraft = false
+        saved.pixelFingerprint = fingerprint
+        saved.pixelArt?.markSaved(snapshot.mark)
+        saved.isDirty = saved.pixelArt?.needsClosePrompt ?? false
+        documents = documents.map { $0 === document ? saved : $0 }
+        if selectedID == document.id { selectedID = saved.id }
+        return saved
+    }
+
     func saveDraft(_ document: EditorDocument, to url: URL) throws -> EditorDocument {
         guard document.isDraft, !contains(url) else { throw DatabaseFailure("El archivo ya está abierto en otra pestaña.") }
         let data = Data(document.text.utf8)
@@ -121,6 +178,19 @@ final class DocumentStore {
         guard !document.isSaving else { return false }
         document.isSaving = true
         defer { document.isSaving = false }
+        if let art = document.pixelArt {
+            guard !art.isReadOnly else { return false }
+            let expected = document.pixelFingerprint, url = document.url
+            let (snapshot, fingerprint) = try await Task.detached(priority: .userInitiated) {
+                let snapshot = try PixelArtFile.snapshot(of: art)
+                let fingerprint = try PixelArtFileStore.save(snapshot, to: url, expecting: expected)
+                return (snapshot, fingerprint)
+            }.value
+            document.pixelFingerprint = fingerprint
+            document.pixelArt?.markSaved(snapshot.mark)
+            document.isDirty = document.pixelArt?.needsClosePrompt ?? false
+            return true
+        }
         let data = Data(document.text.utf8), expected = document.originalData, url = document.url
         try await Task.detached(priority: .userInitiated) {
             try DocumentIO.save(data, to: url, expected: expected)
@@ -133,7 +203,10 @@ final class DocumentStore {
 
     /// Escribe una copia en otra ruta. El documento abierto no cambia.
     func saveCopy(of document: EditorDocument, to url: URL) throws {
-        if document.previewImage != nil {
+        if let art = document.pixelArt {
+            let snapshot = try PixelArtFile.snapshot(of: art.makeCopy())
+            _ = try PixelArtFileStore.save(snapshot, to: url, expecting: nil)
+        } else if document.previewImage != nil {
             try Data(contentsOf: document.url, options: .mappedIfSafe).write(to: url, options: .atomic)
         } else {
             try Data(document.text.utf8).write(to: url, options: .atomic)
@@ -152,7 +225,9 @@ final class DocumentStore {
 
     /// Relee el archivo descartando lo que el usuario escribió.
     func reload(_ document: EditorDocument) throws {
-        if document.previewImage != nil {
+        if document.pixelArt != nil {
+            document.acceptExternalPixelArt(try PixelArtFileStore.open(document.url), discardEdits: true)
+        } else if document.previewImage != nil {
             try document.acceptExternalPreviewData(DocumentIO.preview(document.url))
         } else {
             document.acceptExternalData(try DocumentIO.read(document.url), discardEdits: true)
@@ -169,6 +244,14 @@ final class DocumentStore {
                  stillValid: @MainActor @escaping () -> Bool = { true }) async {
         for document in documents where !document.isDraft && predicate(document.url) {
             let url = document.url
+            if document.pixelArt != nil {
+                let opened = try? await Task.detached(priority: .utility) { try PixelArtFileStore.open(url) }.value
+                guard stillValid(), documents.contains(where: { $0 === document }) else { continue }
+                if let opened, opened.fingerprint != document.pixelFingerprint {
+                    document.acceptExternalPixelArt(opened)
+                } else if opened == nil { document.hasExternalChange = true }
+                continue
+            }
             let data = try? await Task.detached(priority: .utility) {
                 try DocumentIO.isPreviewableImage(url) ? DocumentIO.preview(url) : DocumentIO.read(url)
             }.value

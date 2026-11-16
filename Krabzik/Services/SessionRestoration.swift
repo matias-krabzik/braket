@@ -62,8 +62,8 @@ extension WorkspaceController {
                                    selectedFile: selectedDocument?.isDraft == true ? nil : selectedDocumentID,
                                    selectedProjectID: selectedProjectID,
                                    sidebarVisible: sidebarVisible, processesVisible: processesVisible,
-                                   agentTabOpen: agent.tabOpen, agentVisible: agent.visible, agentSessionID: agent.selectedSessionID,
-                                   sessionsSidebarVisible: sessionsSidebarVisible)
+                                   agentTabOpen: nil, agentVisible: nil, agentSessionID: agent.selectedSessionID,
+                                   sessionsSidebarVisible: nil)
     }
 
     func saveSessionState(_ state: SavedWorkspaceState?) {
@@ -104,12 +104,11 @@ extension WorkspaceController {
         }
         sidebarVisible = state.sidebarVisible
         processesVisible = state.processesVisible
-        sessionsSidebarVisible = state.sessionsSidebarVisible ?? false
         if !isReadOnly {
             if let id = state.agentSessionID { agent.selectSession(id) }
-            agent.tabOpen = state.agentTabOpen ?? false
-            agent.visible = agent.tabOpen && state.agentVisible == true
         }
+        agent.tabOpen = false
+        agent.visible = false
         if unavailable > 0 {
             errors.report(message: "Se recuperó el proyecto, pero \(unavailable) archivos no están disponibles o no se pueden leer.")
         }

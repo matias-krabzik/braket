@@ -182,7 +182,8 @@ struct PixelSelection: Equatable, Sendable {
     var tiles: [TileCoord: SelectionTile] = [:]
 
     func contains(x: Int, y: Int) -> Bool {
-        tiles[TileCoord(containing: x, y)]?[x % PxaTile.side, y % PxaTile.side] ?? false
+        guard x >= 0, y >= 0 else { return false }
+        return tiles[TileCoord(containing: x, y)]?[x % PxaTile.side, y % PxaTile.side] ?? false
     }
 
     var isEmpty: Bool { tiles.values.allSatisfy(\.isEmpty) }

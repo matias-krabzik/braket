@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+import UniformTypeIdentifiers
 
 struct FileOperationStatus {
     var action: String
@@ -24,6 +26,7 @@ final class FileCommands {
     private let defaults: UserDefaults
     private static let scriptsDirectoriesKey = "sql.projectScriptsDirectories.v1"
     var requestNewFile: ((URL?) -> Void)?
+    var requestNewPixelArt: ((URL?) -> Void)?
     var didSaveDraft: ((EditorDocument) -> Void)?
     var onOpen: (() -> Void)?
 
@@ -83,6 +86,46 @@ final class FileCommands {
     func create(in directory: URL? = nil) {
         guard !session.isReadOnly, session.url != nil else { return }
         requestNewFile?(directory)
+    }
+
+    func createPixelArt(in directory: URL? = nil) {
+        guard !session.isReadOnly else { return }
+        if session.url != nil {
+            requestNewPixelArt?(directory)
+            return
+        }
+        guard let options = WorkspacePrompts.pixelArtCanvas(name: nil, width: 64, height: 64) else { return }
+        do {
+            _ = try docs.createPixelDraft(width: options.width, height: options.height)
+            onOpen?()
+        } catch { session.errors.report(error) }
+    }
+
+    func createPixelArtFile(named name: String, in folder: URL,
+                            width: Int = 64, height: Int = 64) async throws -> EditorDocument {
+        guard !session.isReadOnly, let workspaceURL = session.url else {
+            throw ExplorerFileError.outsideProject
+        }
+        let filename = URL(fileURLWithPath: name).pathExtension.isEmpty ? name + ".pxa" : name
+        guard filename.lowercased().hasSuffix(".pxa"), ExplorerFileSystem.validName(filename) else {
+            throw PixelArtError.invalid("archivo", "elegí un nombre válido con extensión .pxa")
+        }
+        let roots = session.mountedProjects.map { $0.directory(relativeTo: workspaceURL) }
+        let destination = try ExplorerFileSystem(roots: roots).destination(name: filename, in: folder)
+        let document = try await docs.createPixelArt(at: destination, width: width, height: height)
+        session.touch()
+        onOpen?()
+        return document
+    }
+
+    func choosePixelArt() {
+        let panel = NSOpenPanel()
+        panel.title = "Abrir imagen pixel art"
+        panel.allowedContentTypes = [UTType(filenameExtension: "pxa") ?? .data]
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        guard panel.runModal() == .OK else { return }
+        for url in panel.urls { open(url) }
     }
 
     func createTableQuery(_ table: SQLSchemaTable) async -> EditorDocument? {
@@ -160,6 +203,15 @@ final class FileCommands {
     func save(_ document: EditorDocument) async -> Bool {
         do {
             if document.isDraft {
+                if document.pixelArt != nil {
+                    let directory = session.url?.deletingLastPathComponent()
+                        ?? FileManager.default.homeDirectoryForCurrentUser
+                    guard let url = session.dialogs.saveCopy("Sin título.pxa", directory),
+                          url.pathExtension.lowercased() == "pxa" else { return false }
+                    _ = try await docs.savePixelDraft(document, to: url)
+                    session.touch()
+                    return true
+                }
                 guard let directory = scriptsDirectory(),
                       let url = session.dialogs.saveCopy(document.url.lastPathComponent, directory) else { return false }
                 let saved = try docs.saveDraft(document, to: url)
@@ -179,12 +231,38 @@ final class FileCommands {
         guard let document = docs.selected else { return }
         let suggested = document.url.deletingPathExtension().lastPathComponent
             + "-copia." + document.url.pathExtension
-        guard let url = session.dialogs.saveCopy(suggested, document.url.deletingLastPathComponent()) else { return }
+        guard let url = session.dialogs.saveCopy(suggested, document.isDraft ?
+            (session.url?.deletingLastPathComponent() ?? document.url.deletingLastPathComponent()) :
+            document.url.deletingLastPathComponent()) else { return }
         do {
             try docs.saveCopy(of: document, to: url)
             session.touch()
         } catch {
             session.errors.report(error)
+        }
+    }
+
+    func exportPixelPNG() {
+        guard let document = docs.selected, let art = document.pixelArt,
+              let frame = art.editor.activeFrameID else { return }
+        let panel = NSSavePanel()
+        panel.title = "Exportar PNG"
+        panel.nameFieldStringValue = document.isDraft ? "pixel-art.png" :
+            document.url.deletingPathExtension().lastPathComponent + ".png"
+        panel.allowedContentTypes = [.png]
+        panel.directoryURL = document.isDraft ? session.url?.deletingLastPathComponent() :
+            document.url.deletingLastPathComponent()
+        guard panel.runModal() == .OK, let destination = panel.url else { return }
+        let state = art.state
+        Task {
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    guard let png = PixelArtPreview.fullSizePNG(of: state, frame: frame) else {
+                        throw WorkspaceError.invalidImage
+                    }
+                    try png.write(to: destination, options: .atomic)
+                }.value
+            } catch { session.errors.report(error) }
         }
     }
 

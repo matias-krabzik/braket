@@ -33,6 +33,7 @@ struct WorkspaceSidebar: View {
                         Button("Agregar carpeta…", action: controller.projects.addFolders)
                         Button("Agregar archivo SQL…", action: controller.files.importScripts)
                         Button("Nuevo archivo") { controller.files.create() }
+                        Button("Nueva imagen pixel art…") { controller.files.createPixelArt() }
                     } label: { Image(systemName: "plus") }
                         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                         .help("Agregar archivos y carpetas").accessibilityLabel("Agregar archivos y carpetas")

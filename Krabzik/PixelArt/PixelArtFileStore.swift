@@ -29,7 +29,7 @@ enum PixelArtSavePhase: Sendable, CaseIterable {
 /// coordinada que compara la huella con la leída o guardada antes. Ante cualquier fallo, el destino anterior y el
 /// estado en memoria quedan intactos. La atomicidad no garantiza durabilidad frente a cualquier fallo físico del disco.
 enum PixelArtFileStore {
-    struct Opened {
+    struct Opened: Sendable {
         var document: PixelArtDocument
         var fingerprint: PixelArtFileFingerprint
     }
