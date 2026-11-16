@@ -19,8 +19,10 @@ enum PixelStroke {
             result.append(PixelWrite(x: x, y: y, value: end.value))
             if x == end.x && y == end.y { return result }
             let twice = 2 * error
-            if twice >= dy { error += dy; x += sx }
-            if twice <= dx { error += dx; y += sy }
+            if twice >= dy { error += dy
+            x += sx }
+            if twice <= dx { error += dx
+            y += sy }
         }
     }
 }

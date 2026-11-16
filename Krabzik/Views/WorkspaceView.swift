@@ -430,7 +430,8 @@ private struct PixelArtEditorView: View {
         }
         .task(id: document.previewRevision) {
             let revision = document.previewRevision
-            guard let art, let frame = art.editor.activeFrameID else { renderedImage = nil; return }
+            guard let art, let frame = art.editor.activeFrameID else { renderedImage = nil
+            return }
             let state = art.state
             let bitmap = await Task.detached(priority: .userInitiated) {
                 PixelArtRenderer.render(state, frame: frame)
@@ -442,7 +443,8 @@ private struct PixelArtEditorView: View {
             committedStroke.removeAll()
         }
         .task(id: "\(document.previewRevision)-\(art?.editor.onionSkin ?? false)-\(onionPrevious)-\(onionNext)") {
-            guard let art, art.editor.onionSkin, let frame = art.editor.activeFrameID else { onionImages = []; return }
+            guard let art, art.editor.onionSkin, let frame = art.editor.activeFrameID else { onionImages = []
+            return }
             let state = art.state, previous = onionPrevious, next = onionNext
             let bitmaps = await Task.detached(priority: .userInitiated) {
                 PixelOnionSkin.previews(state, frame: frame, previous: previous, next: next)
@@ -741,16 +743,18 @@ private struct PixelArtEditorView: View {
                 } label: { Text("\(activeFPS) fps") }
                 .disabled(readOnly || art?.isReadOnly == true)
                 Divider().frame(height: 18)
-                Toggle("Piel de cebolla", isOn: Binding(
-                    get: { art?.editor.onionSkin ?? false },
-                    set: { value in document.updatePixelEditor { $0.onionSkin = value } }))
+                Toggle("Piel de cebolla", isOn: Binding(get: { art?.editor.onionSkin ?? false },
+                                                        set: { value in document.updatePixelEditor { $0.onionSkin = value } }))
                     .toggleStyle(.switch).controlSize(.mini)
                 Text("Atrás")
-                Picker("Atrás", selection: Binding(get: { onionPrevious }, set: { value in document.updatePixelEditor { $0.onionPrevious = value } })) {
+                Picker("Atrás",
+                       selection: Binding(get: { onionPrevious },
+                                          set: { value in document.updatePixelEditor { $0.onionPrevious = value } })) {
                     ForEach(0...2, id: \.self) { Text("\($0)").tag($0) }
                 }.labelsHidden().pickerStyle(.segmented).frame(width: 88)
                 Text("Adelante")
-                Picker("Adelante", selection: Binding(get: { onionNext }, set: { value in document.updatePixelEditor { $0.onionNext = value } })) {
+                Picker("Adelante",
+                       selection: Binding(get: { onionNext }, set: { value in document.updatePixelEditor { $0.onionNext = value } })) {
                     ForEach(0...2, id: \.self) { Text("\($0)").tag($0) }
                 }.labelsHidden().pickerStyle(.segmented).frame(width: 88)
                 Spacer(minLength: 8)
@@ -1133,10 +1137,9 @@ private struct PixelArtEditorView: View {
             guard let start = pixelPoint(at: gesture.startLocation, in: art.state, clamped: true),
                   let end = pixelPoint(at: gesture.location, in: art.state, clamped: true) else { return }
             let value = drawingValue(in: art)
-            stroke = PixelToolGeometry.brush(PixelToolGeometry.outline(
-                from: PixelWrite(x: start.x, y: start.y, value: value),
-                to: PixelWrite(x: end.x, y: end.y, value: value), tool: tool),
-                size: art.editor.brushSize, width: art.state.width, height: art.state.height)
+            stroke = PixelToolGeometry.brush(PixelToolGeometry.outline(from: PixelWrite(x: start.x, y: start.y, value: value),
+                                                                       to: PixelWrite(x: end.x, y: end.y, value: value), tool: tool),
+                                             size: art.editor.brushSize, width: art.state.width, height: art.state.height)
         case "selection":
             guard let start = pixelPoint(at: gesture.startLocation, in: art.state, clamped: true),
                   let end = pixelPoint(at: gesture.location, in: art.state, clamped: true) else { return }
@@ -1466,7 +1469,7 @@ private struct WorkspaceEditorTab: View {
     let selected: Bool
     let select: () -> Void
     let close: () -> Void
-    var drag: (() -> NSItemProvider)? = nil
+    var drag: (() -> NSItemProvider)?
     @State private var hovered = false
     @State private var closeHovered = false
     @FocusState private var closeFocused: Bool

@@ -136,22 +136,27 @@ final class SQLSchemaStore {
     }
 
     func completions(connection: DatabaseConnection?, database: String, text: String, position: Int) -> [String] {
-        guard let connection, let snapshot = snapshot(connection) else { return [] }
         let source = text as NSString
-        let before = source.substring(to: min(position, source.length))
+        let before = source.substring(to: max(0, min(position, source.length)))
         let token = String(before.reversed().prefix { $0.isLetter || $0.isNumber || "_.$`".contains($0) }.reversed())
         let parts = token.replacingOccurrences(of: "`", with: "").split(separator: ".", omittingEmptySubsequences: false)
         var names: [String] = []
+        let snapshot = connection.flatMap { snapshot($0) }
         if parts.count > 1 {
             let qualifier = String(parts[parts.count - 2])
             let aliases = Self.aliases(in: text)
             let tableName = aliases[qualifier.lowercased()] ?? qualifier
-            names = snapshot.tables.filter { $0.name.caseInsensitiveCompare(tableName) == .orderedSame }
+            names = (snapshot?.tables ?? []).filter { $0.name.caseInsensitiveCompare(tableName) == .orderedSame }
                 .flatMap { $0.columns.map(\.name) }
-            names += snapshot.tables.filter { $0.database == qualifier }.map(\.name)
+            names += (snapshot?.tables ?? []).filter { $0.database == qualifier }.map(\.name)
         } else {
-            names = snapshot.databases + snapshot.tables.map(\.name)
-            names += snapshot.tables.filter { database.isEmpty || $0.database == database }.flatMap { $0.columns.map(\.name) }
+            names = ["SELECT", "FROM", "WHERE", "JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "ON", "AS",
+                     "INSERT", "INTO", "VALUES", "UPDATE", "SET", "DELETE", "CREATE", "ALTER", "DROP",
+                     "TABLE", "DATABASE", "INDEX", "VIEW", "GROUP", "BY", "ORDER", "HAVING", "LIMIT",
+                     "OFFSET", "DISTINCT", "UNION", "ALL", "AND", "OR", "NOT", "NULL", "IS", "IN",
+                     "LIKE", "BETWEEN", "EXISTS", "CASE", "WHEN", "THEN", "ELSE", "END", "ASC", "DESC"]
+            names += (snapshot?.databases ?? []) + (snapshot?.tables ?? []).map(\.name)
+            names += (snapshot?.tables ?? []).filter { database.isEmpty || $0.database == database }.flatMap { $0.columns.map(\.name) }
         }
         let prefix = String(parts.last ?? "")
         return Array(Set(names)).filter { $0.lowercased().hasPrefix(prefix.lowercased()) }.sorted().prefix(200).map {

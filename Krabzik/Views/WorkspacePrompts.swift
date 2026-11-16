@@ -83,7 +83,8 @@ enum WorkspacePrompts {
         let alert = NSAlert()
         alert.messageText = resizing ? "Cambiar tamaño del lienzo" : "Nueva imagen pixel art"
         alert.informativeText = resizing
-            ? "La imagen queda anclada arriba a la izquierda. Al reducir el lienzo se recortan los bordes derecho e inferior de todas las capas y fotogramas. Podés deshacer el cambio."
+            ? "La imagen queda anclada arriba a la izquierda. Al reducir el lienzo se recortan los bordes "
+                + "derecho e inferior de todas las capas y fotogramas. Podés deshacer el cambio."
             : "Elegí un tamaño inicial o escribí un ancho y alto personalizados."
         alert.addButton(withTitle: resizing ? "Cambiar tamaño" : "Crear")
         alert.addButton(withTitle: "Cancelar")

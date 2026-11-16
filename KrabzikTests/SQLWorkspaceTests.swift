@@ -67,6 +67,39 @@ final class SQLWorkspaceTests: XCTestCase {
         XCTAssertEqual(view.rangeForUserCompletion, NSRange(location: 9, length: 2))
     }
 
+    @MainActor func testSQLKeywordsCompleteWithoutConnection() {
+        let store = SQLSchemaStore()
+        XCTAssertTrue(store.completions(connection: nil, database: "", text: "sel", position: 3).contains("SELECT"))
+        XCTAssertFalse(store.completions(connection: nil, database: "", text: "t.sel", position: 5).contains("SELECT"))
+    }
+
+    @MainActor func testBacktabRemovesOneIndentFromSelectedLines() {
+        let view = CodeTextView(usingTextLayoutManager: true)
+        view.string = "    SELECT\n\tFROM\n  WHERE\n    untouched"
+        let length = ("    SELECT\n\tFROM\n  WHERE\n" as NSString).length
+        view.setSelectedRange(NSRange(location: 0, length: length))
+        view.insertBacktab(nil)
+        XCTAssertEqual(view.string, "SELECT\nFROM\nWHERE\n    untouched")
+        XCTAssertEqual(view.selectedRange(), NSRange(location: 0, length: length - 7))
+        view.setSelectedRange(NSRange(location: ("SELECT\nFROM\nWHERE\n  " as NSString).length, length: 0))
+        view.insertBacktab(nil)
+        XCTAssertEqual(view.string, "SELECT\nFROM\nWHERE\nuntouched")
+        XCTAssertEqual(view.selectedRange().location, ("SELECT\nFROM\nWHERE\n" as NSString).length)
+    }
+
+    @MainActor func testSQLDeleteBackwardStopsAtLineAndJoinsIndentation() {
+        let view = CodeTextView(usingTextLayoutManager: true)
+        view.sqlCompletionEnabled = true
+        view.string = "SELECT id\n    FROM users"
+        view.setSelectedRange(NSRange(location: 18, length: 0))
+        view.deleteWordBackward(nil)
+        XCTAssertEqual(view.string, "SELECT id\n users")
+        view.string = "SELECT id  \n\t  FROM users"
+        view.setSelectedRange(NSRange(location: 15, length: 0))
+        view.deleteWordBackward(nil)
+        XCTAssertEqual(view.string, "SELECT id FROM users")
+    }
+
     @MainActor func testSuggestionWaitsForAcceptanceAndPreservesQualifiedName() throws {
         let document = try EditorDocument(url: URL(fileURLWithPath: "/tmp/completion.sql"),
                                           data: Data("SELECT p.na FROM people p".utf8))

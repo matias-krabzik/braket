@@ -478,7 +478,7 @@ struct FileTree: NSViewRepresentable {
             Task {
                 do {
                     let document = try await controller.files.createPixelArtFile(named: name, in: folder,
-                                                                                width: options.width, height: options.height)
+                                                                                 width: options.width, height: options.height)
                     guard controller.workspaceURL == workspaceURL else { return }
                     showCreatedFile(document.url, in: folder, rename: false)
                 } catch { report(error) }

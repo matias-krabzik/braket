@@ -1,5 +1,5 @@
-@testable import Krabzik
 import ImageIO
+@testable import Krabzik
 import XCTest
 
 /// Archivo `.pxa` completo: ida y vuelta, validación, cambios pendientes, copias, guardado y recuperación.
@@ -439,7 +439,7 @@ final class PixelArtFileTests: XCTestCase {
         let layer = try XCTUnwrap(initial.editor.activeLayerID)
         let frame = try XCTUnwrap(initial.editor.activeFrameID)
         try draft.applyPixelArt(.writePixels(layer: layer, frame: frame,
-                                            writes: [PixelWrite(x: 3, y: 4, value: .free(red))]),
+                                             writes: [PixelWrite(x: 3, y: 4, value: .free(red))]),
                                 label: "Lápiz", kind: "pencil", scope: .cel(layer: layer, frame: frame))
         let url = directory.appendingPathComponent("dibujo.pxa")
         let saved = try await documents.savePixelDraft(draft, to: url)
@@ -481,7 +481,7 @@ final class PixelArtFileTests: XCTestCase {
     func testFullSizePNGExportKeepsCanvasDimensions() throws {
         let document = try PixelArtDocument(width: 40, height: 24)
         let data = try XCTUnwrap(PixelArtPreview.fullSizePNG(of: document.state,
-                                                              frame: document.state.frames[0].id))
+                                                             frame: document.state.frames[0].id))
         let source = try XCTUnwrap(CGImageSourceCreateWithData(data as CFData, nil))
         let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
         XCTAssertEqual(image.width, 40)

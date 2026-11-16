@@ -75,6 +75,65 @@ final class CodeTextView: NSTextView {
 
     override func insertTab(_ sender: Any?) { insertText("    ", replacementRange: selectedRange()) }
 
+    override func insertBacktab(_ sender: Any?) {
+        let selection = selectedRange()
+        let source = string as NSString
+        let start = source.lineRange(for: NSRange(location: selection.location, length: 0)).location
+        let lastPosition = selection.length > 0 ? NSMaxRange(selection) - 1 : selection.location
+        let end = NSMaxRange(source.lineRange(for: NSRange(location: lastPosition, length: 0)))
+        let original = source.substring(with: NSRange(location: start, length: end - start)) as NSString
+        let result = NSMutableString(string: original)
+        var removals: [(location: Int, length: Int)] = []
+        var offset = 0
+        while offset < original.length {
+            let line = original.lineRange(for: NSRange(location: offset, length: 0))
+            var count = 0
+            if original.character(at: offset) == 9 {
+                count = 1
+            } else {
+                while count < 4, offset + count < NSMaxRange(line), original.character(at: offset + count) == 32 {
+                    count += 1
+                }
+            }
+            if count > 0 { removals.append((start + offset, count)) }
+            offset = NSMaxRange(line)
+        }
+        guard !removals.isEmpty else { return }
+        for removal in removals.reversed() {
+            result.deleteCharacters(in: NSRange(location: removal.location - start, length: removal.length))
+        }
+        func adjusted(_ position: Int) -> Int {
+            position - removals.reduce(0) { $0 + max(0, min($1.length, position - $1.location)) }
+        }
+        let newStart = adjusted(selection.location)
+        let newEnd = adjusted(NSMaxRange(selection))
+        insertText(result as String, replacementRange: NSRange(location: start, length: end - start))
+        setSelectedRange(NSRange(location: newStart, length: newEnd - newStart))
+    }
+
+    override func deleteWordBackward(_ sender: Any?) {
+        guard sqlCompletionEnabled, selectedRange().length == 0 else {
+            super.deleteWordBackward(sender)
+            return
+        }
+        let position = selectedRange().location
+        guard position > 0 else { return }
+        let text = string as NSString
+        let lineStart = text.lineRange(for: NSRange(location: position, length: 0)).location
+        let prefix = text.substring(with: NSRange(location: lineStart, length: position - lineStart))
+        if prefix.trimmingCharacters(in: .whitespaces).isEmpty, lineStart > 0 {
+            let previous = text.lineRange(for: NSRange(location: lineStart - 1, length: 0))
+            var end = lineStart
+            while end > previous.location {
+                let char = text.character(at: end - 1)
+                if char == 10 || char == 13 || char == 32 || char == 9 { end -= 1 } else { break }
+            }
+            insertText(" ", replacementRange: NSRange(location: end, length: position - end))
+        } else if position > lineStart {
+            insertText("", replacementRange: NSRange(location: lineStart, length: position - lineStart))
+        }
+    }
+
     override func insertNewline(_ sender: Any?) {
         let text = string as NSString
         let position = selectedRange().location

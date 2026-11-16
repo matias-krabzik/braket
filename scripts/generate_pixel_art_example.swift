@@ -2,16 +2,18 @@
 // swiftc Krabzik/PixelArt/*.swift scripts/generate_pixel_art_example.swift ...
 // Swift requires this executable's source to be named main.swift when compiling multiple files.
 // Run the resulting executable with the Examples/Pixel art directory as its sole argument.
-import Foundation
 import CoreGraphics
+import Foundation
 import ImageIO
 let root = URL(fileURLWithPath: CommandLine.arguments[1])
-let src = CGImageSourceCreateWithURL(root.appendingPathComponent("bosque-referencia.png") as CFURL, nil)!
-let image = CGImageSourceCreateImageAtIndex(src, 0, nil)!
+guard let src = CGImageSourceCreateWithURL(root.appendingPathComponent("bosque-referencia.png") as CFURL, nil),
+      let image = CGImageSourceCreateImageAtIndex(src, 0, nil) else { fatalError("No se pudo cargar la referencia") }
 let size = 64
 var bytes = [UInt8](repeating: 0, count: size * size * 4)
 bytes.withUnsafeMutableBytes { buffer in
-    let c = CGContext(data: buffer.baseAddress, width: size, height: size, bitsPerComponent: 8, bytesPerRow: size * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    guard let c = CGContext(data: buffer.baseAddress, width: size, height: size, bitsPerComponent: 8, bytesPerRow: size * 4,
+                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+    else { fatalError("No se pudo crear el contexto de imagen") }
     c.interpolationQuality = .none
     c.draw(image, in: CGRect(x: 0, y: 0, width: size, height: size))
 }
@@ -23,7 +25,8 @@ let fireflies = PixelLayer(name: "Luciérnagas")
 func apply(_ label: String, _ ops: [PixelOperation]) throws {
     try doc.core.apply(PixelTransaction(label: label, operationKind: "example", scope: .document(doc.state), operations: ops))
 }
-try apply("Capas del bosque", [.setLayerProperty(base, .name("Entorno")), .addLayer(smoke, at: 1), .addLayer(light, at: 2), .addLayer(fireflies, at: 3)])
+try apply("Capas del bosque",
+          [.setLayerProperty(base, .name("Entorno")), .addLayer(smoke, at: 1), .addLayer(light, at: 2), .addLayer(fireflies, at: 3)])
 for _ in 1..<8 { try apply("Fotograma", [.addFrame(PixelFrame(duration: 125), at: doc.state.frames.count)]) }
 for (n, frame) in doc.state.frames.enumerated() {
     var background: [PixelWrite] = [], fumes: [PixelWrite] = []
@@ -38,11 +41,34 @@ for (n, frame) in doc.state.frames.enumerated() {
         } else { background.append(PixelWrite(x: x, y: y, value: .free(color))) }
     }}
     let spark = PixelWrite(x: 14 + n, y: 20 + [0,1,2,1,0,-1,-2,-1][n], value: .free(PixelRGBA(255, 211, 110)))
-    try apply("Bosque · fotograma \(n + 1)", [.writePixels(layer: base, frame: frame.id, writes: background), .writePixels(layer: smoke.id, frame: frame.id, writes: fumes), .writePixels(layer: fireflies.id, frame: frame.id, writes: [spark])])
+    try apply("Bosque · fotograma \(n + 1)",
+              [
+                  .writePixels(layer: base, frame: frame.id, writes: background),
+                  .writePixels(layer: smoke.id, frame: frame.id, writes: fumes),
+                  .writePixels(layer: fireflies.id, frame: frame.id, writes: [spark])
+              ])
 }
-let colors = [PixelRGBA(24,20,39),PixelRGBA(56,42,73),PixelRGBA(101,75,132),PixelRGBA(139,115,164),PixelRGBA(38,72,77),PixelRGBA(55,102,85),PixelRGBA(90,130,58),PixelRGBA(143,170,70),PixelRGBA(108,70,68),PixelRGBA(164,104,80),PixelRGBA(205,137,91),PixelRGBA(255,211,110),PixelRGBA(250,232,165),PixelRGBA(28,37,52),PixelRGBA(64,82,102),PixelRGBA(179,151,164)]
+let colors = [
+    PixelRGBA(24,20,39),
+    PixelRGBA(56,42,73),
+    PixelRGBA(101,75,132),
+    PixelRGBA(139,115,164),
+    PixelRGBA(38,72,77),
+    PixelRGBA(55,102,85),
+    PixelRGBA(90,130,58),
+    PixelRGBA(143,170,70),
+    PixelRGBA(108,70,68),
+    PixelRGBA(164,104,80),
+    PixelRGBA(205,137,91),
+    PixelRGBA(255,211,110),
+    PixelRGBA(250,232,165),
+    PixelRGBA(28,37,52),
+    PixelRGBA(64,82,102),
+    PixelRGBA(179,151,164)
+]
 let ids = try doc.core.reserveEntryIDs(colors.count)
-try apply("Paleta nocturna", colors.enumerated().map { .addPaletteEntry(PaletteEntry(id: ids[$0.offset], name: "Color \($0.offset + 1)", color: $0.element)) })
+try apply("Paleta nocturna",
+          colors.enumerated().map { .addPaletteEntry(PaletteEntry(id: ids[$0.offset], name: "Color \($0.offset + 1)", color: $0.element)) })
 doc.editor.activeFrameID = doc.state.frames[2].id
 doc.editor.activeLayerID = smoke.id
 doc.editor.onionSkin = true
