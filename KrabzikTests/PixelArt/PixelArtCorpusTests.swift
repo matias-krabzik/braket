@@ -61,8 +61,9 @@ final class PixelArtCorpusTests: XCTestCase {
         print("[corpus ilustración] 60 trazos \(building)s · guardar \(saving)s · abrir \(opening)s · "
             + "archivo \(snapshot.data.count) B · "
             + "bloques \(tiles) · objetos \(snapshot.manifest.objectCount)")
-        // Medido (2026-11-14, Debug): guardar 5,9 s y abrir 5,4 s; en Release 0,37 s y 0,25 s. Cada confirmación de
-        // trazo cuesta 130 ms en Debug y 17 ms en Release: reescribe el estado entero, así que crece con los bloques.
+        // Medido (2026-11-14, Debug): guardar 5,9 s y abrir 5,4 s; en Release 0,37 s y 0,25 s. Confirmar un trazo costaba
+        // 130 ms en Debug y 17 ms en Release porque recodificaba el estado entero; desde la codificación incremental
+        // (PixelArtCommitCostTests) esos 60 trazos tardan 0,14 s en Release en total.
         XCTAssertLessThan(saving, 40)
         XCTAssertLessThan(opening, 40)
     }

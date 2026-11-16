@@ -48,13 +48,18 @@ struct PixelDocumentCore: Sendable {
     /// IDs que aparecieron en algún estado retenido; nunca se reutilizan, ni en ramas ni en propuestas.
     private(set) var everUsedEntryIDs: Set<UInt32>
     private var recentStates: [(hash: String, state: PixelArtState)] = []
+    /// Referencias de lo ya codificado: confirmar un trazo no vuelve a hashear los bloques que no cambiaron.
+    /// Describe objetos de `store`; vacío tras abrir un archivo, así que la primera confirmación codifica todo una vez.
+    private var encodingMemo = PixelEncodingMemo()
     private static let cacheSize = 8
 
     /// Documento nuevo con su estado inicial como raíz del historial.
     init(documentID: UUID = UUID(), state: PixelArtState, label: String = "Documento nuevo") throws {
         try state.validate()
         var store = PxaObjectStore()
-        let ref = PixelArtStateCodec.encode(state, into: &store)
+        var memo = PixelEncodingMemo()
+        let ref = PixelArtStateCodec.encode(state, into: &store, memo: &memo)
+        encodingMemo = memo
         self.documentID = documentID
         instanceID = UUID()
         self.state = state
@@ -84,6 +89,10 @@ struct PixelDocumentCore: Sendable {
             throw PixelArtError.invalid("manifiesto", "el contador de paleta es menor que un ID ya usado")
         }
     }
+
+    /// Cuánto se calculó de cero al codificar hasta ahora; sirve a las pruebas para verificar que confirmar no recodifica
+    /// lo que no cambió.
+    var encodingStatistics: PixelEncodingMemo.Statistics { encodingMemo.statistics }
 
     var token: PixelBaseToken {
         PixelBaseToken(instanceID: instanceID, revisionID: history.cursorID, stateHash: stateRef.hash, generation: generation)
@@ -149,7 +158,8 @@ struct PixelDocumentCore: Sendable {
     /// Quedan retenidos mientras alguna propuesta los referencie y se recolectan si se descarta.
     mutating func storeProposedState(_ proposed: PixelArtState) throws -> PxaObjectRef {
         try proposed.validate()
-        return PixelArtStateCodec.encode(proposed, into: &store)
+        var scratch = encodingMemo
+        return PixelArtStateCodec.encode(proposed, into: &store, memo: &scratch)
     }
 
     /// Guarda el registro de procedencia de una propuesta aceptada (PXA-02 §8).
@@ -174,7 +184,8 @@ struct PixelDocumentCore: Sendable {
             throw PixelArtError.invalid("paleta", "el ID \(id) no está reservado o ya se usó en este documento")
         }
         var newStore = store
-        let ref = PixelArtStateCodec.encode(working, into: &newStore)
+        var newMemo = encodingMemo
+        let ref = PixelArtStateCodec.encode(working, into: &newStore, memo: &newMemo)
         var newHistory = history
         var revision = PixelRevision(afterState: ref, operationKind: transaction.operationKind, label: transaction.label,
                                      source: transaction.source, affected: diff.affected(base: state, result: working),
@@ -185,6 +196,7 @@ struct PixelDocumentCore: Sendable {
         state = working
         stateRef = ref
         store = newStore
+        encodingMemo = newMemo
         history = newHistory
         everUsedEntryIDs.formUnion(working.palette.ids)
         generation += 1

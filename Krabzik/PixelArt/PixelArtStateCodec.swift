@@ -7,8 +7,27 @@ enum PixelArtStateCodec {
     // MARK: Codificar
 
     static func encode(_ state: PixelArtState, into store: inout PxaObjectStore) -> PxaObjectRef {
+        var memo = PixelEncodingMemo()
+        return encode(state, into: &store, memo: &memo)
+    }
+
+    /// Igual que `encode(_:into:)`, pero reutiliza las referencias de lo que no cambió desde la codificación anterior
+    /// (PXA-20: confirmar un trazo cuesta lo que cambió, no el tamaño del documento). El resultado es idéntico byte a byte
+    /// al de una codificación completa; la memoria solo se consulta si el valor de fotograma, celda o bloque es igual.
+    /// `memo` tiene que describir objetos que existen en `store`.
+    static func encode(_ state: PixelArtState, into store: inout PxaObjectStore, memo: inout PixelEncodingMemo) -> PxaObjectRef {
         let layerRefs = state.layers.map { encode($0, into: &store).json }
-        let frameRefs = state.frames.map { encode($0, into: &store).json }
+        var frames: [UUID: PixelEncodingMemo.Frame] = [:]
+        frames.reserveCapacity(state.frames.count)
+        var frameRefs: [PixelArtJSON] = []
+        frameRefs.reserveCapacity(state.frames.count)
+        for frame in state.frames {
+            let previous = memo.frames[frame.id]
+            let entry = encode(frame, previous: previous, memo: &memo, into: &store)
+            frames[frame.id] = entry
+            frameRefs.append(entry.ref.json)
+        }
+        memo.frames = frames
         let palette = encode(state.palette, into: &store)
         let sequences = encode(state.sequences, into: &store)
         return store.put(.documentState, fields: [
@@ -26,17 +45,42 @@ enum PixelArtStateCodec {
         ])
     }
 
-    private static func encode(_ frame: PixelFrame, into store: inout PxaObjectStore) -> PxaObjectRef {
+    private static func encode(_ frame: PixelFrame, previous: PixelEncodingMemo.Frame?, memo: inout PixelEncodingMemo,
+                               into store: inout PxaObjectStore) -> PixelEncodingMemo.Frame {
+        if let previous, previous.value == frame { return previous }
+        memo.statistics.frames += 1
         var cels: [String: PixelArtJSON] = [:]
-        for (layerID, cel) in frame.cels { cels[layerID.uuidString] = encode(cel, into: &store).json }
-        return store.put(.frame, fields: ["id": .string(frame.id.uuidString), "duration": .int(frame.duration),
-                                          "cels": .object(cels)])
+        var entries: [UUID: PixelEncodingMemo.Cel] = [:]
+        for (layerID, cel) in frame.cels {
+            let entry = encode(cel, previous: previous?.cels[layerID], memo: &memo, into: &store)
+            entries[layerID] = entry
+            cels[layerID.uuidString] = entry.ref.json
+        }
+        let ref = store.put(.frame, fields: ["id": .string(frame.id.uuidString), "duration": .int(frame.duration),
+                                             "cels": .object(cels)])
+        return PixelEncodingMemo.Frame(value: frame, ref: ref, cels: entries)
     }
 
-    private static func encode(_ cel: PixelCel, into store: inout PxaObjectStore) -> PxaObjectRef {
+    private static func encode(_ cel: PixelCel, previous: PixelEncodingMemo.Cel?, memo: inout PixelEncodingMemo,
+                               into store: inout PxaObjectStore) -> PixelEncodingMemo.Cel {
+        if let previous, previous.value == cel { return previous }
+        memo.statistics.cels += 1
         var tiles: [String: PixelArtJSON] = [:]
-        for (coord, tile) in cel.tiles { tiles[coord.key] = store.put(Data(tile.bytes), type: .pixelTile).json }
-        return store.put(.cel, fields: ["tiles": .object(tiles)])
+        var refs: [TileCoord: PxaObjectRef] = [:]
+        refs.reserveCapacity(cel.tiles.count)
+        for (coord, tile) in cel.tiles {
+            let ref: PxaObjectRef
+            if let before = previous, before.value.tiles[coord] == tile, let known = before.tiles[coord] {
+                ref = known
+            } else {
+                memo.statistics.tiles += 1
+                ref = store.put(Data(tile.bytes), type: .pixelTile)
+            }
+            refs[coord] = ref
+            tiles[coord.key] = ref.json
+        }
+        let ref = store.put(.cel, fields: ["tiles": .object(tiles)])
+        return PixelEncodingMemo.Cel(value: cel, ref: ref, tiles: refs)
     }
 
     private static func encode(_ palette: PixelPalette, into store: inout PxaObjectStore) -> PxaObjectRef {
@@ -241,6 +285,34 @@ enum PixelArtStateCodec {
             return sequence
         }
     }
+}
+
+/// Referencias de lo ya codificado, por fotograma, celda y bloque, junto con el valor que se codificó. Sirve para no
+/// volver a calcular ni a hashear lo que una confirmación no tocó. Vale solo mientras su `PxaObjectStore` conserve esos
+/// objetos: quien lo posee tiene que descartarlo si reemplaza el almacén por otro.
+struct PixelEncodingMemo: Sendable {
+    struct Cel: Sendable {
+        var value: PixelCel
+        var ref: PxaObjectRef
+        var tiles: [TileCoord: PxaObjectRef]
+    }
+
+    struct Frame: Sendable {
+        var value: PixelFrame
+        var ref: PxaObjectRef
+        var cels: [UUID: Cel]
+    }
+
+    /// Lo que se tuvo que calcular de cero, acumulado. Permite comprobar sin medir tiempos que una confirmación no
+    /// recodifica lo que no cambió.
+    struct Statistics: Equatable, Sendable {
+        var frames = 0
+        var cels = 0
+        var tiles = 0
+    }
+
+    fileprivate(set) var frames: [UUID: Frame] = [:]
+    fileprivate(set) var statistics = Statistics()
 }
 
 /// Lo ya decodificado y verificado, reutilizable entre estados. Se vacía al crecer demasiado para no

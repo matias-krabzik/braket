@@ -103,6 +103,9 @@ final class PixelArtRandomizedTests: XCTestCase {
                     try document.state.validate()
                     XCTAssertEqual(try PixelArtFixtures.roundTrip(document.state), document.state, "semilla \(seed), paso \(step)")
                     XCTAssertEqual(document.core.history.currentState, document.core.stateRef, "semilla \(seed), paso \(step)")
+                    var fresh = PxaObjectStore()
+                    XCTAssertEqual(PixelArtStateCodec.encode(document.state, into: &fresh), document.core.stateRef,
+                                   "la codificación incremental coincide con una completa (semilla \(seed), paso \(step))")
                 } else {
                     XCTAssertEqual(document.state, before.state,
                                    "una operación sin diferencia no cambia nada (semilla \(seed), paso \(step))")
