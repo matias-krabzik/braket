@@ -428,52 +428,5 @@ final class PixelArtFileTests: XCTestCase {
                        "no mientras otra escritura está en curso")
     }
 
-    func testRecoveryKeepsTheTwoLatestValidGenerationsAndNeverRecyclesBeforeVerifying() throws {
-        let store = PixelArtRecoveryStore(directory: directory.appendingPathComponent("recuperacion"))
-        var document = try PixelArtDocument(width: 16, height: 16)
-        let key = PixelArtRecoveryStore.key(forLocation: directory.appendingPathComponent("a.pxa"))
-        for step in 1...3 {
-            try document.core.apply(PixelTransaction(label: "paso \(step)", operationKind: "t", scope: .document(document.state),
-                                                     operations: [.setFrameDuration(document.state.frames[0].id,
-                                                                                    milliseconds: 100 + step)]))
-            try store.capture(try PixelArtFile.snapshot(of: document), key: key, baseFingerprint: nil)
-        }
-        let entries = try store.entries(forKey: key)
-        XCTAssertEqual(entries.map(\.sequence), [3, 2], "se conservan las dos últimas")
-        XCTAssertEqual(try store.load(entries[0]).state.frames[0].duration, 103)
-        XCTAssertEqual(try store.load(entries[1]).state.frames[0].duration, 102)
-        XCTAssertEqual(try store.load(entries[0]).core.history.count, 4, "revisiones completas y cursor")
-
-        let newest = directory.appendingPathComponent("recuperacion/\(key)/3.pxa")
-        try Data("dañada".utf8).write(to: newest)
-        XCTAssertEqual(try store.entries(forKey: key).map(\.sequence), [2], "una dañada no se ofrece como válida")
-        try store.capture(try PixelArtFile.snapshot(of: document), key: key, baseFingerprint: nil)
-        XCTAssertEqual(try store.entries(forKey: key).first?.sequence, 4, "no pisa un número usado")
-    }
-
-    func testRecoveryTracksTheOriginalAndOffersASeparateCopyWhenItChanged() throws {
-        let store = PixelArtRecoveryStore(directory: directory.appendingPathComponent("recuperacion"))
-        let document = try PixelArtDocument(width: 8, height: 8)
-        let key = PixelArtRecoveryStore.key(forLocation: directory.appendingPathComponent("a.pxa"))
-        let base = PixelArtFileFingerprint(of: Data("original".utf8))
-        let entry = try store.capture(try PixelArtFile.snapshot(of: document), key: key, baseFingerprint: base)
-        XCTAssertFalse(store.conflictsWithOriginal(entry, current: base))
-        XCTAssertTrue(store.conflictsWithOriginal(entry, current: PixelArtFileFingerprint(of: Data("cambiado".utf8))))
-        XCTAssertTrue(store.conflictsWithOriginal(entry, current: nil))
-        XCTAssertNotEqual(PixelArtRecoveryStore.key(forLocation: directory.appendingPathComponent("b.pxa")), key)
-    }
-
-    func testDraftsWithoutAPathAreRecoverableAndDiscardOrRetireRemoveTheirCopies() throws {
-        let store = PixelArtRecoveryStore(directory: directory.appendingPathComponent("recuperacion"))
-        let document = try PixelArtDocument(width: 8, height: 8)
-        let key = PixelArtRecoveryStore.draftKey(document.documentID)
-        let first = try store.capture(try PixelArtFile.snapshot(of: document), key: key, baseFingerprint: nil)
-        let second = try store.capture(try PixelArtFile.snapshot(of: document), key: key, baseFingerprint: nil)
-        XCTAssertEqual(try store.entries(forKey: key).count, 2)
-        try store.retire(key: key, upTo: first.sequence)
-        XCTAssertEqual(try store.entries(forKey: key).map(\.sequence), [second.sequence], "retirar lo que cubre el guardado")
-        try store.discard(key: key)
-        XCTAssertTrue(try store.entries(forKey: key).isEmpty)
-        XCTAssertNoThrow(try store.discard(key: "no-existe"))
-    }
+    // La recuperación por trabajo (PXA-08) se prueba en PixelArtRecoveryTests.
 }

@@ -20,7 +20,8 @@ posee y serializa el actor que abra el documento.
 | `PixelArtDocumentCore` | Una sola vía de modificación, atómica, para edición manual y propuestas |
 | `PixelArtAssistant`, `PixelArtAssistantCodec` | Conversación y propuestas de Codex, con alcance congelado y revalidación al reabrir |
 | `PixelArtEditorState` | Estado de edición portable y ajustes de exportación |
-| `PixelArtDocument`, `PixelArtFile`, `PixelArtFileStore`, `PixelArtRecovery`, `PixelArtPreview` | Documento abierto, lectura/validación/escritura del `.pxa`, guardado atómico con huella, recuperación local y miniatura |
+| `PixelArtDocument`, `PixelArtFile`, `PixelArtFileStore`, `PixelArtPreview` | Documento abierto, lectura/validación/escritura del `.pxa`, guardado atómico con huella y miniatura |
+| `PixelArtRecovery`, `PixelArtRecoveryPlanner` | Recuperación local por trabajo (`recoveryID`, índice, generaciones, descarte durable) y la matriz de decisión de PXA-08 |
 
 ## Decisiones que el spec dejaba abiertas
 
@@ -35,8 +36,13 @@ posee y serializa el actor que abra el documento.
   descripciones de las operaciones; aplicarla valida la diferencia con las mismas reglas de una edición manual.
 - **Huella de archivo = tamaño + SHA-256 del contenido.** El conflicto se decide dentro de la sección
   coordinada de `NSFileCoordinator`, justo antes de reemplazar.
-- **Recuperación local**: `<carpeta>/<clave>/<n>.pxa` + `<n>.json`; la clave es el hash de la ruta canónica, o
-  `draft-<UUID>` para un borrador sin ruta.
+- **Recuperación local por trabajo** (PXA-08): `<carpeta>/<recoveryID>/index.json` + `g<generación>-<UUID>.pxa`.
+  El `recoveryID` es propio y **sobrevive a un cambio de ruta**; nunca se deriva de la ruta ni del documento-ID. El
+  índice es versionado (1), con propietario, estado (activo/pendiente/descartado), ruta original como metadato, huella
+  base y hasta dos generaciones ordenadas por número, no por reloj. Se reemplaza de forma atómica; un descarte se
+  registra antes de borrar, así una caída durante la limpieza no lo resucita. Carpeta 0700, archivos 0600. Un índice
+  ilegible o de otra versión se informa y no se borra. `PixelArtRecoveryPlanner` decide cada fila de la matriz de
+  PXA-08 §5 (recuperar en el original, copia, borrador, solo vista, enfocar, nada válido) sin tocar disco.
 
 ## Qué falta
 
@@ -45,7 +51,8 @@ posee y serializa el actor que abra el documento.
 - **Prueba técnica de PXA-04 §7** (render de 32 × 32 a Codex, tabla de cuatro colores, edición localizada, rechazos
   y respuesta tardía contra el transporte real). Los rechazos se comprueban en local con estados sintéticos; **no**
   se probó contra Codex, así que esta puerta de la etapa 1 sigue abierta.
-- **Optimización de la confirmación**: ver mediciones.
+- **Recuperación y cuotas**: el almacén no impone una cuota global (E3 de la revisión de seguridad) y no hay
+  planificador de capturas que lo use; eso es de la etapa 2.
 
 ## Mediciones (2026-11-14)
 
@@ -56,12 +63,23 @@ posee y serializa el actor que abra el documento.
 | Sprite 64 × 64, 3 capas, 8 fotogramas, 150 trazos | 3 ms (Release) · 11 ms (Debug) | 0,2 s · 1,6 s | 0,13 s · 1,4 s | 513 KB (3,4 KB por revisión) |
 | Ilustración 512 × 512, 4 capas, 60 trazos de 400 px, 768 bloques | 17 ms · 130 ms | 0,37 s · 5,9 s | 0,25 s · 5,4 s | 962 KB |
 
-Hallazgo: **confirmar un trazo reescribe el estado entero** (recodifica y vuelve a hashear todos los bloques,
-copia el almacén y el mapa de revisiones). El costo crece con la cantidad de bloques: con los 65.536 del tope sería
-del orden de segundos por trazo. No bloquea la etapa 1, pero hay que resolverlo antes de la etapa 3, que es
-donde un trazo tiene que sentirse inmediato: codificar de forma incremental reutilizando las referencias de las
-celdas y fotogramas que la diferencia (`PixelStateDiff`) ya identifica como sin cambios. No se resuelve recortando
-historia.
+Hallazgo y corrección: **confirmar un trazo reescribía el estado entero** (recodificaba y volvía a hashear todos los
+bloques). Con 16.384 bloques (8 capas × 8 fotogramas de 512 × 512) costaba **416 ms** en Release, 16 veces lo de
+1.024 bloques. `PixelEncodingMemo` guarda, por fotograma, celda y bloque, el valor codificado y su referencia; al
+confirmar, lo que es igual al valor anterior reutiliza la referencia sin hashear ni serializar. El resultado es
+idéntico byte a byte al de una codificación completa (lo comprueban las pruebas de equivalencia y las secuencias
+aleatorias). Ahora:
+
+| Documento | Confirmar un trazo de 200 px (Release) |
+|---|---|
+| 1.024 bloques | 1,5 ms |
+| 16.384 bloques | 6,4 ms (antes 416 ms) |
+
+Queda una parte lineal pequeña: copiar el almacén (un diccionario por hash) y sumar sus bytes en cada confirmación,
+y la comparación de bloques contra la memoria, que es instantánea cuando comparten almacenamiento. Con los 65.536 del
+tope se estima ~25 ms (extrapolado, no medido). **La primera confirmación tras abrir un archivo codifica el estado
+entero una vez**, porque la memoria empieza vacía. Deshacer y rehacer no la invalidan: la memoria solo se usa si el
+valor es igual. No se resuelve recortando historia.
 
 Los topes de PXA-01 §6 se mantienen: nada de lo medido obliga a moverlos.
 
