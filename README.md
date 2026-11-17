@@ -142,9 +142,12 @@ app emite en Debug. Su entrada por terminal es `scripts/qa.sh` y su catálogo
 
 ```sh
 scripts/qa.sh --list        # el catálogo de casos de interfaz
-scripts/qa.sh               # corre los automatizados
+scripts/qa.sh               # corre los 115 casos del catálogo
 scripts/qa.sh --mysql       # además, los que necesitan un MySQL desechable
 ```
+
+Los 115 casos del catálogo están automatizados: 109 corren siempre y 6 esperan el MySQL
+desechable.
 
 La suite completa, que incluye los casos de QA:
 
@@ -180,10 +183,10 @@ Datos de la última comprobación, no promesas permanentes.
 | Qué | Cuándo | Resultado |
 |---|---|---|
 | Xcode 27.1 / Swift 6.4, Swift 6 language mode | 2026-11-10 | compila sin avisos propios |
-| `scripts/verify.sh` completo, sin MySQL local | 2026-11-16 | 566 pruebas, 16 saltadas (MySQL real, Codex con suscripción y los casos de QA que necesitan servidor), 0 fallos |
+| `scripts/verify.sh` completo, sin MySQL local | 2026-11-17 | 589 pruebas, 18 saltadas (MySQL real, Codex con suscripción y los casos de QA que necesitan servidor), 0 fallos |
 | Suite completa con MySQL 8.4 en contenedor desechable | 2026-11-09 | 44 pruebas, 1 saltada (Codex con suscripción), 0 fallos |
-| Release instalada en `/Applications` | 2026-11-16 | 0.5.16 build 80, binario universal (`x86_64 arm64`), firma Developer ID válida, arranca con una sola instancia |
-| `scripts/qa.sh`, catálogo de interfaz, sin MySQL desechable | 2026-11-16 | 115 casos: 88 en verde, 4 omitidos por falta de servidor, 23 sin automatizar |
+| Release instalada en `/Applications` | 2026-11-17 | 0.5.16 build 80, binario universal (`x86_64 arm64`), firma Developer ID válida, arranca con una sola instancia |
+| `scripts/qa.sh`, catálogo de interfaz, sin MySQL desechable | 2026-11-17 | 115 casos: 109 en verde, 6 omitidos por falta de servidor, ninguno sin automatizar |
 | swiftlint 0.65.1 / swiftformat 0.64.6 | 2026-11-10 | `--strict` sin errores y **cero avisos** |
 
 No se garantiza compatibilidad con servidores derivados de MySQL ni con versiones de Xcode anteriores.

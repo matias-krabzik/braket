@@ -75,7 +75,16 @@ un camino paralelo. Un botón que desaparece, cambia de texto o queda deshabilit
 escenario, que es justo lo que se quiere.
 
 `.qaScreen("wizard")` marca una pantalla —una hoja, un panel— para poder afirmar qué está
-montado.
+montado. `.qaField("wizard.name", text: $draft.name)` publica un campo de texto para poder
+leerlo y **escribir** en él, y `.qaLabel("sql.result.schemaError", error)` publica un texto
+para poder afirmar qué dice.
+
+**Las órdenes de los menús** son un caso aparte: el menú vive en la `Scene` de `KrabzikApp`,
+que los escenarios no montan. Están en `AppMenuCommands` (`Krabzik/Views/AppCommands.swift`)
+con su título, su habilitación y su acción una sola vez; el menú las dibuja con
+`AppCommandButton` y `WorkspaceView` las registra con `.qaCommands(...)`, así que
+`menu.view.zoomOut`, `menu.project.stop` o `menu.file.new` se usan y se afirman como
+cualquier otro control. Una orden de menú que haga falta probar se agrega ahí.
 
 ### 3. El arnés: `QAHarness`
 
@@ -90,8 +99,18 @@ await qa.mount()
 try await qa.tap("welcome.create")          // usa el control, falla si está deshabilitado
 await qa.assertScreen("wizard")
 await qa.assertControl("wizard.next", title: "Continuar", enabled: false)
+try await qa.type("Tienda", into: "wizard.name")
 await qa.assertEvent("wizard.open.request", ["switching": "false"])
 ```
+
+Además: `relaunch()` da otra corrida de la app con las mismas preferencias —es lo que
+necesita un escenario de restauración de sesión—, `mount(otro)` monta esa otra corrida, y
+`makeProject(name:folders:command:)` deja un `.kzk` en disco sin pasar por el asistente.
+
+El teardown **desmonta la ventana** antes de limpiar el registro y mata los procesos que el
+escenario haya lanzado. Lo primero no es cosmético: una ventana que sigue montada reevalúa
+sus vistas y vuelve a registrar sus controles, así que el escenario siguiente podría tocar
+el botón de la prueba anterior.
 
 `settle(...)` es asíncrono a propósito. Un `RunLoop.run(until:)` síncrono bombea AppKit pero
 retiene el main actor, así que las tareas de la app no avanzan y la espera se agota siempre;
@@ -101,7 +120,8 @@ suspender con `Task.sleep` suelta el actor y, de paso, el run loop reevalúa las
 
 `KrabzikTests/QA/cases.json` es la fuente única. Cada caso tiene id, suite, título, los pasos
 del usuario, lo que se espera, la prueba que lo ejercita (`null` si todavía no está
-automatizado) y etiquetas.
+automatizado) y etiquetas. Hoy los 115 casos tienen prueba: 109 corren siempre y 6 esperan
+el MySQL desechable.
 
 | Suite | Qué cubre |
 |---|---|
