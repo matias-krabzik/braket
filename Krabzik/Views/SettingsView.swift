@@ -3,25 +3,145 @@ import SwiftUI
 struct SettingsView: View {
     @Bindable var settings: AppSettings
     let controller: WorkspaceController
+    var showsDone = false
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft: GeneralDraft
+
+    init(settings: AppSettings, controller: WorkspaceController, showsDone: Bool = false) {
+        self.settings = settings
+        self.controller = controller
+        self.showsDone = showsDone
+        _draft = State(initialValue: GeneralDraft(settings: settings))
+    }
+
+    @MainActor private struct GeneralDraft: Equatable {
+        var theme: AppTheme
+        var uiScale: Double
+        var codeFontSize: Double
+        var resultFontSize: Double
+        var restoreLastState: Bool
+
+        init(settings: AppSettings) {
+            theme = settings.theme
+            uiScale = settings.uiScale
+            codeFontSize = settings.codeFontSize
+            resultFontSize = settings.resultFontSize
+            restoreLastState = settings.restoreLastState
+        }
+    }
+
+    private var hasChanges: Bool { draft != GeneralDraft(settings: settings) }
+
+    private func apply() {
+        settings.theme = draft.theme
+        settings.uiScale = draft.uiScale
+        settings.codeFontSize = draft.codeFontSize
+        settings.resultFontSize = draft.resultFontSize
+        settings.restoreLastState = draft.restoreLastState
+    }
+
+    private func cancel() {
+        draft = GeneralDraft(settings: settings)
+        dismiss()
+    }
+
+    private enum Page: String, CaseIterable, Identifiable {
+        case general = "Apariencia"
+        case project = "Proyecto"
+        case connections = "Conexiones"
+        case updates = "Actualizaciones"
+
+        var id: Self { self }
+        var icon: String {
+            switch self {
+            case .general: "paintpalette"
+            case .project: "folder"
+            case .connections: "externaldrive"
+            case .updates: "arrow.triangle.2.circlepath"
+            }
+        }
+        var searchTerms: String {
+            switch self {
+            case .general: "apariencia tema grafito fuente código resultados zoom iniciar diagnóstico mysql"
+            case .project: "proyecto identidad ubicación iconos"
+            case .connections: "conexiones base datos mysql"
+            case .updates: "actualizaciones versión"
+            }
+        }
+    }
+
+    @State private var page: Page = .general
+    @State private var search = ""
+
+    private var filteredPages: [Page] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        return query.isEmpty ? Page.allCases : Page.allCases.filter { $0.searchTerms.localizedStandardContains(query) }
+    }
 
     var body: some View {
-        TabView {
-            general.tabItem { Label("General", systemImage: "gearshape") }
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Configuración").font(.headline).padding(.horizontal, 8)
+                TextField("Buscar ajustes", text: $search)
+                    .textFieldStyle(.roundedBorder)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("GENERAL").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                            .padding(.horizontal, 8).padding(.top, 4)
+                        ForEach(filteredPages) { item in
+                            Button { page = item } label: {
+                                Label(item.rawValue, systemImage: item.icon)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 9).padding(.vertical, 7)
+                                    .background(page == item ? Theme.accent.opacity(0.22) : .clear,
+                                                in: RoundedRectangle(cornerRadius: 6))
+                                    .contentShape(Rectangle())
+                            }.buttonStyle(.plain)
+                                .accessibilityAddTraits(page == item ? .isSelected : [])
+                        }
+                        if filteredPages.isEmpty {
+                            Text("Sin resultados").font(.callout).foregroundStyle(.secondary).padding(8)
+                        }
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(14).frame(width: 210).background(Theme.sidebar)
+            Divider()
             Group {
-                if let workspace = controller.workspace, let url = controller.workspaceURL {
-                    ProjectSettingsView(controller: controller, workspace: workspace, url: url).id(url)
-                } else {
-                    ContentUnavailableView("No hay un proyecto abierto", systemImage: "folder",
-                                           description: Text("Abrí un proyecto para editar su configuración."))
+                switch page {
+                case .general: general
+                case .project:
+                    if let workspace = controller.workspace, let url = controller.workspaceURL {
+                        ProjectSettingsView(controller: controller, workspace: workspace, url: url).id(url)
+                    } else {
+                        ContentUnavailableView("No hay un proyecto abierto", systemImage: "folder",
+                                               description: Text("Abrí un proyecto para editar su configuración."))
+                    }
+                case .connections: ConnectionsSettingsView(controller: controller)
+                case .updates: UpdatesSettingsView()
                 }
             }
-            .tabItem { Label("Proyecto", systemImage: "folder") }
-            ConnectionsSettingsView(controller: controller)
-                .tabItem { Label("Conexiones", systemImage: "externaldrive") }
-            UpdatesSettingsView().tabItem { Label("Actualizaciones", systemImage: "arrow.triangle.2.circlepath") }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            Divider()
+            HStack {
+                Spacer()
+                Button("Cancelar", action: cancel).keyboardShortcut(.cancelAction)
+                Button("Aplicar", action: apply)
+                    .disabled(!hasChanges)
+                    .keyboardShortcut(.return, modifiers: .command)
+                Button("Guardar") {
+                    apply()
+                    dismiss()
+                }
+                .disabled(!hasChanges)
+            }
+            .padding(.horizontal, 18).padding(.vertical, 12)
+            .background(Theme.bar)
         }
-        .padding(12)
-        .frame(width: 580, height: 620)
+        .frame(width: 930, height: 700)
         .background(Theme.background)
         .tint(Theme.accent)
         .preferredColorScheme(Theme.colorScheme)
@@ -29,27 +149,50 @@ struct SettingsView: View {
 
     private var general: some View {
         Form {
+            Section {
+                Text("Apariencia").font(.title2.weight(.semibold))
+                    .listRowBackground(Color.clear)
+            }
             Section("Apariencia") {
-                Picker("Tema", selection: $settings.theme) {
+                Picker("Tema", selection: $draft.theme) {
                     ForEach(AppTheme.allCases) { theme in
                         Text(theme.title).tag(theme)
                     }
                 }
-                Text(settings.theme.detail)
+                Text(draft.theme.detail)
                     .font(.callout).foregroundStyle(.secondary)
                 HStack {
-                    Slider(value: $settings.uiScale, in: AppSettings.uiScaleRange, step: 0.1) {
+                    Slider(value: $draft.uiScale, in: AppSettings.uiScaleRange, step: 0.1) {
                         Text("Zoom de interfaz")
                     }
-                    Text("\(Int((settings.uiScale * 100).rounded())) %")
+                    Text("\(Int((draft.uiScale * 100).rounded())) %")
                         .monospacedDigit()
                         .frame(width: 52, alignment: .trailing)
-                    Button("Restablecer") { settings.resetZoom() }
-                        .disabled(settings.uiScale == 1)
+                    Button("Restablecer") { draft.uiScale = 1 }
+                        .disabled(draft.uiScale == 1)
                 }
             }
+            Section("Tamaño de fuente") {
+                HStack {
+                    Slider(value: $draft.codeFontSize, in: AppSettings.fontSizeRange, step: 1) {
+                        Text("Código")
+                    }
+                    Text("\(Int(draft.codeFontSize)) pt").frame(width: 52, alignment: .trailing)
+                    Button("Restablecer") { draft.codeFontSize = 14 }.disabled(draft.codeFontSize == 14)
+                }
+                HStack {
+                    Slider(value: $draft.resultFontSize, in: AppSettings.fontSizeRange, step: 1) {
+                        Text("Resultados")
+                    }
+                    Text("\(Int(draft.resultFontSize)) pt").frame(width: 52, alignment: .trailing)
+                    Button("Restablecer") { draft.resultFontSize = 14 }.disabled(draft.resultFontSize == 14)
+                }
+            }
+            Section("Vista previa") {
+                typographyPreview
+            }
             Section("Al iniciar") {
-                Toggle("Abrir último estado", isOn: $settings.restoreLastState)
+                Toggle("Abrir último estado", isOn: $draft.restoreLastState)
                 Text("Recupera el proyecto y las pestañas que dejaste abiertos al salir.")
                     .font(.callout).foregroundStyle(.secondary)
             }
@@ -71,4 +214,35 @@ struct SettingsView: View {
         .tint(Theme.accent)
         .preferredColorScheme(Theme.colorScheme)
     }
+    private var typographyPreview: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Label("consulta.sql", systemImage: "doc.text")
+                .font(.caption.weight(.medium)).padding(.horizontal, 12).padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading).background(Theme.bar)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("SELECT id, nombre").foregroundStyle(Color(nsColor: EditorPalette.blue))
+                Text("FROM clientes")
+                Text("WHERE activo = 1;")
+            }
+            .font(.system(size: draft.codeFontSize, design: .monospaced))
+            .frame(maxWidth: .infinity, alignment: .leading).padding(12)
+            Divider()
+            Label("Resultados", systemImage: "tablecells")
+                .font(.caption.weight(.medium)).padding(.horizontal, 12).padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading).background(Theme.bar)
+            VStack(alignment: .leading, spacing: 5) {
+                Text("id     nombre").fontWeight(.medium)
+                Text("1      María Pérez")
+                Text("2      Martín López")
+            }
+            .font(.system(size: draft.resultFontSize, design: .monospaced))
+            .frame(maxWidth: .infinity, alignment: .leading).padding(12)
+        }
+        .background(Theme.background)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay { RoundedRectangle(cornerRadius: 6).stroke(Theme.border) }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Vista previa de código y resultados")
+    }
+
 }

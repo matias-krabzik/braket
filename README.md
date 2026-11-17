@@ -62,6 +62,20 @@ Las automatizaciones que usan Codex conservan una hoja pequeña para conectar la
 
 ## MySQL y scripts SQL
 
+La herramienta **Logs** de la barra lateral abre el historial SQL del proyecto en el panel inferior.
+La pestaña **Logs** es fija, no tiene botón de cierre y comparte la barra con las pestañas de resultados.
+El editor permanece visible al consultar el historial. Guarda cada consulta
+enviada al servidor, incluidas las del explorador y la grilla, con fecha, conexión, base, duración,
+estado, filas y error. La búsqueda encuentra palabras de SQL, conexión o base; se cargan las últimas
+200 ejecuciones y el botón **Cargar 200 anteriores** permite consultar las anteriores.
+Al seleccionar una ejecución se muestra el SQL completo y se puede copiar.
+
+El historial persiste al cerrar la app en una base SQLite por ruta de proyecto, dentro de
+`~/Library/Application Support/Braket/QueryHistory/`. El botón de carpeta de Logs muestra su archivo.
+Usa WAL, índices y búsqueda FTS5; no almacena las filas de los resultados ni las credenciales de conexión.
+El texto SQL sí se conserva tal como se envió, incluidos sus valores literales. Mover el archivo del
+proyecto a otra ruta inicia un historial separado y conserva el anterior en disco.
+
 Si falla una conexión, Braket registra los intentos en `~/Library/Logs/Braket/mysql.jsonl` (hasta 512 KiB más
 una copia anterior). En **Configuración → General → Exportar diagnóstico MySQL…** se genera un archivo de texto
 que podés llevar a otra computadora para consultar la causa. También está disponible cuando falla **Probar**, en la misma hoja. Registra hora, duración, etapa y códigos de error

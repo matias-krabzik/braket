@@ -17,7 +17,7 @@ struct ConsoleView: NSViewRepresentable {
         text.isRichText = false
         text.backgroundColor = EditorPalette.background(for: theme)
         text.textColor = EditorPalette.text
-        text.font = .monospacedSystemFont(ofSize: 12 * CGFloat(uiScale), weight: .regular)
+        text.font = Theme.nativeCodeFont(scale: uiScale)
         text.textContainerInset = NSSize(width: 16, height: 12)
         text.autoresizingMask = [.width]
         text.isVerticallyResizable = true
@@ -31,7 +31,7 @@ struct ConsoleView: NSViewRepresentable {
         let _ = run.revision
         guard let text = scroll.documentView as? NSTextView else { return }
         text.backgroundColor = EditorPalette.background(for: theme)
-        let font = NSFont.monospacedSystemFont(ofSize: 12 * CGFloat(uiScale), weight: .regular)
+        let font = Theme.nativeCodeFont(scale: uiScale)
         if text.font != font {
             text.font = font
             if let storage = text.textStorage, storage.length > 0 {

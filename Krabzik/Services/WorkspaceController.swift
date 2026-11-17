@@ -40,9 +40,24 @@ final class WorkspaceController {
     var commandProject: CodeProject?
     var closingProjectURL: URL?
     var showingProjectWizard = false
+    var showingSettings = false
     let runner = ProcessRunner()
     let workflows = WorkflowController()
-    var workflowVisible = false
+    var outputVisible = false {
+        didSet { if outputVisible { workflowVisible = false } }
+    }
+    var sqlResultsDocumentID: URL?
+    var sqlResultsDocument: EditorDocument? {
+        if let selectedDocument, selectedDocument.language == "SQL" { return selectedDocument }
+        return documents.first { $0.id == sqlResultsDocumentID } ?? documents.last { $0.language == "SQL" }
+    }
+    var workflowVisible = false {
+        didSet { if workflowVisible { outputVisible = false } }
+    }
+    func showOutput() {
+        database.resultsVisible = true
+        outputVisible = true
+    }
     var workflowTabOpen = false
     var workflowRoot: URL {
         workspace?.projects.first?.directory(relativeTo: workspaceURL ?? URL(fileURLWithPath: "/")) ?? workspaceURL?
@@ -54,7 +69,7 @@ final class WorkspaceController {
         workflowVisible = true
     }
 
-    let database = DatabaseController()
+    let database: DatabaseController
     let agent: AgentController
     @ObservationIgnored let errors = ErrorCenter()
     @ObservationIgnored let docs = DocumentStore()
@@ -95,14 +110,17 @@ final class WorkspaceController {
     var selectedDocumentID: URL? {
         get { docs.selectedID }
         set { docs.selectedID = newValue
-            if newValue != nil { workflowVisible = false } }
+            if let document = docs.selected, document.language == "SQL" { sqlResultsDocumentID = document.id }
+            if newValue != nil { workflowVisible = false
+                outputVisible = false } }
     }
 
     var selectedProject: CodeProject? {
         runnableProjects.first { $0.id == selectedProjectID } ?? runnableProjects.first
     }
 
-    init(defaults: UserDefaults = .standard, settings: AppSettings? = nil) {
+    init(defaults: UserDefaults = .standard, settings: AppSettings? = nil, historyRoot: URL? = nil) {
+        database = DatabaseController(historyRoot: historyRoot)
         self.settings = settings ?? AppSettings(defaults: defaults)
         restoration = SessionRestoration(defaults: defaults)
         trust = TrustStore(defaults: defaults)
@@ -130,7 +148,10 @@ final class WorkspaceController {
             self.newPixelArtDirectory = directory
             self.newPixelArtRequest = UUID()
         }
-        files.onOpen = { [weak self] in self?.workflowVisible = false }
+        files.onOpen = { [weak self] in
+            self?.workflowVisible = false
+            self?.outputVisible = false
+        }
         // Lo que el usuario ya venía usando se considera confiable, una sola vez.
         trust.migrateIfNeeded(recentProjects: recents.urls)
     }
@@ -281,6 +302,10 @@ final class WorkspaceController {
         commandProject = nil
         connections.install([])
         session.close()
+        database.output.configure(project: nil)
+        outputVisible = false
+        database.resultsVisible = false
+        sqlResultsDocumentID = nil
         restoration.clear()
         QAProbe.action("project.close.ok", ["url": QAField.path(closing)])
         QAProbe.state("state.workspace", ["url": "", "open": QAField.count(openWorkspaceURLs.count),
@@ -299,6 +324,10 @@ final class WorkspaceController {
         if !openWorkspaceURLs.contains(normalized) { openWorkspaceURLs.append(normalized) }
         docs.closeAll()
         session.open(project, at: url, trust: decided)
+        database.output.configure(project: url)
+        outputVisible = false
+        database.resultsVisible = false
+        sqlResultsDocumentID = nil
         openWorkspaceModels[normalized] = project
         connections.install(project.connections)
         bridge.reset(for: project, at: url, trust: decided)
@@ -441,7 +470,25 @@ final class WorkspaceController {
                                                            .flatMap { connections.selected(for: $0) } != nil)])
             return
         }
+        sqlResultsDocumentID = document.id
+        outputVisible = false
+        workflowVisible = false
         database.execute(document, connection: connection)
+    }
+
+    func executeSQLFile() {
+        guard let document = selectedDocument, document.language == "SQL",
+              let connection = connections.selected(for: document), !isReadOnly else { return }
+        sqlResultsDocumentID = document.id
+        outputVisible = false
+        workflowVisible = false
+        let text = document.text
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            document.sqlExecution.error = "El archivo SQL está vacío."
+            database.resultsVisible = true
+            return
+        }
+        database.execute(document, connection: connection, queryOverride: text)
     }
 
     /// Cerrar una pestaña es de `FileCommands`; cancelar la consulta que esa pestaña

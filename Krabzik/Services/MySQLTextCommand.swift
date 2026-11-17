@@ -74,7 +74,7 @@ final class MySQLTextCommand: MySQLCommand, @unchecked Sendable {
     private(set) var results: [SQLResult] = []
     private(set) var status: MySQLProtocol.StatusFlags = []
     private(set) var reusableAfterFailure = false
-    private let sql: String
+    let sql: String
     private let started = Date()
     private var storedBytes = 0
     private let byteLimit: Int

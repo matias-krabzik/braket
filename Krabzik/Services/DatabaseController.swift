@@ -9,7 +9,7 @@ final class DatabaseController {
     var showingConnections = false
     var editingConnection: DatabaseConnection?
     var states: [UUID: DatabaseState] = [:]
-    var resultsVisible = true
+    var resultsVisible = false
     var browserShowsDatabases = false
     let schema = SQLSchemaStore()
     /// Cómo se pide la confirmación de escritura, con el destino ya redactado. Es un punto
@@ -37,7 +37,15 @@ final class DatabaseController {
     var confirmCloseActiveConnections: () -> Bool = {
         DatabaseController.closeConnectionsAlert().runModal() == .alertFirstButtonReturn
     }
-    @ObservationIgnored let client = MySQLClient()
+    let output: SQLOutputController
+    @ObservationIgnored let client: MySQLClient
+
+    init(historyRoot: URL? = nil) {
+        let output = SQLOutputController(root: historyRoot)
+        self.output = output
+        client = MySQLClient(historyProvider: { output.store })
+    }
+
     @ObservationIgnored private var connectionTasks: [UUID: Task<Void, Never>] = [:]
 
     func state(_ id: UUID) -> DatabaseState {

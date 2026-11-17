@@ -32,6 +32,7 @@ final class SQLResultDraft {
     var inserted: [[SQLCellValue]] = []
     private var insertedOriginals: [[SQLCellValue]] = []
     var selectedCell: SQLCell?
+    var scrollOrigin: NSPoint = .zero
     var isEditingCell = false
     var canDeleteSelected: Bool {
         guard let cell = selectedCell else { return false }

@@ -15,6 +15,19 @@ import SwiftUI
     #endif
 
     static func zoom(_ size: CGFloat) -> CGFloat { size * CGFloat(settings.uiScale) }
+    // Las APIs del sistema eligen San Francisco y SF Mono sin depender de nombres de fuentes instaladas.
+    static func interfaceFont(_ size: CGFloat = 13, weight: Font.Weight = .regular) -> Font {
+        .system(size: zoom(size), weight: weight, design: .default)
+    }
+
+    static func codeFont(_ size: CGFloat = 14) -> Font {
+        .system(size: size * CGFloat(settings.resultFontScale), design: .monospaced)
+    }
+
+    static func nativeCodeFont(scale: Double = 1, weight: NSFont.Weight = .regular) -> NSFont {
+        .monospacedSystemFont(ofSize: 14 * CGFloat(scale), weight: weight)
+    }
+
     static var colorScheme: ColorScheme { settings.theme == .light ? .light : .dark }
     static var surfaceInk: Color { settings.theme == .light ? .black : .white }
     static var background: Color { Color(nsColor: EditorPalette.background) }

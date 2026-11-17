@@ -24,7 +24,7 @@ struct WelcomeView: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Braket")
-                .font(.system(size: Theme.zoom(23), weight: .semibold, design: .rounded))
+                .font(.system(size: Theme.zoom(23), weight: .semibold))
                 .padding(.horizontal, 8)
                 .padding(.bottom, 28)
             VStack(spacing: 10) {

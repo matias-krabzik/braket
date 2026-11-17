@@ -34,6 +34,39 @@ final class SQLGridTable: NSTableView {
 final class SQLGridField: NSTextField {
     var rowIndex = 0
     var columnIndex = 0
+    var gridFillColor: NSColor = .clear
+
+    override func draw(_ dirtyRect: NSRect) {
+        gridFillColor.setFill()
+        bounds.fill()
+        super.draw(dirtyRect)
+    }
+}
+
+/// AppKit keeps legacy scrollers in the layout for subclasses that do not opt in to overlay scrollers.
+private final class SQLGridScroller: NSScroller {}
+
+private final class SQLGridScrollView: NSScrollView {
+    override func tile() {
+        super.tile()
+        let gutter = NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
+        var viewport = contentView.frame
+        viewport.size.width = min(viewport.width, max(0, bounds.width - gutter))
+        viewport.size.height = min(viewport.height, max(0, bounds.height - gutter))
+        contentView.frame = viewport
+    }
+}
+
+private final class SQLGridTextCell: NSTextFieldCell {
+    private func centeredRect(in bounds: NSRect) -> NSRect {
+        let content = super.drawingRect(forBounds: bounds)
+        let fontHeight = ceil((font?.ascender ?? 0) - (font?.descender ?? 0) + (font?.leading ?? 0)) + 2
+        let height = min(content.height, fontHeight)
+        return NSRect(x: content.minX + 4, y: bounds.midY - height / 2,
+                      width: max(0, content.width - 8), height: height)
+    }
+
+    override func drawingRect(forBounds rect: NSRect) -> NSRect { centeredRect(in: rect) }
 }
 
 struct SQLResultGrid: NSViewRepresentable {
@@ -41,15 +74,21 @@ struct SQLResultGrid: NSViewRepresentable {
     let scale: Double
     let theme: AppTheme
     func makeCoordinator() -> Coordinator { Coordinator(draft: draft) }
+    static func dismantleNSView(_ scroll: NSScrollView, coordinator: Coordinator) {
+        coordinator.draft.scrollOrigin = scroll.contentView.bounds.origin
+    }
     func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSScrollView()
+        let scroll = SQLGridScrollView()
         scroll.hasVerticalScroller = true
         scroll.hasHorizontalScroller = true
-        scroll.autohidesScrollers = true
+        scroll.verticalScroller = SQLGridScroller()
+        scroll.horizontalScroller = SQLGridScroller()
+        scroll.scrollerStyle = .legacy
+        scroll.autohidesScrollers = false
         let table = SQLGridTable()
         table.style = .plain
         table.columnAutoresizingStyle = .noColumnAutoresizing
-        table.intercellSpacing = NSSize(width: 12, height: 0)
+        table.intercellSpacing = .zero
         table.gridStyleMask = [.solidVerticalGridLineMask, .solidHorizontalGridLineMask]
         table.gridColor = .separatorColor.withAlphaComponent(0.2)
         table.delegate = context.coordinator
@@ -74,6 +113,7 @@ struct SQLResultGrid: NSViewRepresentable {
         let changedResult = coordinator.draft.result.id != draft.result.id || table.tableColumns.isEmpty
         coordinator.draft = draft
         coordinator.scale = scale
+        coordinator.theme = theme
         // Observe the pending values even while the table owns its field editor.
         _ = draft.changes
         _ = draft.inserted
@@ -82,7 +122,7 @@ struct SQLResultGrid: NSViewRepresentable {
         _ = draft.reason
         _ = draft.selectedCell
         table.backgroundColor = EditorPalette.background(for: theme)
-        table.rowHeight = 28 * scale
+        table.rowHeight = 27 * scale
         if changedResult {
             for column in table.tableColumns { table.removeTableColumn(column) }
             for (index, name) in draft.result.columns.enumerated() {
@@ -95,10 +135,11 @@ struct SQLResultGrid: NSViewRepresentable {
             }
         }
         for (index, column) in table.tableColumns.enumerated() {
-            let font = NSFont.monospacedSystemFont(ofSize: 12 * scale, weight: .medium)
+            let font = Theme.nativeCodeFont(scale: scale, weight: .bold)
             column.headerCell.font = font
-            let initial = (column.title as NSString).size(withAttributes: [.font: font]).width + 28 * scale
-            let width = draft.widths[index].map { $0 * scale } ?? max(54 * scale, initial)
+            let width = draft.widths[index].map { $0 * scale }
+                ?? Self.preferredWidth(for: index, in: draft, font: font, scale: scale)
+            if coordinator.editing && coordinator.editingColumn == index { continue }
             if abs(column.width - width) > 0.5 { coordinator.settingWidth = true
             column.width = width
             coordinator.settingWidth = false }
@@ -111,14 +152,38 @@ struct SQLResultGrid: NSViewRepresentable {
             }
             coordinator.insertedCount = draft.inserted.count
         }
+        if !coordinator.restoredScroll {
+            coordinator.restoredScroll = true
+            let origin = draft.scrollOrigin
+            DispatchQueue.main.async {
+                scroll.contentView.scroll(to: origin)
+                scroll.reflectScrolledClipView(scroll.contentView)
+            }
+        }
+    }
+
+    /// El encabezado y las primeras filas determinan el ancho inicial; el usuario puede ajustarlo después.
+    static func preferredWidth(for index: Int, in draft: SQLResultDraft, font: NSFont, scale: Double) -> CGFloat {
+        let heading = (draft.result.columns[index] as NSString).size(withAttributes: [.font: font]).width
+        let values = draft.result.rows.prefix(100).compactMap { row -> CGFloat? in
+            guard index < row.count else { return nil }
+            return ((row[index] ?? "NULL") as NSString).size(withAttributes: [.font: font]).width
+        }
+        return min(420 * scale, max(90 * scale, (max(heading, values.max() ?? 0) + 28 * scale)))
     }
 
     @MainActor final class Coordinator: NSObject, NSTableViewDelegate, NSTableViewDataSource, NSTextFieldDelegate {
         var draft: SQLResultDraft
         var scale = 1.0
+        var theme: AppTheme = .graphite
         weak var table: SQLGridTable?
         var editing = false
+        var editingColumn: Int?
+        var editingOriginalWidth: CGFloat?
+        weak var editingTextView: NSTextView?
+        var originalEditorInset: NSSize?
         var settingWidth = false
+        var restoredScroll = false
         var insertedCount = 0
         private func modelRow(_ row: Int) -> Int {
             row < draft.inserted.count ? draft.rowCount - 1 - row : row - draft.inserted.count
@@ -133,7 +198,11 @@ struct SQLResultGrid: NSViewRepresentable {
             guard let column = Int(tableColumn?.identifier.rawValue ?? ""), row < draft.rowCount else { return nil }
             let row = modelRow(row)
             let identifier = NSUserInterfaceItemIdentifier("value")
-            let field = (tableView.makeView(withIdentifier: identifier, owner: nil) as? SQLGridField) ?? SQLGridField()
+            let field = (tableView.makeView(withIdentifier: identifier, owner: nil) as? SQLGridField) ?? {
+                let field = SQLGridField()
+                field.cell = SQLGridTextCell(textCell: "")
+                return field
+            }()
             let value = draft.value(row: row, column: column)
             field.identifier = identifier
             field.rowIndex = row
@@ -141,15 +210,20 @@ struct SQLResultGrid: NSViewRepresentable {
             field.delegate = self
             field.stringValue = value.display
             field.isBordered = false
-            field.drawsBackground = draft.selectedCell == SQLCell(row: row, column: column)
-            field.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.16)
+            field.drawsBackground = false
+            field.gridFillColor = draft.selectedCell == SQLCell(row: row, column: column)
+                ? NSColor.controlAccentColor.withAlphaComponent(0.23)
+                : (visibleRow(row).isMultiple(of: 2) ? EditorPalette.background(for: theme)
+                   : EditorPalette.background(for: theme).blended(withFraction: 0.04, of: .labelColor)
+                     ?? EditorPalette.background(for: theme))
             field.isEditable = false
             field.isSelectable = false
-            field.font = .monospacedSystemFont(ofSize: 12 * scale, weight: .regular)
+            field.font = Theme.nativeCodeFont(scale: scale)
             let pending = draft.changes[SQLCell(row: row, column: column)] != nil || row >= draft.result.rows.count
             field.textColor = draft.deleted.contains(row) ? .systemRed : pending ? .systemOrange
                 : value == .null || value == .serverDefault ? .tertiaryLabelColor : EditorPalette.text
             field.lineBreakMode = .byTruncatingTail
+            field.usesSingleLineMode = true
             field.toolTip = value.display
             return field
         }
@@ -174,6 +248,19 @@ struct SQLResultGrid: NSViewRepresentable {
                   let field = sender.view(atColumn: column, row: visibleRow(row), makeIfNecessary: true) as? SQLGridField else { return }
             field.isEditable = true
             field.isSelectable = true
+            if sender.tableColumns.indices.contains(column) {
+                let tableColumn = sender.tableColumns[column]
+                let fullWidth = (field.stringValue as NSString).size(withAttributes: [
+                    .font: field.font ?? Theme.nativeCodeFont(scale: scale)
+                ]).width + 32 * scale
+                if fullWidth > tableColumn.width {
+                    editingOriginalWidth = tableColumn.width
+                    editingColumn = column
+                    settingWidth = true
+                    tableColumn.width = min(tableColumn.maxWidth, fullWidth)
+                    settingWidth = false
+                }
+            }
             if draft.value(row: row, column: column) == .null || draft.value(row: row, column: column) == .serverDefault {
                 field.stringValue = ""
             }
@@ -181,6 +268,15 @@ struct SQLResultGrid: NSViewRepresentable {
             editing = true
             SQLGridTable.editingField = field
             field.selectText(nil)
+            if let editor = field.currentEditor() as? NSTextView {
+                editingTextView = editor
+                originalEditorInset = editor.textContainerInset
+                let font = field.font ?? Theme.nativeCodeFont(scale: scale)
+                let lineHeight = ceil(font.ascender - font.descender + font.leading)
+                editor.textContainerInset = NSSize(width: editor.textContainerInset.width,
+                                                   height: max(0, (field.bounds.height - lineHeight) / 2))
+            }
+            sender.scrollColumnToVisible(column)
         }
         func controlTextDidEndEditing(_ notification: Notification) {
             guard let field = notification.object as? SQLGridField, editing else { return }
@@ -188,7 +284,9 @@ struct SQLResultGrid: NSViewRepresentable {
             draft.endEditing(commit: .text(field.stringValue))
             editing = false
             SQLGridTable.editingField = nil
+            restoreEditorInset()
             field.isEditable = false
+            restoreEditingWidth()
             table?.reloadData()
         }
         func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
@@ -200,11 +298,28 @@ struct SQLResultGrid: NSViewRepresentable {
                 editing = false
                 draft.endEditing()
                 SQLGridTable.editingField = nil
+                restoreEditorInset()
+                restoreEditingWidth()
                 table?.window?.makeFirstResponder(table)
                 table?.reloadData()
                 return true
             }
             return false
+        }
+        private func restoreEditorInset() {
+            if let inset = originalEditorInset { editingTextView?.textContainerInset = inset }
+            editingTextView = nil
+            originalEditorInset = nil
+        }
+        private func restoreEditingWidth() {
+            defer { editingColumn = nil
+            editingOriginalWidth = nil }
+            guard let index = editingColumn, let width = editingOriginalWidth,
+                  let table, table.tableColumns.indices.contains(index) else { return }
+            let column = table.tableColumns[index]
+            settingWidth = true
+            column.width = width
+            settingWidth = false
         }
         func menu(row: Int, column: Int) -> NSMenu {
             let row = modelRow(row)

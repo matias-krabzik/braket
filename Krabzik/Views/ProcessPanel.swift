@@ -34,12 +34,12 @@ struct ProcessPanel: View {
                 if controller.workflowVisible {
                     ScrollView {
                         Text(controller.workflows.log.isEmpty ? "Todavía no se ejecutó este flujo." : controller.workflows.log)
-                            .font(.system(size: Theme.zoom(11), design: .monospaced)).textSelection(.enabled)
+                            .font(Theme.codeFont()).textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading).padding(12)
                     }
                 } else if let project = controller.selectedProject, let run = controller.runner.runs[project.id] {
                     ConsoleView(run: run, theme: Theme.settings.theme,
-                                uiScale: Theme.settings.uiScale).id(project.id)
+                                uiScale: Theme.settings.resultFontScale).id(project.id)
                 } else { Theme.background }
             }
         }

@@ -587,6 +587,22 @@ final class GlobalConnectionTests: XCTestCase {
         XCTAssertNil(restored.selected(for: one))
     }
 
+    func testRecentConnectionsKeepOnlyThreeSelectionsInOrder() throws {
+        let (defaults, session, database) = environment()
+        let profiles = (1...5).map { DatabaseConnection(name: "Conexión \($0)") }
+        defaults.set(try JSONEncoder().encode(profiles), forKey: ConnectionStore.profilesKey)
+        let store = ConnectionStore(session: session, database: database, defaults: defaults)
+        let document = try EditorDocument(url: URL(fileURLWithPath: "/tmp/recents.sql"),
+                                          data: Data("SELECT 1".utf8))
+
+        for profile in profiles { store.select(profile.id, for: document) }
+        XCTAssertEqual(store.recentProfiles.map(\.id), [profiles[4].id, profiles[3].id, profiles[2].id])
+
+        store.select(profiles[3].id, for: document)
+        let restored = ConnectionStore(session: session, database: database, defaults: defaults)
+        XCTAssertEqual(restored.recentProfiles.map(\.id), [profiles[3].id, profiles[4].id, profiles[2].id])
+    }
+
     func testTrustedLegacyProfilesMigrateOnceWithoutChangingCredentialIdentity() throws {
         let (defaults, session, database) = environment()
         let connection = DatabaseConnection(name: "Importada")

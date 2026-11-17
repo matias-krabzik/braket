@@ -82,11 +82,11 @@ final class FileTreeCell: NSTableCellView {
             if icon.image?.isTemplate == true { icon.contentTintColor = .labelColor }
         }
         let label = NSTextField(labelWithString: node.name)
-        label.font = .systemFont(ofSize: 12, weight: node.project == nil ? .regular : .medium)
+        label.font = .systemFont(ofSize: 13, weight: node.project == nil ? .regular : .medium)
         label.lineBreakMode = .byTruncatingMiddle
         label.textColor = NSColor.labelColor
         let detail = NSTextField(labelWithString: node.project?.kind.rawValue ?? "")
-        detail.font = .systemFont(ofSize: 10)
+        detail.font = .systemFont(ofSize: 12)
         detail.textColor = .tertiaryLabelColor
         detail.setContentCompressionResistancePriority(.required, for: .horizontal)
         let iconBackground = NSView()

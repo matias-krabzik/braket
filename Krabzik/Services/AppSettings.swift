@@ -27,6 +27,7 @@ enum AppTheme: String, CaseIterable, Identifiable, Codable {
 final class AppSettings {
     static let shared = AppSettings()
     static let uiScaleRange = 0.8...1.5
+    static let fontSizeRange = 10.0...24.0
 
     var theme: AppTheme {
         didSet { defaults.set(theme.rawValue, forKey: "appearanceTheme") }
@@ -43,10 +44,22 @@ final class AppSettings {
     var uiScale: Double {
         didSet { defaults.set(uiScale, forKey: "uiScale") }
     }
+    var codeFontSize: Double {
+        didSet { defaults.set(codeFontSize, forKey: "codeFontSize") }
+    }
+    var resultFontSize: Double {
+        didSet { defaults.set(resultFontSize, forKey: "resultFontSize") }
+    }
+    var codeFontScale: Double { codeFontSize / 14 }
+    var resultFontScale: Double { resultFontSize / 14 }
     @ObservationIgnored private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        let savedCodeSize = defaults.object(forKey: "codeFontSize") as? Double ?? 14
+        let savedResultSize = defaults.object(forKey: "resultFontSize") as? Double ?? 14
+        codeFontSize = savedCodeSize.isFinite ? min(24, max(10, savedCodeSize)) : 14
+        resultFontSize = savedResultSize.isFinite ? min(24, max(10, savedResultSize)) : 14
         theme = AppTheme(rawValue: defaults.string(forKey: "appearanceTheme") ?? "") ?? .graphite
         restoreLastState = defaults.object(forKey: "restoreLastState") as? Bool ?? true
         let savedZoom = defaults.object(forKey: "markdownPreviewZoom") as? Double ?? 1

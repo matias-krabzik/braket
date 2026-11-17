@@ -46,10 +46,13 @@ actor MySQLClient {
     /// Inyectable para poder probar el camino de fallo sin tocar el llavero real.
     private let readPassword: @Sendable (DatabaseConnection) throws -> String
     private let diagnostics: MySQLDiagnostics
+    private let historyProvider: @MainActor @Sendable () -> SQLHistoryStore?
+    private var jobHistory: [UUID: SQLHistoryStore] = [:]
 
-    init(diagnostics: MySQLDiagnostics = .shared, readPassword: @escaping @Sendable (DatabaseConnection) throws -> String = {
-        try CredentialStore.read(for: $0)
-    }) {
+    init(diagnostics: MySQLDiagnostics = .shared,
+         readPassword: @escaping @Sendable (DatabaseConnection) throws -> String = { try CredentialStore.read(for: $0) },
+         historyProvider: @escaping @MainActor @Sendable () -> SQLHistoryStore? = { nil }) {
+        self.historyProvider = historyProvider
         self.readPassword = readPassword
         self.diagnostics = diagnostics
     }
@@ -150,14 +153,15 @@ actor MySQLClient {
         return connection
     }
 
-    private func session(_ config: DatabaseConnection, password: String) async throws -> Session {
+    private func session(_ config: DatabaseConnection, password: String, history: SQLHistoryStore?) async throws -> Session {
         if let existing = sessions[config.id], existing.configuration == config, !existing.connection.isClosed { return existing }
         let token = epoch
         let connection = try await open(config, password: password)
         do {
             guard token == epoch else { throw CancellationError() }
             let command = MySQLTextCommand(sql: "SELECT CONNECTION_ID(), DATABASE()", statement: 0, line: 1)
-            try await connection.send(command, logger: connection.logger).get()
+            try await sendLogged(command, on: connection, configuration: config, database: config.database,
+                                 history: history, source: "Sesión")
             let result = try await connection.eventLoop.submit { (command.results, command.status) }.get()
             guard let values = result.0.first?.rows.first, let idText = values.first ?? nil, let serverID = UInt64(idText) else {
                 throw DatabaseFailure("No se pudo identificar la sesión MySQL.")
@@ -176,15 +180,18 @@ actor MySQLClient {
     func connect(_ config: DatabaseConnection, password: String) async throws -> DatabaseSessionInfo {
         guard busy.insert(config.id).inserted else { throw DatabaseFailure("La conexión está ocupada.") }
         defer { busy.remove(config.id) }
-        let value = try await session(config, password: password)
+        let value = try await session(config, password: password, history: await historyProvider())
         return .init(database: value.database, inTransaction: value.flags.contains(.SERVER_STATUS_IN_TRANS),
                      noBackslashEscapes: value.flags.contains(.SERVER_STATUS_NO_BACKSLASH_ESCAPES))
     }
 
     func test(_ config: DatabaseConnection, password: String) async throws {
+        let history = await historyProvider()
         let connection = try await open(config, password: password)
         do {
-            _ = try await connection.simpleQuery("SELECT 1").get()
+            let command = MySQLTextCommand(sql: "SELECT 1", statement: 0, line: 1)
+            try await sendLogged(command, on: connection, configuration: config, database: config.database,
+                                 history: history, source: "Prueba de conexión")
             try await connection.close().get()
         }
         catch {
@@ -200,14 +207,17 @@ actor MySQLClient {
         try Task.checkCancellation()
         let id = configuration.id
         guard busy.insert(id).inserted else { throw DatabaseFailure("La conexión está ocupada.") }
+        let history = await historyProvider()
         jobs[operation] = id
+        jobHistory[operation] = history
         defer {
             busy.remove(id)
             jobs.removeValue(forKey: operation)
+            jobHistory.removeValue(forKey: operation)
             cancelled.remove(operation)
             timedOut.remove(operation)
         }
-        var session = try await session(configuration, password: password)
+        var session = try await session(configuration, password: password, history: history)
         if cancelled.contains(operation) || Task.isCancelled {
             await disconnect(id)
             throw CancellationError()
@@ -236,7 +246,8 @@ actor MySQLClient {
             let command = MySQLTextCommand(sql: pagination?.query ?? statement.text, statement: statementNumber, line: statement.line,
                                            byteLimit: min(remainingBytes, 4_000_000), resultLimit: 200 - resultCount)
             do {
-                try await session.connection.send(command, logger: session.connection.logger).get()
+                try await sendLogged(command, on: session.connection, configuration: configuration, database: pending.database,
+                                     history: history, source: "Consulta", operation: operation)
                 let captured = try await session.connection.eventLoop.submit { (command.results, command.status) }.get()
                 if timedOut.contains(operation) { throw DatabaseFailure("La consulta superó el límite de \(timeoutSeconds) segundos.") }
                 if cancelled.contains(operation) { throw CancellationError() }
@@ -248,7 +259,8 @@ actor MySQLClient {
                    captured.0.count == 1, captured.0[0].rowCount > SQLPage.size || pagination.index > 0 {
                     let count = MySQLTextCommand(sql: countSQL, statement: 0, line: 1)
                     do {
-                        try await session.connection.send(count, logger: session.connection.logger).get()
+                        try await sendLogged(count, on: session.connection, configuration: configuration, database: pending.database,
+                                             history: history, source: "Paginación", operation: operation)
                         let value = try await session.connection.eventLoop.submit { count.results.first?.rows.first?.first }.get()
                         totalRows = value.flatMap { $0 }.flatMap(Int.init)
                     } catch {
@@ -312,9 +324,38 @@ actor MySQLClient {
                      noBackslashEscapes: session.flags.contains(.SERVER_STATUS_NO_BACKSLASH_ESCAPES))
     }
 
-    private func read(_ sql: String, on connection: MySQLConnection) async throws -> SQLResult {
+    private func sendLogged(_ command: MySQLTextCommand, on connection: MySQLConnection,
+                            configuration: DatabaseConnection, database: String, history: SQLHistoryStore?,
+                            source: String, operation: UUID? = nil, deadline: NIODeadline? = nil) async throws {
+        let token = await history?.begin(sql: command.sql, configuration: configuration, database: database, source: source)
+        let started = ContinuousClock.now
+        do {
+            try await connection.send(command, logger: connection.logger).get()
+            let totals = try await connection.eventLoop.submit {
+                (command.results.reduce(0) { $0 + $1.rowCount }, command.results.reduce(UInt64(0)) { $0 &+ $1.affectedRows })
+            }.get()
+            if let token {
+                await history?.finish(token, status: "success", elapsed: Double(Self.milliseconds(since: started)) / 1000,
+                                      rows: totals.0, affected: totals.1)
+            }
+        } catch {
+            let timeout = operation.map { timedOut.contains($0) } == true || deadline.map { NIODeadline.now() >= $0 } == true
+            let cancelled = Task.isCancelled || operation.map { self.cancelled.contains($0) } == true
+            if let token {
+                await history?.finish(token, status: timeout ? "timeout" : cancelled ? "cancelled" : "error",
+                                      elapsed: Double(Self.milliseconds(since: started)) / 1000,
+                                      error: timeout ? "La consulta superó el tiempo límite." : Self.message(error))
+            }
+            throw error
+        }
+    }
+
+    private func read(_ sql: String, on connection: MySQLConnection, configuration: DatabaseConnection,
+                      history: SQLHistoryStore?, source: String = "Grilla", deadline: NIODeadline? = nil) async throws -> SQLResult {
         let command = MySQLTextCommand(sql: sql, statement: 0, line: 1)
-        try await connection.send(command, logger: connection.logger).get()
+        try await sendLogged(command, on: connection, configuration: configuration,
+                             database: sessions[configuration.id]?.database ?? configuration.database,
+                             history: history, source: source, deadline: deadline)
         let results = try await connection.eventLoop.submit { command.results }.get()
         guard let result = results.first, !result.truncated else {
             throw DatabaseFailure("La estructura supera el límite de lectura; seleccioná menos bases.")
@@ -323,7 +364,8 @@ actor MySQLClient {
     }
 
     /// A metadata timeout closes only its private socket, never the editor's SQL session.
-    private func readMetadata(_ sql: String, on connection: MySQLConnection,
+    private func readMetadata(_ sql: String, on connection: MySQLConnection, configuration: DatabaseConnection,
+                              history: SQLHistoryStore?,
                               timeoutMilliseconds: Int64 = 15_000) async throws -> SQLResult {
         try Task.checkCancellation()
         let deadline = NIODeadline.now() + .milliseconds(timeoutMilliseconds)
@@ -332,7 +374,8 @@ actor MySQLClient {
         defer { timeout.cancel() }
         do {
             return try await withTaskCancellationHandler {
-                let result = try await read(sql, on: connection)
+                let result = try await read(sql, on: connection, configuration: configuration,
+                                            history: history, source: "Explorador", deadline: deadline)
                 try Task.checkCancellation()
                 return result
             } onCancel: { channel.close(promise: nil) }
@@ -348,9 +391,11 @@ actor MySQLClient {
 
     func metadataQuery(_ sql: String, configuration: DatabaseConnection, password: String,
                        timeoutMilliseconds: Int64 = 15_000) async throws -> SQLResult {
+        let history = await historyProvider()
         let connection = try await open(configuration, password: password)
         do {
-            let result = try await readMetadata(sql, on: connection, timeoutMilliseconds: timeoutMilliseconds)
+            let result = try await readMetadata(sql, on: connection, configuration: configuration, history: history,
+                                                timeoutMilliseconds: timeoutMilliseconds)
             try? await connection.close().get()
             return result
         } catch {
@@ -366,9 +411,12 @@ actor MySQLClient {
 
     func schema(_ config: DatabaseConnection, password: String, databases: [String],
                 progress: @escaping @Sendable (SQLSchemaProgress) async -> Void = { _ in }) async throws -> SQLSchemaSnapshot {
+        let history = await historyProvider()
         let connection = try await open(config, password: password)
         do {
-            let loader = SQLSchemaLoader { sql in try await self.readMetadata(sql, on: connection) }
+            let loader = SQLSchemaLoader { sql in
+                try await self.readMetadata(sql, on: connection, configuration: config, history: history)
+            }
             let snapshot = try await loader.load(connection: config, databases: databases, progress: progress)
             try? await connection.close().get()
             return snapshot
@@ -378,17 +426,20 @@ actor MySQLClient {
         }
     }
 
-    private func describe(_ table: SQLSchemaTable, on connection: MySQLConnection) async throws -> SQLSchemaTable {
+    private func describe(_ table: SQLSchemaTable, on connection: MySQLConnection, configuration: DatabaseConnection,
+                          history: SQLHistoryStore?) async throws -> SQLSchemaTable {
         var table = table
         let predicate = " WHERE TABLE_SCHEMA = " + SQLValue.literal(table.database) + " AND TABLE_NAME = " + SQLValue.literal(table.name)
         let columns = try await read("SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, EXTRA "
-                                     + "FROM INFORMATION_SCHEMA.COLUMNS" + predicate + " ORDER BY ORDINAL_POSITION", on: connection)
+                                     + "FROM INFORMATION_SCHEMA.COLUMNS" + predicate + " ORDER BY ORDINAL_POSITION", on: connection,
+                                     configuration: configuration, history: history)
         table.columns = columns.rows.compactMap { row in
             guard row.count == 5, let name = row[0], let type = row[1] else { return nil }
             return SQLSchemaColumn(name: name, type: type, nullable: row[2] == "YES", defaultValue: row[3], extra: row[4] ?? "")
         }
         let keys = try await read("SELECT INDEX_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.STATISTICS" + predicate
-                                  + " AND NON_UNIQUE = 0 ORDER BY INDEX_NAME, SEQ_IN_INDEX", on: connection)
+                                  + " AND NON_UNIQUE = 0 ORDER BY INDEX_NAME, SEQ_IN_INDEX", on: connection, configuration: configuration,
+                                  history: history)
         var grouped: [String: [String]] = [:]
         var invalid: Set<String> = []
         for row in keys.rows where row.count == 2 {
@@ -414,40 +465,41 @@ actor MySQLClient {
                password: String) async throws {
         guard !mutations.isEmpty, busy.insert(configuration.id).inserted else { throw DatabaseFailure("La conexión está ocupada.") }
         defer { busy.remove(configuration.id) }
-        let session = try await session(configuration, password: password)
+        let history = await historyProvider()
+        let session = try await session(configuration, password: password, history: history)
         guard !session.flags.contains(.SERVER_STATUS_IN_TRANS), session.flags.contains(.SERVER_STATUS_AUTOCOMMIT) else {
             throw DatabaseFailure("Finalizá la transacción del script y activá autocommit antes de enviar cambios de la grilla.")
         }
-        let fresh = try await describe(table, on: session.connection)
+        let fresh = try await describe(table, on: session.connection, configuration: configuration, history: history)
         guard fresh.columns == table.columns, fresh.uniqueKeys == table.uniqueKeys else {
             throw DatabaseFailure("La estructura cambió. Actualizá la consulta antes de editar.")
         }
         let engine = try await read("SELECT ENGINE FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = "
                                     + SQLValue.literal(table.database) + " AND TABLE_NAME = " + SQLValue.literal(table.name),
-                                    on: session.connection)
+                                    on: session.connection, configuration: configuration, history: history)
         guard (engine.rows.first?.first ?? nil)?.uppercased() == "INNODB" else {
             throw DatabaseFailure("La edición requiere una tabla InnoDB.")
         }
-        _ = try await read("START TRANSACTION", on: session.connection)
+        _ = try await read("START TRANSACTION", on: session.connection, configuration: configuration, history: history)
         do {
             for mutation in mutations {
                 if let verification = mutation.verificationSQL {
-                    let matching = try await read(verification, on: session.connection)
+                    let matching = try await read(verification, on: session.connection, configuration: configuration, history: history)
                     guard matching.rows.count == 1 else {
                         throw DatabaseFailure("La fila cambió o ya no existe. Se revirtieron los cambios.")
                     }
                 }
-                let result = try await read(mutation.sql, on: session.connection)
+                let result = try await read(mutation.sql, on: session.connection, configuration: configuration, history: history)
                 guard (result.affectedRows == 1 || (mutation.allowsUnchanged && result.affectedRows == 0)), result.warnings == 0 else {
                     throw DatabaseFailure("La fila cambió, ya no existe o el servidor rechazó un valor. Se revirtieron los cambios.")
                 }
             }
         } catch {
-            do { _ = try await read("ROLLBACK", on: session.connection) }
+            do { _ = try await read("ROLLBACK", on: session.connection, configuration: configuration, history: history) }
             catch { await disconnect(configuration.id) }
             throw error
         }
-        do { _ = try await read("COMMIT", on: session.connection) }
+        do { _ = try await read("COMMIT", on: session.connection, configuration: configuration, history: history) }
         catch {
             await disconnect(configuration.id)
             throw DatabaseFailure("No se pudo confirmar la respuesta de COMMIT. Consultá los datos antes de volver a enviar.")
@@ -470,6 +522,7 @@ actor MySQLClient {
         // Cerrar el socket no interrumpe de forma fiable una consulta larga en el
         // servidor. Una segunda conexión corta termina solo esta sesión, que es de
         // la app. La contraseña se relee del llavero: la sesión no la guarda.
+        let history = jobHistory[operation]
         var outcome = CancelOutcome.killed
         do {
             let configuration = value.configuration
@@ -479,7 +532,9 @@ actor MySQLClient {
             }.value
             let control = try await open(configuration, password: password)
             do {
-                _ = try await control.simpleQuery("KILL CONNECTION \(value.serverID)").get()
+                let command = MySQLTextCommand(sql: "KILL CONNECTION \(value.serverID)", statement: 0, line: 1)
+                try await sendLogged(command, on: control, configuration: configuration, database: value.database,
+                                     history: history, source: "Cancelación")
             } catch {
                 Log.mysql.error("KILL CONNECTION falló: \(Self.message(error), privacy: .private)")
                 outcome = .localOnly(reason: Self.message(error))

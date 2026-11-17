@@ -354,8 +354,23 @@ struct ConnectionSheet: View {
 struct SQLToolbar: View {
     let document: EditorDocument
     @Bindable var controller: WorkspaceController
+    @State private var processingFlash = false
+    @State private var showingConnectionMenu = false
+    @State private var showingDatabaseMenu = false
+    private var selectorWidth: CGFloat { Theme.zoom(220) }
 
     private var connection: DatabaseConnection? { controller.connections.selected(for: document) }
+    private var statusColor: Color {
+        guard let connection else { return Color(red: 0.27, green: 0.29, blue: 0.32) }
+        if document.sqlExecution.isRunning { return processingFlash ? .orange : .green }
+        return controller.database.state(connection.id).status == .connected
+            ? .green : Color(red: 0.27, green: 0.29, blue: 0.32)
+    }
+    private var statusDescription: String {
+        guard let connection else { return "Sin conexión seleccionada" }
+        if document.sqlExecution.isRunning { return "Procesando consulta" }
+        return controller.database.state(connection.id).connectionLabel
+    }
     private var canExecute: Bool {
         guard let connection, !controller.isReadOnly else { return false }
         let state = controller.database.states[connection.id]
@@ -363,87 +378,252 @@ struct SQLToolbar: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 12) {
-                Image(systemName: "externaldrive").foregroundStyle(Theme.accent)
-                Picker("Conexión del script", selection: Binding(get: { connection?.id },
-                                                                 set: { controller.connections.select($0, for: document) })) {
-                        Text("Elegir conexión…").tag(nil as UUID?)
-                        ForEach(controller.connections.profiles) { profile in
-                            Text(profile.name).tag(Optional(profile.id))
+        VStack(spacing: 0) {
+        HStack(spacing: 12) {
+                HStack(spacing: 0) {
+                    Button { showingConnectionMenu = true } label: {
+                        HStack(spacing: Theme.zoom(8)) {
+                            Image(systemName: "externaldrive").foregroundStyle(Theme.accent)
+                                .overlay(alignment: .bottomTrailing) {
+                                    Circle().fill(statusColor).frame(width: Theme.zoom(8), height: Theme.zoom(8))
+                                        .overlay { Circle().strokeBorder(Theme.bar, lineWidth: Theme.zoom(1.5)) }
+                                        .offset(x: Theme.zoom(3), y: Theme.zoom(3))
+                                }
+                            Text(connection?.name ?? "Elegir conexión…")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .lineLimit(1).truncationMode(.middle)
+                            Image(systemName: "chevron.up.chevron.down").font(.system(size: Theme.zoom(9)))
+                                .foregroundStyle(.secondary)
                         }
-                    }.labelsHidden().pickerStyle(.menu).frame(maxWidth: 240)
-                    .disabled(document.sqlExecution.isRunning)
-                Button { controller.database.showingConnections = true } label: {
-                    Image(systemName: "slider.horizontal.3")
-                }.help("Administrar conexiones globales").accessibilityLabel("Administrar conexiones")
+                        .padding(.leading, Theme.zoom(10)).padding(.trailing, Theme.zoom(7))
+                        .frame(width: selectorWidth - Theme.zoom(27), height: Theme.zoom(28))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).disabled(document.sqlExecution.isRunning)
+                    .help(connection.map { $0.name + " · " + controller.database.state($0.id).connectionLabel
+                        + " · " + controller.database.state($0.id).destination(for: $0) }
+                        ?? "Elegir conexión para este archivo")
+                    .accessibilityLabel("Conexión del script")
+                    .popover(isPresented: $showingConnectionMenu, arrowEdge: .bottom) {
+                        SQLConnectionMenu(document: document, controller: controller,
+                                          isPresented: $showingConnectionMenu)
+                    }
+                    Button { controller.database.showingConnections = true } label: {
+                        Image(systemName: "gearshape").font(.system(size: Theme.zoom(13)))
+                            .frame(width: Theme.zoom(27), height: Theme.zoom(28))
+                    }
+                    .buttonStyle(.plain).help("Administrar conexiones").accessibilityLabel("Administrar conexiones")
                     .qaControl("sql.toolbar.manageConnections", title: "Administrar conexiones") {
                         controller.database.showingConnections = true
                     }
+                }
+                .background(Theme.surfaceInk.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
                 if let connection {
                     let state = controller.database.state(connection.id)
                     let names = controller.database.schema.preference(connection).visible
-                    Picker("Base de datos", selection: Binding(get: { state.currentDatabase }, set: {
-                        controller.database.selectDatabase($0, connection: connection)
-                    })) {
-                        Text(state.currentDatabase.isEmpty ? "Base…" : state.currentDatabase).tag(state.currentDatabase)
-                        ForEach(names.filter { $0 != state.currentDatabase }, id: \.self) { Text($0).tag($0) }
-                    }.labelsHidden().frame(maxWidth: 190).disabled(!canExecute)
+                    Button { showingDatabaseMenu = true } label: {
+                        HStack(spacing: Theme.zoom(8)) {
+                            Image(systemName: "cylinder")
+                            Text(state.currentDatabase.isEmpty ? "Base…" : state.currentDatabase)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .lineLimit(1).truncationMode(.middle)
+                            Image(systemName: "chevron.up.chevron.down").font(.system(size: Theme.zoom(9)))
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, Theme.zoom(10))
+                        .frame(width: selectorWidth, height: Theme.zoom(28))
+                    }
+                    .buttonStyle(.plain).disabled(!canExecute || names.isEmpty)
+                    .background(Theme.surfaceInk.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
+                    .help("Base de datos del archivo: " + (state.currentDatabase.isEmpty ? "sin elegir" : state.currentDatabase))
+                    .accessibilityLabel("Base de datos del archivo")
+                    .popover(isPresented: $showingDatabaseMenu, arrowEdge: .bottom) {
+                        ScrollView(.vertical) {
+                            LazyVStack(spacing: 2) {
+                                ForEach(names, id: \.self) { name in
+                                    Button {
+                                        controller.database.selectDatabase(name, connection: connection)
+                                        showingDatabaseMenu = false
+                                    } label: {
+                                        HStack {
+                                            Text(name).lineLimit(1).truncationMode(.middle)
+                                            Spacer(minLength: 0)
+                                            if name == state.currentDatabase {
+                                                Image(systemName: "checkmark").foregroundStyle(Theme.accent)
+                                            }
+                                        }
+                                        .padding(.horizontal, Theme.zoom(10))
+                                        .frame(height: Theme.zoom(32))
+                                        .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(Theme.zoom(4))
+                        }
+                        .frame(width: selectorWidth,
+                               height: Theme.zoom(CGFloat(min(names.count, 6)) * 34 + 8))
+                        .scrollIndicators(names.count > 6 ? .visible : .hidden)
+                    }
                 }
                 Spacer(minLength: 4)
                 SQLTimeoutControl(execution: document.sqlExecution)
-                if let connection {
-                    let state = controller.database.state(connection.id)
-                    let enabled = !state.busy && state.status != .connecting
-                        && !document.sqlExecution.isRunning && !controller.isReadOnly
-                    Button(state.status == .connected ? "Desconectar" : "Conectar") { toggle(connection, state: state) }
-                        .disabled(!enabled)
-                        .qaControl("sql.toolbar.toggleConnection",
-                                   title: state.status == .connected ? "Desconectar" : "Conectar",
-                                   enabled: enabled) { toggle(connection, state: state) }
-                }
+                    .padding(.horizontal, Theme.zoom(7)).frame(height: Theme.zoom(28))
+                    .background(Theme.surfaceInk.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
                 if document.sqlExecution.isRunning {
                     Button { controller.database.cancel(document.sqlExecution) } label: {
-                        Label("Cancelar", systemImage: "stop.fill")
+                        Image(systemName: "stop.fill")
                     }.disabled(document.sqlExecution.isCancelling)
+                        .help("Cancelar ejecución").accessibilityLabel("Cancelar ejecución")
                         .qaControl("sql.toolbar.cancel", title: "Cancelar",
                                    enabled: !document.sqlExecution.isCancelling) {
                             controller.database.cancel(document.sqlExecution)
                         }
                 } else {
-                    Button(action: controller.executeSQL) { Label("Ejecutar", systemImage: "play.fill") }
-                        .disabled(!canExecute).help("Ejecutar selección o sentencia bajo el cursor (⌘↩)")
-                        .accessibilityLabel("Ejecutar SQL")
+                    Button(action: controller.executeSQL) { Image(systemName: "play.fill") }
+                        .disabled(!canExecute)
+                        .help(document.selectedRange.length > 0 ? "Ejecutar selección (⌘↩)"
+                            : "Ejecutar sentencia actual (⌘↩)")
+                        .accessibilityLabel("Ejecutar selección o sentencia")
                         .qaControl("sql.toolbar.execute", title: "Ejecutar", enabled: canExecute,
                                    action: controller.executeSQL)
-                }
-            }
-            HStack(spacing: 8) {
-                if let connection {
-                    let state = controller.database.state(connection.id)
-                    Circle().fill(state.status == .connected ? Color.green : .secondary).frame(width: 6, height: 6)
-                    Text(state.connectionLabel)
-                    Text("·")
-                    Text(state.destination(for: connection)).lineLimit(1).truncationMode(.middle).help(state.destination(for: connection))
-                    if state.inTransaction { Text("· Transacción abierta").foregroundStyle(.orange) }
-                    if let badge = connection.effectiveWritePolicy.badge {
-                        Label(badge, systemImage: connection.effectiveWritePolicy.icon)
-                            .foregroundStyle(.orange).help(connection.effectiveWritePolicy.detail)
+                    Button(action: controller.executeSQLFile) {
+                        Image(systemName: "doc.text")
+                            .overlay(alignment: .bottomTrailing) {
+                                Image(systemName: "play.fill")
+                                    .font(.system(size: Theme.zoom(7)))
+                                    .padding(Theme.zoom(1))
+                                    .background(Theme.bar, in: RoundedRectangle(cornerRadius: 2))
+                                    .offset(x: Theme.zoom(3), y: Theme.zoom(2))
+                            }
                     }
-                } else {
-                    Text("Elegí una conexión para ejecutar este archivo.")
+                        .disabled(!canExecute).help("Ejecutar archivo completo")
+                        .accessibilityLabel("Ejecutar archivo completo")
+                        .qaControl("sql.toolbar.executeFile", title: "Ejecutar archivo completo", enabled: canExecute,
+                                   action: controller.executeSQLFile)
                 }
-                Spacer(minLength: 0)
-                Text("Por archivo").foregroundStyle(.tertiary)
-            }.font(.system(size: Theme.zoom(11))).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 18).padding(.vertical, 10)
+        if let connection, let error = controller.database.state(connection.id).error {
+            Text(error).font(Theme.interfaceFont(12)).foregroundStyle(.orange).textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 18).padding(.bottom, 8)
+        }
+        }
         .background(Theme.bar)
         .qaScreen("sql.toolbar")
+        .task(id: document.sqlExecution.isRunning) {
+            guard document.sqlExecution.isRunning else { processingFlash = false
+                return }
+            processingFlash = true
+            while !Task.isCancelled && document.sqlExecution.isRunning {
+                do { try await Task.sleep(for: .milliseconds(Int.random(in: 240...720))) }
+                catch { break }
+                processingFlash.toggle()
+            }
+            processingFlash = false
+        }
     }
 
-    private func toggle(_ connection: DatabaseConnection, state: DatabaseState) {
-        if state.status == .connected { Task { _ = await controller.database.disconnect(connection) } }
-        else { controller.database.connect(connection) }
+}
+
+private struct SQLConnectionMenu: View {
+    let document: EditorDocument
+    @Bindable var controller: WorkspaceController
+    @Binding var isPresented: Bool
+    @State private var search = ""
+
+    private var recent: [DatabaseConnection] {
+        let selected = controller.connections.selected(for: document).map { [$0] } ?? []
+        var seen = Set<UUID>()
+        return (selected + controller.connections.recentProfiles)
+            .filter { seen.insert($0.id).inserted && matches($0) }.prefix(3).map { $0 }
+    }
+
+    private var all: [DatabaseConnection] {
+        let recentIDs = Set(recent.map(\.id))
+        return controller.connections.profiles.filter { !recentIDs.contains($0.id) && matches($0) }
+    }
+
+    private func matches(_ connection: DatabaseConnection) -> Bool {
+        search.isEmpty || connection.name.localizedStandardContains(search)
+            || connection.host.localizedStandardContains(search)
+            || connection.username.localizedStandardContains(search)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Buscar conexión…", text: $search)
+                    .textFieldStyle(.plain).accessibilityLabel("Buscar conexión")
+            }
+            .padding(.horizontal, 10).frame(height: Theme.zoom(30))
+            .background(Theme.surfaceInk.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+            .padding(10)
+
+            if !recent.isEmpty {
+                sectionTitle("RECIENTES")
+                ForEach(recent) { profile in connectionRow(profile) }
+            }
+            if !all.isEmpty {
+                sectionTitle("TODAS")
+                ScrollView(.vertical) {
+                    LazyVStack(spacing: 2) {
+                        ForEach(all) { profile in connectionRow(profile) }
+                    }
+                }
+                .frame(height: Theme.zoom(CGFloat(min(all.count, 4)) * 54))
+                .scrollIndicators(all.count > 4 ? .visible : .hidden)
+            }
+            if recent.isEmpty && all.isEmpty {
+                Text(search.isEmpty ? "No hay conexiones guardadas." : "No se encontraron conexiones.")
+                    .foregroundStyle(.secondary).font(Theme.interfaceFont(12)).padding(12)
+            }
+            Divider().padding(.top, 6)
+            Button { openConnections() } label: { Label("Administrar", systemImage: "gearshape") }
+                .buttonStyle(.plain).font(Theme.interfaceFont(12))
+                .help("Administrar conexiones").padding(12)
+        }
+        .frame(width: Theme.zoom(340))
+        .background(Theme.bar)
+    }
+
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title).font(Theme.interfaceFont(10, weight: .semibold)).foregroundStyle(.secondary)
+            .padding(.horizontal, 12).padding(.top, 5).padding(.bottom, 3)
+    }
+
+    private func connectionRow(_ profile: DatabaseConnection) -> some View {
+        let state = controller.database.state(profile.id)
+        let selected = controller.connections.selected(for: document)?.id == profile.id
+        return Button {
+            controller.connections.select(profile.id, for: document)
+            isPresented = false
+        } label: {
+            HStack(spacing: 10) {
+                Circle().fill(state.status == .connected ? .green : Color.gray.opacity(0.55))
+                    .frame(width: 7, height: 7)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(profile.name).font(Theme.interfaceFont(13)).lineLimit(1)
+                    Text("\(profile.host):\(profile.port)").font(Theme.interfaceFont(11))
+                        .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                }
+                Spacer(minLength: 0)
+                if selected { Image(systemName: "checkmark").foregroundStyle(Theme.accent) }
+            }
+            .padding(.horizontal, 12).frame(height: Theme.zoom(52))
+            .background(Theme.surfaceInk.opacity(selected ? 0.12 : 0),
+                        in: RoundedRectangle(cornerRadius: 5))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).help("Seleccionar \(profile.name) · \(state.connectionLabel)")
+        .accessibilityLabel("\(profile.name), \(state.connectionLabel)")
+    }
+
+    private func openConnections() {
+        isPresented = false
+        DispatchQueue.main.async {
+            controller.database.showingConnections = true
+        }
     }
 }

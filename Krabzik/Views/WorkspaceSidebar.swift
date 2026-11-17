@@ -14,13 +14,13 @@ struct WorkspaceSidebar: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
-                Text(workspace.name).font(.system(size: Theme.zoom(13), weight: .semibold))
+                Text(workspace.name).font(Theme.interfaceFont(13, weight: .semibold))
                     .lineLimit(1).truncationMode(.middle).help(workspace.name)
                 HStack(spacing: 8) {
                     HStack(spacing: 6) {
                         Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                         TextField("Filtrar archivos", text: $codeFilter)
-                            .textFieldStyle(.plain).font(.system(size: Theme.zoom(11)))
+                            .textFieldStyle(.plain).font(Theme.interfaceFont(12))
                         if !codeFilter.isEmpty {
                             Button {
                                 codeFilter = ""
@@ -43,8 +43,8 @@ struct WorkspaceSidebar: View {
             .padding(12)
             Divider()
             codeContent.frame(maxWidth: .infinity, maxHeight: .infinity)
-            Divider()
             if let operation = controller.fileOperation {
+                Divider()
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
                     VStack(alignment: .leading, spacing: 3) {
@@ -52,23 +52,9 @@ struct WorkspaceSidebar: View {
                         Text(operation.filename).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                     }
                     Spacer(minLength: 0)
-                }.font(.system(size: Theme.zoom(11))).padding(12)
+                }.font(Theme.interfaceFont(12)).padding(12)
                     .accessibilityElement(children: .combine)
-                Divider()
             }
-            Button { controller.database.showingConnections = true } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "slider.horizontal.3")
-                    Text("Conexiones")
-                    Spacer()
-                    let count = controller.database.states.values.filter { $0.status == .connected }.count
-                    if count > 0 {
-                        Text("\(count) abiertas").foregroundStyle(.green)
-                    }
-                    Image(systemName: "chevron.right").font(.caption2)
-                }.font(.system(size: Theme.zoom(11))).padding(12).contentShape(Rectangle())
-            }.buttonStyle(.plain).help("Configurar conexiones globales")
-
         }
         .background(Theme.sidebar)
         .qaScreen("explorer.files")
@@ -126,7 +112,7 @@ struct WorkspaceSidebar: View {
                                                                              height: 18)
                                         VStack(alignment: .leading, spacing: 3) {
                                             Text(match.url.lastPathComponent).lineLimit(1)
-                                            Text(match.path).font(.system(size: Theme.zoom(10))).foregroundStyle(.secondary)
+                                            Text(match.path).font(Theme.interfaceFont(12)).foregroundStyle(.secondary)
                                                 .lineLimit(1).truncationMode(.middle)
                                         }
                                         Spacer(minLength: 0)
@@ -140,7 +126,7 @@ struct WorkspaceSidebar: View {
                     }
                 }
                 if search.truncated { Text("Hay más archivos. Refiná el filtro.").foregroundStyle(.secondary).padding() }
-            }.font(.system(size: Theme.zoom(12)))
+            }.font(Theme.interfaceFont(13))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.sidebar)

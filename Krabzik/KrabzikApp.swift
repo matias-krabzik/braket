@@ -21,6 +21,7 @@ struct KrabzikApp: App {
         .defaultSize(width: 760, height: 420)
         .windowToolbarStyle(.unifiedCompact)
         .commands {
+            SettingsCommands(controller: controller)
             CommandGroup(after: .appInfo) { CheckForUpdatesButton() }
             CommandGroup(before: .undoRedo) {
                 if controller.selectedDocument?.pixelArt != nil {
@@ -91,6 +92,24 @@ struct KrabzikApp: App {
         }
         Settings {
             SettingsView(settings: controller.settings, controller: controller)
+        }
+    }
+}
+
+private struct SettingsCommands: Commands {
+    let controller: WorkspaceController
+    @Environment(\.openSettings) private var openSettings
+
+    var body: some Commands {
+        CommandGroup(replacing: .appSettings) {
+            Button("Configuración…") {
+                if controller.workspace != nil || !controller.documents.isEmpty {
+                    controller.showingSettings = true
+                } else {
+                    openSettings()
+                }
+            }
+            .keyboardShortcut(",", modifiers: .command)
         }
     }
 }

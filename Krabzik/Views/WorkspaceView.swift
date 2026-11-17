@@ -5,11 +5,16 @@ import UniformTypeIdentifiers
 struct WorkspaceView: View {
     @Bindable var controller: WorkspaceController
     @State private var draggedTabID: URL?
+    @State private var emptySQLExecution = SQLExecution()
 
     private var showsSQLResults: Bool {
-        guard !controller.workflowVisible, let document = controller.selectedDocument,
-              document.language == "SQL", controller.database.resultsVisible else { return false }
-        return document.sqlExecution.isRunning || document.sqlExecution.error != nil || !document.sqlExecution.results.isEmpty
+        guard !controller.workflowVisible, controller.database.resultsVisible else { return false }
+        return true
+    }
+
+    private var sqlExecution: SQLExecution {
+        guard let document = controller.sqlResultsDocument else { return emptySQLExecution }
+        return document.sqlExecution
     }
 
     var body: some View {
@@ -18,9 +23,10 @@ struct WorkspaceView: View {
                 if controller.isReadOnly { readOnlyBanner }
                 HStack(spacing: 0) {
                     ProjectRail(controller: controller)
-                    WorkspaceModeRail(controller: controller).zIndex(1)
+                    WorkspaceActivityBar(controller: controller).zIndex(1)
                     WorkspaceVerticalSplit(showsBottom: showsSQLResults ||
-                                           (controller.selectedProcessesVisible && !controller.workflowVisible),
+                                           (controller.selectedProcessesVisible && !controller.workflowVisible && !controller
+                                           .outputVisible),
                                            isResults: showsSQLResults) {
                         HSplitView {
                             if controller.sidebarVisible {
@@ -35,11 +41,13 @@ struct WorkspaceView: View {
                             editorArea.frame(minWidth: 420, maxWidth: .infinity, minHeight: 180, maxHeight: .infinity)
                         }
                     } bottom: {
-                        if showsSQLResults, let document = controller.selectedDocument {
-                            SQLResultsPanel(execution: document.sqlExecution, controller: controller) {
+                        if showsSQLResults {
+                            SQLResultsPanel(execution: sqlExecution, controller: controller) {
                                 controller.database.resultsVisible = false
+                                controller.outputVisible = false
+                                controller.processesVisible = false
                             }.frame(minHeight: 220, idealHeight: 360, maxHeight: .infinity)
-                        } else if controller.selectedProcessesVisible && !controller.workflowVisible {
+                        } else if controller.selectedProcessesVisible && !controller.workflowVisible && !controller.outputVisible {
                             ProcessPanel(controller: controller).frame(minHeight: 150, idealHeight: 240, maxHeight: 440)
                         }
                     }
@@ -54,6 +62,7 @@ struct WorkspaceView: View {
         }
         .background(Theme.background)
         .tint(Theme.accent)
+        .font(Theme.interfaceFont())
         .disabled(controller.isRestoringSession)
         .preferredColorScheme(Theme.colorScheme)
         .qaCommands(AppMenuCommands(controller: controller).all)
@@ -71,7 +80,7 @@ struct WorkspaceView: View {
                     }.help("Abrir automatización").accessibilityLabel("Abrir automatización")
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    SettingsLink { Image(systemName: "gearshape") }
+                    Button { controller.showingSettings = true } label: { Image(systemName: "gearshape") }
                         .help("Configuración")
                         .accessibilityLabel("Configuración")
                 }
@@ -84,8 +93,9 @@ struct WorkspaceView: View {
                 if !controller.workflowVisible {
                     ToolbarItem(placement: .primaryAction) {
                         Button {
-                            if controller.selectedDocument?.language == "SQL" { controller.database.resultsVisible.toggle() }
-                            else { controller.toggleProcessesPanel() }
+                            controller.database.resultsVisible = false
+                            controller.outputVisible = false
+                            controller.toggleProcessesPanel()
                         } label: { Image(systemName: "rectangle.bottomthird.inset.filled") }
                             .help("Mostrar procesos")
                     }
@@ -95,6 +105,9 @@ struct WorkspaceView: View {
         .sheet(isPresented: Binding(get: { controller.closingProjectURL != nil },
                                     set: { if !$0 { controller.closingProjectURL = nil } })) {
             if let url = controller.closingProjectURL { ProjectCloseSheet(controller: controller, url: url) }
+        }
+        .sheet(isPresented: $controller.showingSettings) {
+            SettingsView(settings: controller.settings, controller: controller, showsDone: true)
         }
         .sheet(isPresented: $controller.showingProjectWizard) {
             ProjectWizard(controller: controller)
@@ -145,7 +158,8 @@ struct WorkspaceView: View {
                                                icon: Image(nsImage: FileIcons.file(document.url)),
                                                tooltip: document.isDraft ? "Borrador · sin guardar" : document.url.path,
                                                isDirty: document.isDirty,
-                                               selected: !controller.workflowVisible && controller.selectedDocumentID == document.id,
+                                               selected: !controller.workflowVisible && controller
+                                               .selectedDocumentID == document.id,
                                                select: { controller.selectedDocumentID = document.id },
                                                close: { controller.closeDocument(document) },
                                                drag: {
@@ -237,17 +251,17 @@ struct WorkspaceView: View {
     private var editor: some View {
         VStack(spacing: 0) {
             if let document = controller.selectedDocument {
-                HStack(spacing: 7) {
-                    Text(document.isDraft ? "Borrador · " + document.url.lastPathComponent : breadcrumb(document.url)).lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer()
-                    if isMarkdown(document) {
-                        markdownModeControls(document)
+                if document.language != "SQL" {
+                    HStack(spacing: 7) {
+                        Text(document.isDraft ? "Borrador · " + document.url.lastPathComponent : breadcrumb(document.url)).lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer()
+                        if isMarkdown(document) { markdownModeControls(document) }
                     }
+                    .font(.system(size: Theme.zoom(11))).foregroundStyle(.secondary)
+                    .padding(.horizontal, 20).frame(height: 31)
+                    .background(Theme.background)
                 }
-                .font(.system(size: Theme.zoom(11))).foregroundStyle(.secondary)
-                .padding(.horizontal, 20).frame(height: 31)
-                .background(Theme.background)
                 if document.hasExternalChange {
                     HStack {
                         Text("El archivo cambió en disco.").foregroundStyle(.orange)
@@ -270,7 +284,7 @@ struct WorkspaceView: View {
                 } else if isMarkdown(document) {
                     markdownContent(document)
                 } else {
-                    CodeEditor(document: document, theme: Theme.settings.theme, uiScale: controller.settings.uiScale,
+                    CodeEditor(document: document, theme: Theme.settings.theme, uiScale: controller.settings.codeFontScale,
                                completion: { text, position in
                                    let connection = controller.connections.selected(for: document)
                                    let database = connection.map { controller.database.state($0.id).currentDatabase } ?? ""
@@ -323,14 +337,14 @@ struct WorkspaceView: View {
         } ?? []
         switch document.markdownMode {
         case .edit:
-            CodeEditor(document: document, theme: Theme.settings.theme, uiScale: controller.settings.uiScale).id(document.id)
+            CodeEditor(document: document, theme: Theme.settings.theme, uiScale: controller.settings.codeFontScale).id(document.id)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .preview:
             MarkdownPreview(document: document, projectRoots: roots).id(document.id)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .split:
             HSplitView {
-                CodeEditor(document: document, theme: Theme.settings.theme, uiScale: controller.settings.uiScale).id(document.id)
+                CodeEditor(document: document, theme: Theme.settings.theme, uiScale: controller.settings.codeFontScale).id(document.id)
                     .frame(minWidth: 230, maxWidth: .infinity, maxHeight: .infinity)
                 MarkdownPreview(document: document, projectRoots: roots).id(document.id)
                     .frame(minWidth: 230, maxWidth: .infinity, maxHeight: .infinity)
@@ -1455,8 +1469,8 @@ private struct EditorStatusBar: View {
                 }
             } else { Spacer() }
         }
-        .font(.system(size: Theme.zoom(10))).foregroundStyle(.secondary)
-        .padding(.horizontal, 16).frame(height: 25)
+        .font(Theme.interfaceFont(12)).foregroundStyle(.secondary)
+        .padding(.horizontal, 16).frame(height: Theme.zoom(28))
         .background(Theme.bar)
         .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
     }
@@ -1487,7 +1501,7 @@ private struct WorkspaceEditorTab: View {
                         .opacity(selected ? 1 : 0.75)
                         .accessibilityHidden(true)
                     Text(title)
-                        .font(.system(size: Theme.zoom(12), weight: selected ? .medium : .regular))
+                        .font(Theme.interfaceFont(weight: selected ? .medium : .regular))
                         .lineLimit(1).truncationMode(.middle)
                         .foregroundStyle(selected ? .primary : .secondary)
                 }
@@ -1534,7 +1548,7 @@ private struct CommandSheet: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Comando").foregroundStyle(.secondary)
                 TextField("npm run dev", text: $project.command)
-                    .font(.system(size: Theme.zoom(12), design: .monospaced))
+                    .font(Theme.codeFont())
                     .textFieldStyle(.roundedBorder)
             }
             HStack {

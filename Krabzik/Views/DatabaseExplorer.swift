@@ -1,47 +1,12 @@
 import SwiftUI
 
-struct WorkspaceModeRail: View {
-    let controller: WorkspaceController
-    var body: some View {
-        VStack(spacing: 12) {
-            mode("Archivos", icon: "folder", databases: false)
-            mode("Bases de datos", icon: "externaldrive", databases: true)
-            Spacer()
-        }
-        .padding(.top, 14).frame(width: Theme.zoom(38)).background(Theme.bar)
-        .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 1) }
-    }
-    private func mode(_ label: String, icon: String, databases: Bool) -> some View {
-        let selected = controller.database.browserShowsDatabases == databases
-        return Button {
-            show(databases)
-        } label: {
-            Image(systemName: icon).font(.system(size: Theme.zoom(15)))
-                .foregroundStyle(selected ? Theme.accent : .secondary)
-                .frame(width: Theme.zoom(30), height: Theme.zoom(30))
-                .contentShape(Rectangle())
-                .background(selected ? Theme.accent.opacity(0.12) : .clear,
-                            in: RoundedRectangle(cornerRadius: 5))
-        }.buttonStyle(.plain).help(label).accessibilityLabel(label)
-            .qaControl(databases ? "explorer.mode.databases" : "explorer.mode.files",
-                       title: label) { show(databases) }
-    }
-
-    private func show(_ databases: Bool) {
-        controller.database.browserShowsDatabases = databases
-        controller.sidebarVisible = true
-        QAProbe.state("state.explorer", ["mode": databases ? "databases" : "files",
-                                         "sidebar": QAField.bool(controller.sidebarVisible)])
-    }
-}
-
 struct DatabaseExplorer: View {
     let controller: WorkspaceController
     @State private var ddl: String?
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("BASES DE DATOS").font(.system(size: Theme.zoom(10), weight: .semibold)).foregroundStyle(.secondary)
+                Text("BASES DE DATOS").font(Theme.interfaceFont(12, weight: .semibold)).foregroundStyle(.secondary)
                 Spacer()
                 Button { controller.database.showingConnections = true } label: { Image(systemName: "plus") }
                     .buttonStyle(.plain).help("Administrar conexiones")
@@ -55,13 +20,13 @@ struct DatabaseExplorer: View {
                 }.padding(.trailing, 10).padding(.bottom, 14)
             }
         }
-        .font(.system(size: Theme.zoom(12))).background(Theme.background)
+        .font(Theme.interfaceFont(13)).background(Theme.background)
         .qaScreen("explorer.databases")
         .sheet(isPresented: Binding(get: { ddl != nil }, set: { if !$0 { ddl = nil } })) {
             VStack(alignment: .leading) {
                 Text("Definición de la tabla").font(.headline)
                 ScrollView([.horizontal, .vertical]) {
-                    Text(ddl ?? "").font(.system(size: Theme.zoom(12), design: .monospaced)).textSelection(.enabled).padding()
+                    Text(ddl ?? "").font(Theme.codeFont()).textSelection(.enabled).padding()
                 }
                 HStack { Spacer()
                 Button("Cerrar") { ddl = nil }.keyboardShortcut(.cancelAction) }
@@ -89,10 +54,10 @@ struct DatabaseExplorer: View {
                     .padding(.leading, Theme.zoom(SidebarTreeStyle.iconLeading))
             }
             if let progress = store.progress[connection.id] {
-                Text(progress).font(.system(size: Theme.zoom(10))).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text(progress).font(Theme.interfaceFont(12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             if let error = store.errors[connection.id] ?? state.error {
-                Text(error).font(.system(size: Theme.zoom(10))).foregroundStyle(.orange).textSelection(.enabled)
+                Text(error).font(Theme.interfaceFont(12)).foregroundStyle(.orange).textSelection(.enabled)
                     .qaLabel("explorer.schema.error." + connection.name, error)
                 Button("Reintentar carga") { Task { await store.discover(connection, client: controller.database.client) } }
                     .disabled(store.loading.contains(connection.id) || controller.isReadOnly)
@@ -101,7 +66,7 @@ struct DatabaseExplorer: View {
                         Task { await store.discover(connection, client: controller.database.client) }
                     }
             } else if !store.loading.contains(connection.id), store.preference(connection).visible.isEmpty {
-                Text("Elegí las bases con el selector de la derecha.").font(.system(size: Theme.zoom(10))).foregroundStyle(.secondary)
+                Text("Elegí las bases con el selector de la derecha.").font(Theme.interfaceFont(12)).foregroundStyle(.secondary)
             }
         }
     }
@@ -190,7 +155,7 @@ struct DatabaseExplorer: View {
                 } label: {
                     Text(store.available[connection.id].map { "\(store.preference(connection).visible.count)/\($0.count)" }
                          ?? "\(store.preference(connection).visible.count) bases")
-                        .font(.system(size: Theme.zoom(10))).padding(3).background(Theme.bar, in: RoundedRectangle(cornerRadius: 3))
+                        .font(Theme.interfaceFont(12)).padding(3).background(Theme.bar, in: RoundedRectangle(cornerRadius: 3))
                 }.buttonStyle(.plain).help("Elegir bases visibles y predeterminada").disabled(controller.isReadOnly)
             }
         }

@@ -85,7 +85,7 @@ final class QAHarness {
         root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("braket-qa-" + UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        controller = WorkspaceController(defaults: defaults)
+        controller = WorkspaceController(defaults: defaults, historyRoot: root.appendingPathComponent("history"))
         script.install(on: controller)
         QAControls.clear()
         QAProbe.activate(writingTo: QAHarness.logPath(for: test))

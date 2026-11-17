@@ -182,7 +182,7 @@ private final class ObserverToken: @unchecked Sendable {
         style.minimumLineHeight = 23
         style.maximumLineHeight = 23
         style.tabStops = []
-        style.defaultTabInterval = 32
+        style.defaultTabInterval = ("    " as NSString).size(withAttributes: [.font: Theme.nativeCodeFont()]).width
         self.paragraph = style
         super.init(frame: .zero)
         wantsLayer = true
@@ -220,7 +220,7 @@ private final class ObserverToken: @unchecked Sendable {
         textView.isGrammarCheckingEnabled = false
         textView.usesFindBar = true
         textView.isIncrementalSearchingEnabled = true
-        textView.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+        textView.font = Theme.nativeCodeFont()
         textView.textColor = EditorPalette.text
         textView.backgroundColor = EditorPalette.background
         textView.insertionPointColor = EditorPalette.text
@@ -278,12 +278,12 @@ private final class ObserverToken: @unchecked Sendable {
     func applyZoom(_ scale: Double) {
         guard appliedZoom != scale else { return }
         appliedZoom = scale
-        let font = NSFont.monospacedSystemFont(ofSize: 13 * CGFloat(scale), weight: .regular)
+        let font = Theme.nativeCodeFont(scale: scale)
         let style = NSMutableParagraphStyle()
         style.minimumLineHeight = 23 * CGFloat(scale)
         style.maximumLineHeight = 23 * CGFloat(scale)
         style.tabStops = []
-        style.defaultTabInterval = 32 * CGFloat(scale)
+        style.defaultTabInterval = ("    " as NSString).size(withAttributes: [.font: font]).width
         paragraph = style
         textView.font = font
         textView.defaultParagraphStyle = style
@@ -333,7 +333,7 @@ private final class ObserverToken: @unchecked Sendable {
     }
 
     private var baseAttributes: [NSAttributedString.Key: Any] {
-        [.font: NSFont.monospacedSystemFont(ofSize: 13 * CGFloat(appliedZoom), weight: .regular),
+        [.font: Theme.nativeCodeFont(scale: appliedZoom),
          .foregroundColor: EditorPalette.text, .paragraphStyle: paragraph]
     }
 
@@ -453,7 +453,7 @@ private final class ObserverToken: @unchecked Sendable {
               let viewport = layout.textViewportLayoutController.viewportRange else { return }
         let visible = surface.scrollView.contentView.bounds
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: Theme.zoom(11), weight: .regular),
+            .font: NSFont.monospacedSystemFont(ofSize: Theme.zoom(12), weight: .regular),
             .foregroundColor: EditorPalette.muted
         ]
         layout.enumerateTextLayoutFragments(from: viewport.location, options: []) { fragment in

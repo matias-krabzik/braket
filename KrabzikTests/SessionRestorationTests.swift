@@ -39,12 +39,16 @@ final class SessionRestorationTests: XCTestCase {
         XCTAssertTrue(settings.restoreLastState)
         XCTAssertEqual(settings.markdownPreviewZoom, 1)
         XCTAssertEqual(settings.uiScale, 1)
+        settings.codeFontSize = 18
+        settings.resultFontSize = 12
         settings.theme = .midnight
         settings.restoreLastState = true
         settings.markdownPreviewZoom = 1.4
         settings.zoomIn()
         settings.zoomIn()
         let reloaded = AppSettings(defaults: defaults)
+        XCTAssertEqual(reloaded.codeFontSize, 18)
+        XCTAssertEqual(reloaded.resultFontSize, 12)
         XCTAssertEqual(reloaded.theme, .midnight)
         XCTAssertTrue(reloaded.restoreLastState)
         XCTAssertEqual(reloaded.markdownPreviewZoom, 1.4)

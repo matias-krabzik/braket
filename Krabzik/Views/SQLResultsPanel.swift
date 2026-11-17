@@ -4,56 +4,88 @@ struct SQLResultsPanel: View {
     @Bindable var execution: SQLExecution
     let controller: WorkspaceController
     let hide: () -> Void
+    private var showingLogs: Bool { controller.outputVisible }
+
+    private func selectResult(_ result: SQLResult) {
+        controller.outputVisible = false
+        execution.selectedResultID = result.id
+    }
+
+    private func closeResult(_ result: SQLResult) {
+        let draft = execution.draft(for: result)
+        guard !draft.sending, draft.confirmDiscard() else { return }
+        execution.results.removeAll { $0.id == result.id }
+        execution.drafts.removeValue(forKey: result.id)
+        execution.pinned.remove(result.id)
+        if execution.selectedResultID == result.id { execution.selectedResultID = execution.results.last?.id }
+    }
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
                 ScrollView(.horizontal) {
                     HStack(spacing: 4) {
+                        Button(action: controller.showOutput) {
+                            Label("Logs", systemImage: "text.alignleft")
+                                .padding(.vertical, 8).padding(.horizontal, 10)
+                        }
+                        .buttonStyle(.plain)
+                        .background(Theme.surfaceInk.opacity(showingLogs ? 0.1 : 0.025),
+                                    in: RoundedRectangle(cornerRadius: 5))
+                        .accessibilityAddTraits(showingLogs ? .isSelected : [])
+                        .help("Historial SQL del proyecto")
+                        .qaControl("sql.logs.tab", title: "Logs", action: controller.showOutput)
                         ForEach(Array(execution.results.enumerated()), id: \.element.id) { index, result in
                             let draft = execution.draft(for: result)
                             HStack(spacing: 6) {
-                                Button { execution.selectedResultID = result.id } label: {
+                                Button { selectResult(result) } label: {
                                     HStack(spacing: 6) {
                                         if result.isLoading { ProgressView().controlSize(.mini) }
                                         else { Image(systemName: "tablecells") }
                                         Text("Consulta \(index + 1)" + (draft.hasChanges ? " •" : ""))
                                     }.padding(.vertical, 8).padding(.leading, 10)
-                                }.buttonStyle(.plain).help(result.sql)
+                                }.buttonStyle(.plain)
+                                    .help("Consulta \(index + 1) · \(result.connection?.name ?? "Sin conexión") · \(result.database)\n\(result.sql)")
                                 Button {
                                     if execution.pinned.contains(result.id) { execution.pinned.remove(result.id) }
                                     else { execution.pinned.insert(result.id) }
                                 } label: {
                                     Image(systemName: execution.pinned.contains(result.id) ? "pin.fill" : "pin")
                                         .foregroundStyle(execution.pinned.contains(result.id) ? Theme.accent : .secondary)
-                                        .padding(5)
+                                        .frame(width: Theme.zoom(28), height: Theme.zoom(28))
                                 }.buttonStyle(.plain).disabled(result.isLoading)
                                     .help(execution.pinned
                                         .contains(result.id) ? "Desfijar pestaña" : "Fijar pestaña: conservar este resultado")
                                     .accessibilityLabel(execution.pinned.contains(result.id) ? "Desfijar pestaña" : "Fijar pestaña")
                                 Button {
-                                    guard !draft.sending, draft.confirmDiscard() else { return }
-                                    execution.results.removeAll { $0.id == result.id }
-                                    execution.drafts.removeValue(forKey: result.id)
-                                    execution.pinned.remove(result.id)
-                                    if execution.selectedResultID == result.id { execution.selectedResultID = execution.results.last?.id }
-                                } label: { Image(systemName: "xmark").font(.system(size: Theme.zoom(9))).padding(6) }
-                                    .buttonStyle(.plain).help("Cerrar resultado").disabled(result.isLoading)
+                                    closeResult(result)
+                                } label: {
+                                    Image(systemName: "xmark").font(.system(size: Theme.zoom(9)))
+                                        .frame(width: Theme.zoom(28), height: Theme.zoom(28))
+                                        .contentShape(Rectangle())
+                                }
+                                    .buttonStyle(.plain).help("Cerrar resultado: Consulta \(index + 1)")
+                                    .disabled(result.isLoading)
+                                    .qaControl("sql.result.close.\(index)", title: "Cerrar resultado",
+                                               enabled: !result.isLoading) { closeResult(result) }
                             }
-                            .background(Theme.surfaceInk.opacity(execution.selectedResult?.id == result.id ? 0.1 : 0.025),
+                            .background(Theme.surfaceInk.opacity(!showingLogs && execution.selectedResult?.id == result.id ? 0.1 : 0.025),
                                         in: RoundedRectangle(cornerRadius: 5))
                             .qaControl("sql.result.tab.\(index)", title: "Consulta \(index + 1)",
-                                       enabled: !result.isLoading) { execution.selectedResultID = result.id }
+                                       enabled: !result.isLoading) { selectResult(result) }
                         }
                     }.padding(5)
                 }.scrollIndicators(.hidden)
-                SQLTimeoutControl(execution: execution)
-                Button(action: hide) { Image(systemName: "chevron.down") }.buttonStyle(.plain).padding(.horizontal, 12)
-            }.font(.system(size: Theme.zoom(12))).background(Theme.bar).qaScreen("sql.results")
-            if let result = execution.selectedResult {
+                if !showingLogs { SQLTimeoutControl(execution: execution) }
+                Button(action: hide) { Image(systemName: "chevron.down") }.buttonStyle(.plain)
+                    .padding(.horizontal, 12).help("Ocultar resultados").accessibilityLabel("Ocultar resultados")
+            }.font(Theme.interfaceFont(13)).background(Theme.bar).qaScreen("sql.results")
+            if showingLogs {
+                SQLOutputView(output: controller.database.output).id(controller.workspaceURL)
+            } else if let result = execution.selectedResult {
                 if result.isLoading {
                     VStack(spacing: 12) {
                         ProgressView().controlSize(.regular)
-                        Text("Ejecutando consulta…").font(.system(size: Theme.zoom(13)))
+                        Text("Ejecutando consulta…").font(Theme.interfaceFont(13))
                         Text("Límite: \(execution.timeoutSeconds) segundos").foregroundStyle(.secondary)
                         Button("Cancelar") { controller.database.cancel(execution) }.disabled(execution.isCancelling)
                     }.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -61,9 +93,12 @@ struct SQLResultsPanel: View {
                     SQLResultToolbar(execution: execution, draft: execution.draft(for: result), controller: controller)
                     SQLResultContent(draft: execution.draft(for: result), controller: controller).id(result.id)
                 }
+            } else {
+                Text("Todavía no hay resultados. Ejecutá una consulta para verlos aquí.")
+                    .foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             if let error = execution.error, error != execution.selectedResult?.error {
-                Text(error).font(.system(size: Theme.zoom(11))).foregroundStyle(.orange).textSelection(.enabled)
+                Text(error).font(Theme.interfaceFont(12)).foregroundStyle(.orange).textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(8)
             }
         }.background(Theme.background)
@@ -79,45 +114,21 @@ private struct SQLResultContent: View {
     }
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Text(draft.result.connection?.name ?? "").fontWeight(.medium)
-                Text(draft.result.database).foregroundStyle(.secondary)
-                Spacer()
-                if let connection = draft.result.connection, draft.result.origins.contains(where: { !$0.table.isEmpty }),
-                   !draft.canEdit, !draft.sent {
-                    if controller.database.schema.loading.contains(connection.id) {
-                        ProgressView().controlSize(.mini)
-                        Text("Cargando estructura…").foregroundStyle(.secondary)
-                    } else {
-                        Button("Cargar estructura") {
-                            let store = controller.database.schema
-                            let origin = draft.result.origins.first?.database ?? ""
-                            Task {
-                                await store.discover(connection, client: controller.database.client,
-                                                     choose: !store.preference(connection).visible.contains(origin))
-                            }
-                        }.disabled(controller.isReadOnly)
-                    }
-                }
-            }.font(.system(size: Theme.zoom(11))).padding(.horizontal, 12).padding(.vertical, 7)
             if draft.result.columns.isEmpty {
                 Text(draft.result.error ?? draft.result.summary).textSelection(.enabled)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(16)
             } else {
-                SQLResultGrid(draft: draft, scale: controller.settings.uiScale, theme: controller.settings.theme)
+                SQLResultGrid(draft: draft, scale: controller.settings.resultFontScale, theme: controller.settings.theme)
             }
             if let connection = draft.result.connection, let error = controller.database.schema.errors[connection.id] {
-                Text("Estructura: " + error).font(.system(size: Theme.zoom(11))).foregroundStyle(.orange).textSelection(.enabled)
+                Text("Estructura: " + error).font(Theme.interfaceFont(12)).foregroundStyle(.orange).textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12)
                     .qaLabel("sql.result.schemaError", error)
             }
-            HStack {
-                if draft.result.error == nil { Text(draft.result.summary) }
-                Spacer()
-                Text(draft.result.error != nil ? "" : draft.reason
-                    .isEmpty ? "Doble clic: editar · Enter: guardar campo · ⌘Enter: revisar cambios" : draft.reason)
-                    .lineLimit(1).help(draft.reason)
-            }.font(.system(size: Theme.zoom(10))).foregroundStyle(.secondary).padding(8)
+            if let error = draft.result.error {
+                Text(error).font(Theme.interfaceFont(12)).foregroundStyle(.orange).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(8)
+            }
         }
         .onAppear { draft.configure(schemaTable) }
         .onChange(of: schemaTable) { _, table in draft.configure(table) }
@@ -128,7 +139,7 @@ private struct SQLResultContent: View {
                     .foregroundStyle(.secondary)
                 Text("Se enviarán juntos en una transacción. Si una fila cambió o un valor falla, se revierten todos.")
                 ScrollView([.horizontal, .vertical]) {
-                    Text(preview).font(.system(size: Theme.zoom(12), design: .monospaced)).textSelection(.enabled).padding(12)
+                    Text(preview).font(Theme.codeFont()).textSelection(.enabled).padding(12)
                 }.background(Theme.bar)
                 if let error = draft.error { Text(error).foregroundStyle(.orange).textSelection(.enabled) }
                 HStack {
@@ -161,17 +172,81 @@ private struct SQLResultContent: View {
 
 struct SQLTimeoutControl: View {
     @Bindable var execution: SQLExecution
+    @State private var showingEditor = false
+    @State private var editorIdentity = UUID()
+
     var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "timer")
-            TextField("Timeout", value: $execution.timeoutSeconds, format: .number.grouping(.never))
-                .textFieldStyle(.roundedBorder).frame(width: Theme.zoom(48))
-                .accessibilityLabel("Timeout de consulta en segundos")
-            Text("s")
+        Button {
+            editorIdentity = UUID()
+            showingEditor = true
+        } label: {
+            HStack(spacing: Theme.zoom(5)) {
+                Image(systemName: "timer")
+                Text("\(execution.timeoutSeconds) s")
+                Image(systemName: "chevron.down")
+                    .font(.system(size: Theme.zoom(9)))
+                    .foregroundStyle(.secondary)
+            }
         }
-        .font(.system(size: Theme.zoom(11)))
+        .buttonStyle(.plain)
+        .font(Theme.interfaceFont(12))
         .disabled(execution.isRunning)
-        .help("Tiempo máximo por sentencia (1–3600 segundos). Cambialo y pulsá Reintentar.")
+        .help("Ajustar tiempo máximo por sentencia (1–3600 segundos)")
+        .accessibilityLabel("Tiempo máximo por sentencia: \(execution.timeoutSeconds) segundos")
+        .popover(isPresented: $showingEditor, arrowEdge: .bottom) {
+            SQLTimeoutEditor(initialSeconds: execution.timeoutSeconds,
+                             onSave: { execution.timeoutSeconds = $0; showingEditor = false },
+                             onCancel: { showingEditor = false })
+                .id(editorIdentity)
+        }
+    }
+}
+
+private struct SQLTimeoutEditor: View {
+    let onSave: (Int) -> Void
+    let onCancel: () -> Void
+    @State private var proposedSeconds: String
+
+    init(initialSeconds: Int, onSave: @escaping (Int) -> Void, onCancel: @escaping () -> Void) {
+        self.onSave = onSave
+        self.onCancel = onCancel
+        _proposedSeconds = State(initialValue: String(initialSeconds))
+    }
+
+    private var validSeconds: Int? {
+        guard let seconds = Int(proposedSeconds), (1...3600).contains(seconds) else { return nil }
+        return seconds
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Tiempo máximo por sentencia")
+                .font(Theme.interfaceFont(13, weight: .semibold))
+            HStack(spacing: 8) {
+                TextField("Segundos", text: $proposedSeconds)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: Theme.zoom(76))
+                    .accessibilityLabel("Tiempo máximo en segundos")
+                    .onSubmit(apply)
+                Text("segundos").foregroundStyle(.secondary)
+            }
+            Text("Entre 1 y 3600 segundos.")
+                .font(Theme.interfaceFont(11)).foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("Cancelar", action: onCancel)
+                Button("Guardar", action: apply)
+                    .disabled(validSeconds == nil)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(Theme.zoom(16))
+        .frame(width: Theme.zoom(250))
+    }
+
+    private func apply() {
+        guard let seconds = validSeconds else { return }
+        onSave(seconds)
     }
 }
 
@@ -186,7 +261,7 @@ private struct SQLResultToolbar: View {
     }
 
     private func run(page: Int? = nil) {
-        guard let document = controller.selectedDocument, let connection = result.connection else { return }
+        guard let document = controller.sqlResultsDocument, let connection = result.connection else { return }
         controller.database.execute(document, connection: connection, queryOverride: result.sql, databaseOverride: result.database,
                                     pageIndex: page ?? 0, targetResultID: page == nil ? nil : result.id)
     }
@@ -206,13 +281,28 @@ private struct SQLResultToolbar: View {
                    enabled: !busy && draft.canResetSelected, id: "grid.reset") {
                 draft.resetSelected()
             }
-            action("Guardar cambios", icon: "square.and.arrow.down",
+            action("Guardar cambios", icon: "floppy",
                    enabled: !busy && draft.canEdit && draft.hasChanges && !draft.isEditingCell,
                    id: "grid.save") { draft.showingReview = true }
+            if let connection = result.connection, result.origins.contains(where: { !$0.table.isEmpty }),
+               !draft.canEdit, !draft.sent {
+                if controller.database.schema.loading.contains(connection.id) {
+                    ProgressView().controlSize(.mini).help("Cargando estructura…")
+                } else {
+                    action("Cargar estructura", icon: "arrow.down.doc", enabled: !controller.isReadOnly,
+                           id: "grid.loadSchema") {
+                        let store = controller.database.schema
+                        let origin = result.origins.first?.database ?? ""
+                        Task { await store.discover(connection, client: controller.database.client,
+                                                    choose: !store.preference(connection).visible.contains(origin)) }
+                    }
+                }
+            }
             Spacer(minLength: 6)
+            Text("\(Int(result.elapsed * 1000)) ms").help("Tiempo de ejecución de este resultado")
             if !result.columns.isEmpty {
                 if let page = result.page {
-                    Text("100 filas · \(page.index + 1) de \(page.count.map(String.init) ?? "?")")
+                    Text("\(result.rows.count) filas · \(page.index + 1) de \(page.count.map(String.init) ?? "?")")
                         .help(page.totalRows
                             .map { "\($0) filas en total" } ?? "Total no disponible; podés navegar mientras haya más filas.")
                     action("Página anterior", icon: "chevron.left", enabled: !busy && page.index > 0,
@@ -226,17 +316,40 @@ private struct SQLResultToolbar: View {
                 }
             }
         }
-        .font(.system(size: Theme.zoom(11)))
+        .font(Theme.interfaceFont(12))
         .padding(.horizontal, 12).padding(.vertical, 6).background(Theme.bar)
         .qaScreen("grid.toolbar")
     }
 
     private func action(_ title: String, icon: String, enabled: Bool, id: String,
                         perform: @escaping () -> Void) -> some View {
-        Button(action: perform) {
-            Image(systemName: icon).font(.system(size: Theme.zoom(14)))
+        let tooltip: String = switch id {
+        case "grid.refresh": "Volver a ejecutar esta consulta"
+        case "grid.deleteRow": "Marcar fila seleccionada para eliminar"
+        case "grid.reset": "Descartar el cambio del campo seleccionado"
+        case "grid.save": "Revisar y guardar cambios (⌘Enter desde la grilla)"
+        default: title
+        }
+        return Button(action: perform) {
+            Group {
+                if icon == "floppy" { FloppyDiskIcon() }
+                else { Image(systemName: icon).font(.system(size: Theme.zoom(14))) }
+            }
                 .frame(width: Theme.zoom(26), height: Theme.zoom(24)).contentShape(Rectangle())
-        }.buttonStyle(.plain).disabled(!enabled).help(title).accessibilityLabel(title)
+        }.buttonStyle(.plain).disabled(!enabled)
+            .help(enabled ? tooltip : tooltip + " · No disponible")
+            .accessibilityLabel(title)
             .qaControl(id, title: title, enabled: enabled, action: perform)
+    }
+}
+
+private struct FloppyDiskIcon: View {
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 2).strokeBorder(lineWidth: 1.5)
+            Rectangle().strokeBorder(lineWidth: 1).frame(width: 7, height: 4).offset(y: -4)
+            Rectangle().strokeBorder(lineWidth: 1).frame(width: 9, height: 5).offset(y: 3)
+        }
+        .frame(width: Theme.zoom(14), height: Theme.zoom(14))
     }
 }

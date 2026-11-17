@@ -40,7 +40,8 @@ import AppKit
         let caret = textView.firstRect(forCharacterRange: textView.selectedRange(), actualRange: nil)
         let local = surface.convert(window.convertFromScreen(caret), from: nil)
         let width = min(360.0, surface.bounds.width)
-        let height = min(200.0, Double(values.count) * 25 + 4)
+        table.rowHeight = 27 * Theme.settings.codeFontScale
+        let height = min(200 * Theme.settings.codeFontScale, CGFloat(values.count) * table.rowHeight + 4)
         scroll.frame = NSRect(x: min(max(0, local.minX), max(0, surface.bounds.width - width)),
                               y: max(0, local.minY - height - 3), width: width, height: height)
         table.tableColumns.first?.width = width - 18
@@ -80,7 +81,7 @@ import AppKit
             ?? NSTextField(labelWithString: "")
         label.identifier = identifier
         label.stringValue = items[row]
-        label.font = .monospacedSystemFont(ofSize: Theme.zoom(12), weight: .regular)
+        label.font = Theme.nativeCodeFont(scale: Theme.settings.codeFontScale)
         label.lineBreakMode = .byTruncatingTail
         return label
     }
