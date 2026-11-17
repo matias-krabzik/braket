@@ -134,6 +134,20 @@ El editor admite UTF-8 hasta 5 MB. Usa Tree-sitter con las gramáticas de CodeEd
 
 ## Pruebas
 
+Hay dos niveles. La suite de siempre —unidad e integración— y, encima, el **QA automatizado
+de la interfaz**: casos que montan la pantalla de verdad, usan los controles por su
+identificador y afirman cómo reaccionó la app leyendo un registro de eventos que la propia
+app emite en Debug. Su entrada por terminal es `scripts/qa.sh` y su catálogo
+`KrabzikTests/QA/cases.json`; está documentado en [docs/qa-automation.md](docs/qa-automation.md).
+
+```sh
+scripts/qa.sh --list        # el catálogo de casos de interfaz
+scripts/qa.sh               # corre los automatizados
+scripts/qa.sh --mysql       # además, los que necesitan un MySQL desechable
+```
+
+La suite completa, que incluye los casos de QA:
+
 ```sh
 xcodebuild -project Braket.xcodeproj -scheme Braket \
   -destination 'platform=macOS' -derivedDataPath .build \
