@@ -89,10 +89,21 @@ final class QAHarness {
         script.install(on: controller)
         QAControls.clear()
         QAProbe.activate(writingTo: QAHarness.logPath(for: test))
+        // La interfaz mira `Theme.settings`: apuntarla a las preferencias aisladas del
+        // arnés deja que un escenario cambie el tema o el zoom sin tocar las del usuario,
+        // que son las del host de pruebas (la propia Braket.app).
+        Theme.settings = controller.settings
         let suite = self.suite, root = self.root
-        test.addTeardownBlock { @MainActor in
+        test.addTeardownBlock { @MainActor [self] in
+            // La ventana se desmonta **antes** de limpiar el registro. Si quedara montada,
+            // sus vistas siguen reevaluándose y vuelven a registrar sus controles con el
+            // controlador de esta prueba: la siguiente tocaría el botón de la anterior.
+            unmount()
+            // Ningún escenario deja un proceso suelto: `sleep` sobreviviría a la corrida.
+            controller.runner.terminateImmediately()
             QAControls.clear()
             QAProbe.deactivate()
+            Theme.settings = .shared
             SQLResultDraft.confirmDiscardChanges = { $0.discardAlert().runModal() == .alertFirstButtonReturn }
             UserDefaults().removePersistentDomain(forName: suite)
             try? FileManager.default.removeItem(at: root)
@@ -117,11 +128,13 @@ final class QAHarness {
 
     /// Monta `WorkspaceView` en una ventana real y espera a que SwiftUI evalúe su cuerpo.
     /// Sin esto no hay controles registrados y los `tap(_:)` fallan diciendo justamente eso.
-    func mount() async {
+    /// `target` deja montar **otra** corrida de la app —la de `relaunch()`— para afirmar
+    /// qué pantalla ofrece al arrancar.
+    func mount(_ target: WorkspaceController? = nil) async {
         guard window == nil else { return }
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
                               styleMask: [.titled, .resizable], backing: .buffered, defer: false)
-        window.contentView = NSHostingView(rootView: WorkspaceView(controller: controller))
+        window.contentView = NSHostingView(rootView: WorkspaceView(controller: target ?? controller))
         window.orderFront(nil)
         self.window = window
         QAProbe.mark("harness.mounted")
@@ -174,6 +187,24 @@ final class QAHarness {
             throw error
         }
         await settle(timeout: 0.05)
+    }
+
+    /// Escribe en un campo de la interfaz, como lo haría la persona.
+    func type(_ text: String, into id: String, file: StaticString = #filePath, line: UInt = #line) async throws {
+        await settle(until: { QAControls.field(id) != nil }, timeout: 2)
+        do { try QAControls.type(text, into: id) }
+        catch {
+            XCTFail(((error as? LocalizedError)?.errorDescription ?? "\(error)") + "\n" + timelineText(),
+                    file: file, line: line)
+            throw error
+        }
+        await settle(timeout: 0.05)
+    }
+
+    /// Afirma qué dice un campo de texto.
+    func assertField(_ id: String, text: String, file: StaticString = #filePath, line: UInt = #line) async {
+        await settle(until: { QAControls.field(id) == text }, timeout: 2)
+        XCTAssertEqual(QAControls.field(id), text, "campo «\(id)»", file: file, line: line)
     }
 
     /// Comprueba lo que la interfaz está ofreciendo: el texto del control y si deja usarlo.
@@ -256,6 +287,7 @@ final class QAHarness {
     /// escenarios que no están probando la creación.
     @discardableResult
     func makeProject(name: String = "Demo", folders: [String] = [],
+                     command: String = "",
                      connections: [DatabaseConnection] = [],
                      trusted: Bool = true) throws -> URL {
         let folder = root.appendingPathComponent(name, isDirectory: true)
@@ -264,7 +296,7 @@ final class QAHarness {
         for item in folders {
             let directory = folder.appendingPathComponent(item, isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            projects.append(CodeProject(name: item, path: item, kind: .files, command: ""))
+            projects.append(CodeProject(name: item, path: item, kind: .files, command: command))
         }
         var workspace = Workspace(name: name, projects: projects)
         workspace.connections = connections
@@ -308,6 +340,15 @@ final class QAHarness {
         document.text = text
         document.isDirty = true
         QAProbe.action("file.edit", ["file": QAField.path(document.url)])
+    }
+
+    /// Otra corrida de la app con las mismas preferencias y el mismo guion de diálogos:
+    /// es lo que necesita un escenario de restauración de sesión, que tiene que arrancar
+    /// de nuevo para ver qué se reabre.
+    func relaunch() -> WorkspaceController {
+        let next = WorkspaceController(defaults: defaults)
+        script.install(on: next)
+        return next
     }
 
     /// Guarda un perfil de conexión en el catálogo, como lo haría la hoja de conexión.

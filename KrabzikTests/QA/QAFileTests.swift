@@ -130,4 +130,55 @@ final class QAFileTests: XCTestCase {
         XCTAssertTrue(document.isDirty)
         XCTAssertEqual(qa.controller.workspaceURL?.standardizedFileURL, first.standardizedFileURL)
     }
+
+    /// ARC-01
+    func testNewFileAsksForTheNameInTheExplorerAndOpensTheTab() async throws {
+        let qa = try QAHarness(self)
+        let url = try qa.makeProject(name: "Tienda", folders: ["app"])
+        await qa.openProject(url)
+        await qa.mount()
+        try await qa.tap("explorer.mode.databases")
+        await qa.assertScreen("explorer.databases")
+        await qa.assertControl("menu.file.new", title: "Nuevo archivo", enabled: true)
+
+        try await qa.tap("menu.file.new")
+        await qa.assertEvent("file.new.request", ["readOnly": "false", "project": "true"])
+        // El explorador de archivos vuelve a la vista: es donde aparece el campo del nombre.
+        XCTAssertTrue(qa.controller.sidebarVisible)
+        XCTAssertFalse(qa.controller.database.browserShowsDatabases)
+        await qa.assertScreen("explorer.files")
+
+        let created = await qa.settle(forEvent: "file.new.ok", timeout: 5)
+        XCTAssertTrue(created, "el archivo nuevo tiene que abrirse en una pestaña\n" + qa.timelineText())
+        await qa.assertEvent("file.new.created", ["name": "nuevo.txt"])
+        await qa.assertEvent("file.new.ok", ["selected": "true"])
+        await qa.assertEvent("file.new.naming")
+        let document = try XCTUnwrap(qa.controller.selectedDocument)
+        XCTAssertEqual(document.url.lastPathComponent, "nuevo.txt")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: document.url.path))
+    }
+
+    /// ARC-08
+    func testReloadingAChangedFileAsksBeforeDiscarding() async throws {
+        let qa = try QAHarness(self)
+        let url = try qa.makeProject(name: "Tienda")
+        await qa.openProject(url)
+        let document = try await qa.openScript("SELECT 1;\n", named: "uno.sql")
+        qa.type("SELECT 2;\n", into: document)
+        try Data("SELECT 3;\n".utf8).write(to: document.url)
+
+        qa.script.discardChanges = false
+        qa.controller.files.reload(document)
+        await qa.assertEvent("dialog.file.confirmDiscardChanges", ["answer": "cancel", "name": "uno.sql"])
+        await qa.assertEvent("file.reload.cancelled")
+        XCTAssertEqual(document.text, "SELECT 2;\n", "cancelar conserva lo escrito")
+        XCTAssertTrue(document.isDirty)
+
+        qa.script.discardChanges = true
+        qa.controller.files.reload(document)
+        await qa.assertEvent("dialog.file.confirmDiscardChanges", ["answer": "discard"])
+        await qa.assertEvent("file.reload.ok", ["dirty": "false"])
+        XCTAssertEqual(document.text, "SELECT 3;\n", "descartar trae lo que hay en disco")
+        XCTAssertFalse(document.isDirty)
+    }
 }

@@ -96,4 +96,46 @@ final class QAProjectLifecycleTests: XCTestCase {
         XCTAssertEqual(qa.controller.openWorkspaceURLs.count, 1)
         XCTAssertNotNil(qa.controller.workspace, "no vuelve al inicio mientras quede otro proyecto")
     }
+
+    /// ABR-12
+    func testReorderingTheOpenProjectsInTheRail() async throws {
+        let qa = try QAHarness(self)
+        let first = try qa.makeProject(name: "Uno")
+        let second = try qa.makeProject(name: "Dos")
+        let third = try qa.makeProject(name: "Tres")
+        for url in [first, second, third] { await qa.openProject(url) }
+        XCTAssertEqual(qa.controller.openWorkspaceURLs.map { $0.deletingPathExtension().lastPathComponent },
+                       ["Uno", "Dos", "Tres"])
+
+        qa.controller.moveOpenWorkspace(third, to: first)
+        await qa.assertEvent("state.rail", ["order": "Tres,Uno,Dos"])
+        XCTAssertEqual(qa.controller.openWorkspaceURLs.map { $0.deletingPathExtension().lastPathComponent },
+                       ["Tres", "Uno", "Dos"])
+
+        // El orden es lo que se guarda para la próxima corrida.
+        let state = try XCTUnwrap(qa.controller.captureSessionState())
+        XCTAssertEqual(state.openWorkspaceStates?.map { $0.workspaceURL.deletingPathExtension().lastPathComponent },
+                       ["Tres", "Uno", "Dos"])
+    }
+
+    /// ABR-13
+    func testMovingTheProjectFileUpdatesRecentsAndTheSession() async throws {
+        let qa = try QAHarness(self)
+        let url = try qa.makeProject(name: "Tienda", folders: ["app"])
+        await qa.openProject(url)
+        XCTAssertEqual(qa.controller.recentProjects.first?.standardizedFileURL, url.standardizedFileURL)
+
+        let destination = qa.root.appendingPathComponent("Movido/Tienda.kzk")
+        let moved = await qa.controller.relocateWorkspace(to: destination, createDirectory: true)
+        XCTAssertTrue(moved, qa.timelineText())
+        await qa.assertEvent("project.relocate.ok")
+        XCTAssertEqual(qa.controller.workspaceURL?.standardizedFileURL, destination.standardizedFileURL)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path), "el .kzk viejo ya no está")
+
+        let recents = qa.controller.recentProjects.map(\.standardizedFileURL)
+        XCTAssertTrue(recents.contains(destination.standardizedFileURL), "la ruta nueva entra en recientes")
+        XCTAssertFalse(recents.contains(url.standardizedFileURL), "y la vieja sale")
+        let state = try XCTUnwrap(qa.controller.captureSessionState())
+        XCTAssertEqual(state.workspaceURL.standardizedFileURL, destination.standardizedFileURL)
+    }
 }

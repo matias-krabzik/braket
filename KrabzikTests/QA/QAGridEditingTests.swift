@@ -1,3 +1,4 @@
+import AppKit
 @testable import Krabzik
 import XCTest
 
@@ -290,4 +291,104 @@ final class QAGridEditingTests: XCTestCase {
         await client.closeAll()
         await client.shutdown()
     }
+
+    /// GRI-20
+    func testColumnWidthsAreKeptPerResult() async throws {
+        let qa = try QAHarness(self)
+        let connection = QAFixtures.connection()
+        let first = QAFixtures.draft(connection, result: QAFixtures.result(connection, sql: "SELECT uno"))
+        let second = QAFixtures.draft(connection, result: QAFixtures.result(connection, sql: "SELECT dos"))
+
+        // La grilla de verdad: al soltar el borde de la columna, AppKit avisa al
+        // coordinador y el ancho queda en el borrador de **ese** resultado.
+        let coordinator = SQLResultGrid.Coordinator(draft: first)
+        let table = SQLGridTable()
+        table.columnAutoresizingStyle = .noColumnAutoresizing
+        table.delegate = coordinator
+        table.dataSource = coordinator
+        coordinator.table = table
+        for (index, name) in first.result.columns.enumerated() {
+            let column = NSTableColumn(identifier: .init("\(index)"))
+            column.title = name
+            column.minWidth = 44
+            column.maxWidth = 4000
+            column.resizingMask = .userResizingMask
+            table.addTableColumn(column)
+        }
+
+        table.tableColumns[1].width = 210
+        await qa.assertEvent("grid.column.resize", ["column": "1", "width": "210"])
+        XCTAssertEqual(first.widths[1] ?? 0, 210, accuracy: 0.5)
+        XCTAssertTrue(second.widths.isEmpty, "el otro resultado conserva sus propios anchos")
+
+        // Volver a leer la estructura no pierde el ancho elegido.
+        first.configure(QAFixtures.table())
+        XCTAssertEqual(first.widths[1] ?? 0, 210, accuracy: 0.5)
+    }
+
+    /// GRI-18 · necesita el MySQL desechable
+    func testARowChangedOnTheServerRollsEverythingBack() async throws {
+        let port = try QAFixtures.mysqlPort()
+        let qa = try QAHarness(self)
+        var connection = QAFixtures.connection("QA real")
+        connection.port = port
+        connection.database = "krabzik_qa"
+        let client = qa.controller.database.client
+        let profile = try await qa.addConnection(connection)
+        func run(_ sql: String) async throws {
+            _ = try await client.execute(sql, startingLine: 1, configuration: profile, password: "",
+                                         operation: UUID(), timeoutSeconds: 15, pageIndex: 0,
+                                         onStatement: { _ in }, onResult: { _ in })
+        }
+        try await run("""
+        DROP TABLE IF EXISTS braket_qa_conflict;
+        CREATE TABLE braket_qa_conflict(id INT PRIMARY KEY AUTO_INCREMENT, nombre VARCHAR(80) NULL) ENGINE=InnoDB;
+        INSERT INTO braket_qa_conflict(nombre) VALUES ('uno'),('dos');
+        """)
+        let snapshot = try await client.schema(profile, password: "", databases: ["krabzik_qa"])
+        let table = try XCTUnwrap(snapshot.tables.first { $0.name == "braket_qa_conflict" })
+
+        var result = SQLResult(statement: 1, line: 1)
+        result.sql = "SELECT id, nombre FROM braket_qa_conflict ORDER BY id"
+        result.connection = profile
+        result.database = "krabzik_qa"
+        result.columns = ["id", "nombre"]
+        result.origins = ["id", "nombre"].map { SQLColumnOrigin(database: "krabzik_qa", table: "braket_qa_conflict",
+                                                                column: $0) }
+        result.rows = [["1", "uno"], ["2", "dos"]]
+        let draft = SQLResultDraft(result: result)
+        draft.configure(table)
+        XCTAssertTrue(draft.canEdit, draft.reason)
+        draft.beginEditing(row: 0, column: 1)
+        draft.endEditing(commit: .text("UNO"))
+        draft.beginEditing(row: 1, column: 1)
+        draft.endEditing(commit: .text("DOS"))
+        XCTAssertEqual(draft.changes.count, 2)
+
+        // Alguien cambió la fila por fuera después de que se leyó el resultado.
+        try await run("UPDATE braket_qa_conflict SET nombre = 'otro' WHERE id = 1;")
+
+        qa.controller.database.submit(draft, profiles: qa.controller.connections.profiles)
+        await qa.settle(until: { draft.sent || draft.error != nil }, timeout: 15)
+        await qa.assertEvent("grid.submit.failed")
+        XCTAssertFalse(draft.sent, "no se aplicó nada")
+        XCTAssertNotNil(draft.error)
+        XCTAssertEqual(draft.changes.count, 2, "los cambios siguen pendientes para revisar")
+
+        let collector = QARowCollector()
+        _ = try await client.execute("SELECT nombre FROM braket_qa_conflict ORDER BY id;", startingLine: 1,
+                                     configuration: profile, password: "", operation: UUID(), timeoutSeconds: 15,
+                                     pageIndex: 0, onStatement: { _ in }, onResult: { await collector.set($0.rows) })
+        let rows = await collector.rows
+        XCTAssertEqual(rows, [["otro"], ["dos"]], "la transacción se revirtió completa")
+        await client.closeAll()
+        await client.shutdown()
+    }
+}
+
+/// Junta las filas que llegan del cliente, que entrega los resultados desde fuera del
+/// main actor.
+private actor QARowCollector {
+    var rows: [[String?]] = []
+    func set(_ value: [[String?]]) { rows = value }
 }

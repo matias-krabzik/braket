@@ -165,4 +165,39 @@ final class QAProjectWizardTests: XCTestCase {
                       "el comando declarado queda aprobado al crear el proyecto")
         XCTAssertFalse(qa.controller.runner.hasActiveProcesses, "crear un proyecto no ejecuta nada")
     }
+
+    /// PRJ-07
+    func testThereIsACapOnSubprojects() async throws {
+        let qa = try QAHarness(self)
+        var urls: [URL] = []
+        for index in 0...WorkspaceLimits.projects {
+            let item = qa.root.appendingPathComponent("Muchas/p\(index)", isDirectory: true)
+            try FileManager.default.createDirectory(at: item, withIntermediateDirectories: true)
+            urls.append(item)
+        }
+        qa.script.chooseFolders = urls
+        await qa.mount()
+        try await qa.tap("welcome.create")
+        await qa.assertScreen("wizard")
+        try await qa.type("Muchas carpetas", into: "wizard.name")
+        await qa.assertField("wizard.name", text: "Muchas carpetas")
+        await qa.assertControl("wizard.next", title: "Continuar", enabled: true)
+        try await qa.tap("wizard.next")
+        await qa.assertControl("wizard.addFolders", title: "Agregar carpetas…", enabled: true)
+
+        try await qa.tap("wizard.addFolders")
+        await qa.assertEvent("dialog.file.chooseFolders", ["answer": "choose"])
+        await qa.assertEvent("wizard.addFolders.rejected", [
+            "message": "Podés agregar hasta \(WorkspaceLimits.projects) subproyectos.",
+            "limit": String(WorkspaceLimits.projects),
+            "projects": "0"
+        ])
+        qa.assertNoEvent("wizard.addFolders.ok")
+
+        // Hasta el tope sí entran.
+        qa.script.chooseFolders = Array(urls.prefix(WorkspaceLimits.projects))
+        try await qa.tap("wizard.addFolders")
+        await qa.assertEvent("wizard.addFolders.ok", ["added": String(WorkspaceLimits.projects),
+                                                      "projects": String(WorkspaceLimits.projects)])
+    }
 }

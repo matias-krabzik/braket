@@ -1,3 +1,4 @@
+import AppKit
 @testable import Krabzik
 import XCTest
 
@@ -205,5 +206,51 @@ final class QASQLExecutionTests: XCTestCase {
         await qa.settle(until: { !document.sqlExecution.isRunning }, timeout: 20)
         XCTAssertFalse(document.sqlExecution.isRunning)
         await qa.controller.database.client.shutdown()
+    }
+
+    /// SQL-20
+    func testCompletionOffersSchemaNamesAndKeepsTheAlias() async throws {
+        let qa = try QAHarness(self)
+        let url = try qa.makeProject(name: "Bases")
+        await qa.openProject(url)
+        let profile = try await qa.addConnection(QAFixtures.connection("Local"))
+        let store = qa.controller.database.schema
+        store.snapshots[profile.id] = SQLSchemaSnapshot(connection: profile, databases: [QAFixtures.database],
+                                                        tables: [QAFixtures.table()])
+        XCTAssertNotNil(store.snapshot(profile))
+
+        let text = "SELECT p.nom FROM personas p"
+        let names = store.completions(connection: profile, database: QAFixtures.database,
+                                      text: text, position: 12)
+        XCTAssertEqual(names, ["nombre"], "con el alias resuelto, solo ofrece columnas de esa tabla")
+        XCTAssertTrue(store.completions(connection: profile, database: QAFixtures.database,
+                                        text: "SELECT per", position: 10).contains("personas"),
+                      "sin calificador ofrece también las tablas")
+
+        // El editor de verdad: pedir la sugerencia y aceptarla con Enter tiene que
+        // reemplazar **solo la columna** y dejar el alias donde estaba.
+        let document = try await qa.openScript(text, named: "consulta.sql", connection: profile)
+        let surface = EditorSurface(document: document)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 400),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = surface
+        surface.completion = { [weak store] value, position in
+            store?.completions(connection: profile, database: QAFixtures.database,
+                               text: value, position: position) ?? []
+        }
+        surface.textView.sqlCompletionEnabled = true
+        surface.textView.setSelectedRange(NSRange(location: 12, length: 0))
+        surface.layoutSubtreeIfNeeded()
+        surface.textView.complete(nil)
+        await qa.assertEvent("editor.completion.show", ["count": "1", "first": "nombre"])
+
+        let enter = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                                                   timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                                                   characters: "\r", charactersIgnoringModifiers: "\r",
+                                                   isARepeat: false, keyCode: 36))
+        XCTAssertTrue(surface.textView.completionKey?(enter) == true, "Enter acepta la sugerencia")
+        await qa.assertEvent("editor.completion.accept", ["value": "nombre", "replaced": "nom"])
+        XCTAssertEqual(surface.textView.string, "SELECT p.nombre FROM personas p")
+        window.contentView = nil
     }
 }

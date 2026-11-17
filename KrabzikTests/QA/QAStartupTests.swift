@@ -87,6 +87,47 @@ final class QAStartupTests: XCTestCase {
         qa.controller.session.endSwitch()
     }
 
+    /// INI-08
+    func testTheLastSessionComesBackOnTheNextLaunch() async throws {
+        let qa = try QAHarness(self)
+        let url = try qa.makeProject(name: "Tienda", folders: ["app"])
+        await qa.openProject(url)
+        let file = url.deletingLastPathComponent().appendingPathComponent("app/notas.txt")
+        try Data("hola".utf8).write(to: file)
+        qa.controller.files.open(file)
+        await qa.settle(until: { qa.controller.documents.contains { $0.url.lastPathComponent == "notas.txt" } })
+        qa.controller.saveSessionState(qa.controller.captureSessionState())
+        XCTAssertNotNil(qa.controller.restoration.load(), "la sesión tiene que quedar guardada")
+
+        let next = qa.relaunch()
+        await next.start(arguments: ["Braket"])
+        await qa.assertEvent("app.start", ["restoring": "true"])
+        await qa.settle(until: { next.workspaceURL != nil }, timeout: 5)
+        XCTAssertEqual(next.workspaceURL?.standardizedFileURL, url.standardizedFileURL)
+        let restored = await qa.settle(until: {
+            next.documents.contains { $0.url.lastPathComponent == "notas.txt" }
+        }, timeout: 5)
+        XCTAssertTrue(restored, "la pestaña que estaba abierta tiene que volver\n" + qa.timelineText())
+    }
+
+    /// INI-10
+    func testAPixelArtFileFromFinderOpensTheImageAndNoProject() async throws {
+        let qa = try QAHarness(self)
+        let url = qa.root.appendingPathComponent("bosque.pxa")
+        _ = try await qa.controller.docs.createPixelArt(at: url, width: 8, height: 8)
+        qa.controller.docs.closeAll()
+        XCTAssertTrue(qa.controller.documents.isEmpty)
+
+        qa.controller.requestWorkspace(url)
+        await qa.settle(until: { !qa.controller.documents.isEmpty }, timeout: 3)
+        let document = try XCTUnwrap(qa.controller.documents.first)
+        XCTAssertNotNil(document.pixelArt, "un .pxa se abre como imagen")
+        XCTAssertEqual(document.url.lastPathComponent, "bosque.pxa")
+        XCTAssertNil(qa.controller.workspace, "abrir una imagen no abre ningún proyecto")
+        await qa.controller.start(arguments: ["Braket"])
+        XCTAssertNil(qa.controller.workspace, "la imagen pedida desde Finder gana sobre la sesión guardada")
+    }
+
     /// INI-09
     func testLaunchArgumentOpensThatProject() async throws {
         let qa = try QAHarness(self)

@@ -56,6 +56,37 @@ final class QAConnectionTests: XCTestCase {
         XCTAssertEqual(saved.tlsServerName, "db.example.com")
     }
 
+    /// CON-17
+    func testAFailedTestOffersTheDiagnosticsExportWithoutSecrets() async throws {
+        let qa = try QAHarness(self)
+        await qa.mount()
+        qa.controller.database.showingConnections = true
+        await qa.assertScreen("connections")
+        try await qa.tap("connections.new")
+        await qa.assertScreen("connection.sheet")
+        qa.assertNoControl("connection.sheet.diagnostics")
+
+        // La hoja arranca con un perfil sin nombre: «Probar» falla sin tocar la red.
+        try await qa.tap("connection.sheet.test")
+        await qa.assertEvent("connection.test.failed")
+        let message = try XCTUnwrap(qa.event("connection.test.failed")?.fields["message"])
+        await qa.assertControl("connection.sheet.message", title: message)
+        await qa.assertControl("connection.sheet.diagnostics", title: "Exportar diagnóstico MySQL…", enabled: true)
+
+        // Y lo que se exportaría no lleva contraseña ni destino.
+        let diagnostics = MySQLDiagnostics(directory: qa.root.appendingPathComponent("logs", isDirectory: true))
+        var profile = QAFixtures.connection("Producción")
+        profile.host = "db.interno.example"
+        profile.username = "cuenta_de_la_app"
+        await diagnostics.record(.failed, attempt: UUID(), configuration: profile,
+                                 error: DatabaseFailure("no se pudo conectar"))
+        let text = String(decoding: try await diagnostics.snapshot(), as: UTF8.self)
+        XCTAssertTrue(text.contains("connection.failed"), text)
+        for secret in ["Krabzik QA ephemeral", "db.interno.example", "cuenta_de_la_app", "no se pudo conectar"] {
+            XCTAssertFalse(text.contains(secret), "el diagnóstico no puede nombrar «\(secret)»:\n" + text)
+        }
+    }
+
     /// CON-05
     func testASavedProfileSurvivesAProjectChange() async throws {
         let qa = try QAHarness(self)
