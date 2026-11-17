@@ -71,6 +71,7 @@ struct WorkspaceSidebar: View {
 
         }
         .background(Theme.sidebar)
+        .qaScreen("explorer.files")
         .task(id: query + "|" + String(controller.session.revision)) { await filterFiles() }
     }
 

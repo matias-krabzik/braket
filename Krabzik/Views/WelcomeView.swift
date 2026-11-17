@@ -58,7 +58,7 @@ struct WelcomeView: View {
         .padding(.bottom, 20)
         .frame(width: Theme.zoom(240))
         .frame(maxHeight: .infinity)
-        .background(AppSettings.shared.theme == .light ? Theme.sidebar.opacity(0.65) : Color.black.opacity(0.035))
+        .background(Theme.settings.theme == .light ? Theme.sidebar.opacity(0.65) : Color.black.opacity(0.035))
     }
 
     private var recentProjects: some View {
@@ -110,7 +110,7 @@ struct WelcomeView: View {
 }
 
 private struct WelcomeBackground: View {
-    private var isLight: Bool { AppSettings.shared.theme == .light }
+    private var isLight: Bool { Theme.settings.theme == .light }
     private var base: Color {
         isLight ? Color(red: 0.985, green: 0.99, blue: 1) : Color(red: 35 / 255, green: 38 / 255, blue: 44 / 255)
     }

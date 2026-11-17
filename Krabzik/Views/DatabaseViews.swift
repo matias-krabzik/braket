@@ -251,13 +251,11 @@ struct ConnectionSheet: View {
             if let message {
                 Text(message).font(.system(size: Theme.zoom(11))).foregroundStyle(succeeded ? Color.green : .red)
                     .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    .qaLabel("connection.sheet.message", message)
                 if !succeeded {
-                    Button("Exportar diagnóstico MySQL…") {
-                        Task {
-                            do { try await WorkspacePrompts.exportMySQLDiagnostics() }
-                            catch { self.message = AppError.describe(error) }
-                        }
-                    }.disabled(busy)
+                    Button("Exportar diagnóstico MySQL…", action: exportDiagnostics).disabled(busy)
+                        .qaControl("connection.sheet.diagnostics", title: "Exportar diagnóstico MySQL…",
+                                   enabled: !busy, action: exportDiagnostics)
                 }
             }
             HStack {
@@ -325,6 +323,14 @@ struct ConnectionSheet: View {
                 message = MySQLClient.message(error)
                 QAProbe.failure("connection.test.failed", message ?? "", ["name": connection.name])
             }
+        }
+    }
+
+    private func exportDiagnostics() {
+        QAProbe.action("connection.diagnostics.request", ["name": connection.name])
+        Task {
+            do { try await WorkspacePrompts.exportMySQLDiagnostics() }
+            catch { self.message = AppError.describe(error) }
         }
     }
 

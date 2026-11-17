@@ -318,9 +318,13 @@ final class WorkspaceController {
     }
 
     func openTableQuery(_ table: SQLSchemaTable, connection: DatabaseConnection) {
+        QAProbe.action("table.query.request", ["table": table.qualified, "connection": connection.name,
+                                               "readOnly": QAField.bool(isReadOnly)])
         guard !isReadOnly else { return }
         Task {
             if let document = await files.createTableQuery(table) {
+                QAProbe.action("table.query.ok", ["table": table.qualified, "connection": connection.name,
+                                                  "sql": QAField.sql(document.text)])
                 connections.select(connection.id, for: document)
                 workflowVisible = false
                 database.execute(document, connection: connection, databaseOverride: table.database)
@@ -334,10 +338,16 @@ final class WorkspaceController {
     }
 
     func moveOpenWorkspace(_ url: URL, to target: URL) {
+        QAProbe.action("project.rail.move.request", ["project": QAField.path(url), "before": QAField.path(target)])
         guard !isSwitchingWorkspace, let source = openWorkspaceURLs.firstIndex(of: url),
-              let destination = openWorkspaceURLs.firstIndex(of: target), source != destination else { return }
+              let destination = openWorkspaceURLs.firstIndex(of: target), source != destination else {
+            QAProbe.action("project.rail.move.ignored", ["switching": QAField.bool(isSwitchingWorkspace)])
+            return
+        }
         openWorkspaceURLs.remove(at: source)
         openWorkspaceURLs.insert(url, at: destination)
+        QAProbe.state("state.rail", ["order": openWorkspaceURLs.map { $0.deletingPathExtension().lastPathComponent }
+                .joined(separator: ","), "open": QAField.count(openWorkspaceURLs.count)])
     }
 
     func adoptRelocatedWorkspace(_ updated: Workspace, from old: URL, to url: URL) {
@@ -410,6 +420,14 @@ final class WorkspaceController {
     func toggleRun(_ project: CodeProject) {
         selectedProjectID = project.id
         projects.toggleRun(project)
+        processesVisible = true
+    }
+
+    /// Detener desde el menú: corta todos los procesos y deja el panel a la vista, que es
+    /// donde se ve el resultado.
+    func stopAll() {
+        QAProbe.action("process.stopAll.request", ["active": QAField.bool(runner.hasActiveProcesses)])
+        runner.stopAll()
         processesVisible = true
     }
 

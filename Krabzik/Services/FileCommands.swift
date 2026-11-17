@@ -84,6 +84,9 @@ final class FileCommands {
     }
 
     func create(in directory: URL? = nil) {
+        QAProbe.action("file.new.request", ["readOnly": QAField.bool(session.isReadOnly),
+                                            "project": QAField.bool(session.url != nil),
+                                            "directory": QAField.path(directory)])
         guard !session.isReadOnly, session.url != nil else { return }
         requestNewFile?(directory)
     }
@@ -305,13 +308,19 @@ final class FileCommands {
     }
 
     func reload(_ document: EditorDocument) {
+        QAProbe.action("file.reload.request", ["file": QAField.path(document.url),
+                                               "dirty": QAField.bool(document.isDirty)])
         guard !document.isDraft else { return }
         if document.isDirty, !session.dialogs.confirmDiscardChanges(document.url.lastPathComponent) {
+            QAProbe.action("file.reload.cancelled", ["file": QAField.path(document.url)])
             return
         }
         do {
             try docs.reload(document)
+            QAProbe.action("file.reload.ok", ["file": QAField.path(document.url),
+                                              "dirty": QAField.bool(document.isDirty)])
         } catch {
+            QAProbe.failure("file.reload.failed", AppError.describe(error), ["file": QAField.path(document.url)])
             session.errors.report(error)
         }
     }

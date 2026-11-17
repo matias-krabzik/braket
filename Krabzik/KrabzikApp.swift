@@ -5,6 +5,8 @@ import SwiftUI
 struct KrabzikApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var controller = WorkspaceController.forApp()
+    /// Las órdenes que el menú comparte con los escenarios de QA: ver `AppCommands.swift`.
+    private var commands: AppMenuCommands { AppMenuCommands(controller: controller) }
 
     var body: some Scene {
         Window("Braket", id: "workspace") {
@@ -40,7 +42,7 @@ struct KrabzikApp: App {
                 Button("Agregar subproyecto…", action: controller.projects.addFolders)
                     .keyboardShortcut("o", modifiers: [.command, .shift])
                     .disabled(controller.workspace == nil)
-                Button("Nuevo archivo") { controller.files.create() }.keyboardShortcut("n").disabled(controller.workspace == nil)
+                AppCommandButton(commands.newFile).keyboardShortcut("n")
                 Divider()
                 Button("Nueva imagen pixel art") { controller.files.createPixelArt() }
                     .disabled(controller.isReadOnly)
@@ -55,24 +57,19 @@ struct KrabzikApp: App {
                     .disabled(controller.selectedDocument?.pixelArt == nil)
             }
             CommandGroup(replacing: .windowSize) {
-                Button("Mostrar explorador") { controller.sidebarVisible.toggle() }.keyboardShortcut("1", modifiers: [.command, .option])
-                Button("Mostrar panel inferior") { controller.toggleProcessesPanel() }.keyboardShortcut("j")
+                AppCommandButton(commands.toggleSidebar).keyboardShortcut("1", modifiers: [.command, .option])
+                AppCommandButton(commands.toggleProcesses).keyboardShortcut("j")
             }
             CommandGroup(after: .toolbar) {
-                Button("Aumentar zoom") { controller.settings.zoomIn() }.keyboardShortcut("+", modifiers: .command)
-                    .disabled(controller.settings.uiScale >= AppSettings.uiScaleRange.upperBound)
-                Button("Aumentar zoom con =") { controller.settings.zoomIn() }.keyboardShortcut("=", modifiers: .command)
-                    .disabled(controller.settings.uiScale >= AppSettings.uiScaleRange.upperBound)
-                Button("Reducir zoom") { controller.settings.zoomOut() }.keyboardShortcut("-", modifiers: .command)
-                    .disabled(controller.settings.uiScale <= AppSettings.uiScaleRange.lowerBound)
-                Button("Restablecer zoom") { controller.settings.resetZoom() }.keyboardShortcut("0", modifiers: .command)
-                    .disabled(controller.settings.uiScale == 1)
+                AppCommandButton(commands.zoomIn).keyboardShortcut("+", modifiers: .command)
+                Button("Aumentar zoom con =") { commands.zoomIn.run() }.keyboardShortcut("=", modifiers: .command)
+                    .disabled(!commands.zoomIn.enabled)
+                AppCommandButton(commands.zoomOut).keyboardShortcut("-", modifiers: .command)
+                AppCommandButton(commands.resetZoom).keyboardShortcut("0", modifiers: .command)
             }
             CommandMenu("Proyecto") {
-                Button("Iniciar", action: controller.startAll).keyboardShortcut("r").disabled(controller.runnableProjects.isEmpty)
-                Button("Detener") {
-                    controller.runner.stopAll()
-                }.keyboardShortcut(".").disabled(!controller.runner.hasActiveProcesses)
+                AppCommandButton(commands.startProcesses).keyboardShortcut("r")
+                AppCommandButton(commands.stopProcesses).keyboardShortcut(".")
             }
             CommandMenu("SQL") {
                 Button("Abrir script…", action: controller.files.importScripts).disabled(controller.workspace == nil)

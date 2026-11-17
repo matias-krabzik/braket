@@ -14,8 +14,7 @@ struct WorkspaceModeRail: View {
     private func mode(_ label: String, icon: String, databases: Bool) -> some View {
         let selected = controller.database.browserShowsDatabases == databases
         return Button {
-            controller.database.browserShowsDatabases = databases
-            controller.sidebarVisible = true
+            show(databases)
         } label: {
             Image(systemName: icon).font(.system(size: Theme.zoom(15)))
                 .foregroundStyle(selected ? Theme.accent : .secondary)
@@ -24,6 +23,15 @@ struct WorkspaceModeRail: View {
                 .background(selected ? Theme.accent.opacity(0.12) : .clear,
                             in: RoundedRectangle(cornerRadius: 5))
         }.buttonStyle(.plain).help(label).accessibilityLabel(label)
+            .qaControl(databases ? "explorer.mode.databases" : "explorer.mode.files",
+                       title: label) { show(databases) }
+    }
+
+    private func show(_ databases: Bool) {
+        controller.database.browserShowsDatabases = databases
+        controller.sidebarVisible = true
+        QAProbe.state("state.explorer", ["mode": databases ? "databases" : "files",
+                                         "sidebar": QAField.bool(controller.sidebarVisible)])
     }
 }
 
@@ -48,6 +56,7 @@ struct DatabaseExplorer: View {
             }
         }
         .font(.system(size: Theme.zoom(12))).background(Theme.background)
+        .qaScreen("explorer.databases")
         .sheet(isPresented: Binding(get: { ddl != nil }, set: { if !$0 { ddl = nil } })) {
             VStack(alignment: .leading) {
                 Text("Definición de la tabla").font(.headline)
@@ -84,8 +93,13 @@ struct DatabaseExplorer: View {
             }
             if let error = store.errors[connection.id] ?? state.error {
                 Text(error).font(.system(size: Theme.zoom(10))).foregroundStyle(.orange).textSelection(.enabled)
+                    .qaLabel("explorer.schema.error." + connection.name, error)
                 Button("Reintentar carga") { Task { await store.discover(connection, client: controller.database.client) } }
                     .disabled(store.loading.contains(connection.id) || controller.isReadOnly)
+                    .qaControl("explorer.schema.retry." + connection.name, title: "Reintentar carga",
+                               enabled: !store.loading.contains(connection.id) && !controller.isReadOnly) {
+                        Task { await store.discover(connection, client: controller.database.client) }
+                    }
             } else if !store.loading.contains(connection.id), store.preference(connection).visible.isEmpty {
                 Text("Elegí las bases con el selector de la derecha.").font(.system(size: Theme.zoom(10))).foregroundStyle(.secondary)
             }

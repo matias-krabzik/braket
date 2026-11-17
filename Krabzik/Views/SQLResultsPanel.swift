@@ -109,6 +109,7 @@ private struct SQLResultContent: View {
             if let connection = draft.result.connection, let error = controller.database.schema.errors[connection.id] {
                 Text("Estructura: " + error).font(.system(size: Theme.zoom(11))).foregroundStyle(.orange).textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12)
+                    .qaLabel("sql.result.schemaError", error)
             }
             HStack {
                 if draft.result.error == nil { Text(draft.result.summary) }

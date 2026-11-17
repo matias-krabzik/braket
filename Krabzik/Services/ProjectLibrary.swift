@@ -87,9 +87,10 @@ final class ProjectLibrary {
 
     /// Arranca todos los ejecutables cuyo comando esté permitido.
     func startAll() {
+        QAProbe.action("process.startAll.request", ["projects": QAField.count(session.runnableProjects.count)])
         guard let workspaceURL = session.url else { return }
         for project in session.runnableProjects where allowedToRun(project, workspaceURL: workspaceURL) {
-            runner.start(project, workspaceURL: workspaceURL)
+            start(project, workspaceURL: workspaceURL)
         }
     }
 
@@ -97,26 +98,41 @@ final class ProjectLibrary {
     func toggleRun(_ project: CodeProject) {
         guard let workspaceURL = session.url else { return }
         if runner.state(for: project.id).status.active {
+            QAProbe.action("process.stop.request", ["project": project.name])
             runner.stop(project.id)
         } else if allowedToRun(project, workspaceURL: workspaceURL) {
-            runner.start(project, workspaceURL: workspaceURL)
+            start(project, workspaceURL: workspaceURL)
         }
+    }
+
+    /// El único sitio que le pide un proceso al runner, para que la línea de tiempo diga
+    /// siempre qué subproyecto arrancó y con qué comando.
+    private func start(_ project: CodeProject, workspaceURL: URL) {
+        QAProbe.action("process.start.ok", ["project": project.name,
+                                            "command": QAField.text(project.command)])
+        runner.start(project, workspaceURL: workspaceURL)
     }
 
     /// Un comando se confirma la primera vez, y de nuevo si cambia, porque la aprobación
     /// se guarda por hash del comando.
     private func allowedToRun(_ project: CodeProject, workspaceURL: URL) -> Bool {
         guard session.trust == .trusted else {
+            QAProbe.failure("process.start.rejected", "proyecto en solo lectura", ["project": project.name])
             session.errors.report(message: "El proyecto está en solo lectura. Confiá en él para ejecutar procesos.")
             return false
         }
         if session.trustStore.isApproved(command: project.command, project: project.id, workspaceURL: workspaceURL) {
+            QAProbe.action("process.command.approved", ["project": project.name, "asked": QAField.bool(false)])
             return true
         }
         let directory = project.directory(relativeTo: workspaceURL)
-        switch confirmCommand(CommandPrompt(project: project.name, command: project.command,
-                                            directory: directory.path)) {
+        let decision = confirmCommand(CommandPrompt(project: project.name, command: project.command,
+                                                    directory: directory.path))
+        QAProbe.dialog("dialog.process.confirmCommand", answer: decision.qaAnswer,
+                       ["project": project.name, "command": QAField.text(project.command)])
+        switch decision {
         case .cancel:
+            QAProbe.action("process.start.cancelled", ["project": project.name])
             return false
         case .once:
             return true

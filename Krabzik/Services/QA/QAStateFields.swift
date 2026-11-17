@@ -80,3 +80,13 @@ extension SaveDecision {
         }
     }
 }
+
+extension CommandDecision {
+    var qaAnswer: String {
+        switch self {
+        case .cancel: "cancel"
+        case .once: "once"
+        case .always: "always"
+        }
+    }
+}

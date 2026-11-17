@@ -77,6 +77,9 @@ extension WorkspaceController {
     }
 
     func relocateWorkspace(to destination: URL, createDirectory: Bool = false) async -> Bool {
+        QAProbe.action("project.relocate.request", ["from": QAField.path(workspaceURL),
+                                                    "to": QAField.path(destination),
+                                                    "readOnly": QAField.bool(isReadOnly)])
         guard !isReadOnly, let source = workspaceURL, let workspace, session.beginSwitch() else { return false }
         defer { session.endSwitch() }
         let destination = destination.standardizedFileURL
@@ -93,8 +96,13 @@ extension WorkspaceController {
             }
             trust.forget(source)
             adoptRelocatedWorkspace(moved, from: source, to: destination)
+            QAProbe.action("project.relocate.ok", ["from": QAField.path(source), "to": QAField.path(destination),
+                                                   "recents": QAField.count(recents.urls.count)])
             return true
-        } catch { errors.report(error)
-        return false }
+        } catch {
+            QAProbe.failure("project.relocate.failed", AppError.describe(error), ["to": QAField.path(destination)])
+            errors.report(error)
+            return false
+        }
     }
 }

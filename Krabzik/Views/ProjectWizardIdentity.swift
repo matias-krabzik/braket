@@ -14,6 +14,7 @@ struct ProjectWizardIdentity: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Nombre").font(.callout)
                     TextField("Mi proyecto", text: $draft.name).textFieldStyle(.roundedBorder)
+                        .qaField("wizard.name", text: $draft.name)
                 }
             }
             VStack(alignment: .leading, spacing: 8) {

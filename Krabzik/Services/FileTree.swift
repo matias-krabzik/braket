@@ -503,12 +503,16 @@ struct FileTree: NSViewRepresentable {
                     controller.session.write(workspace)
                     update(workspace, at: workspaceURL, revision: controller.session.revision)
                 }
+                QAProbe.action("file.new.created", ["file": QAField.path(url), "name": url.lastPathComponent])
                 Task {
                     do {
                         try await controller.docs.open(url) { self.controller.workspaceURL == workspaceURL }
                         guard controller.workspaceURL == workspaceURL else { return }
                         controller.docs.selected?.focusEditorOnOpen = false
                         showCreatedFile(url, in: folder)
+                        QAProbe.action("file.new.ok", ["file": QAField.path(url),
+                                                       "selected": QAField.bool(controller.selectedDocumentID?
+                                                           .standardizedFileURL == url.standardizedFileURL)])
                     } catch { report(error) }
                 }
             } catch { report(error) }
@@ -535,6 +539,7 @@ struct FileTree: NSViewRepresentable {
             // SwiftUI termina de insertar la pestaña antes de entregar el foco al
             // editor de nombres de AppKit; hacerlo durante ese layout lo cancela.
             guard rename else { return }
+            QAProbe.action("file.new.naming", ["file": QAField.path(url)])
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
                 guard let self, self.controller.selectedDocument?.url.standardizedFileURL == url.standardizedFileURL,
                       let current = self.findNode(at: folder)?.children?.first(where: {

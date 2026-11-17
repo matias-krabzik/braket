@@ -157,6 +157,9 @@ struct SQLResultGrid: NSViewRepresentable {
             guard !settingWidth, let column = notification.userInfo?["NSTableColumn"] as? NSTableColumn,
                   let index = Int(column.identifier.rawValue) else { return }
             draft.widths[index] = column.width / scale
+            QAProbe.action("grid.column.resize", ["column": QAField.count(index),
+                                                  "width": QAField.count(Int(column.width / scale)),
+                                                  "result": QAField.text(draft.result.sql)])
         }
         @objc func selectCell(_ sender: NSTableView) {
             guard sender.clickedRow >= 0, sender.clickedColumn >= 0 else { return }

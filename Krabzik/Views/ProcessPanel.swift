@@ -38,8 +38,8 @@ struct ProcessPanel: View {
                             .frame(maxWidth: .infinity, alignment: .leading).padding(12)
                     }
                 } else if let project = controller.selectedProject, let run = controller.runner.runs[project.id] {
-                    ConsoleView(run: run, theme: AppSettings.shared.theme,
-                                uiScale: AppSettings.shared.uiScale).id(project.id)
+                    ConsoleView(run: run, theme: Theme.settings.theme,
+                                uiScale: Theme.settings.uiScale).id(project.id)
                 } else { Theme.background }
             }
         }

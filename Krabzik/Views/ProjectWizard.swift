@@ -101,9 +101,9 @@ struct ProjectWizard: View {
                 Label(detecting ? "Detectando tecnologías…" : "Soltá carpetas acá", systemImage: "folder.badge.plus")
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button("Agregar carpetas…") { addFolders(WorkspacePrompts.chooseFolders()) }.disabled(detecting)
+                Button("Agregar carpetas…") { addFolders(controller.session.dialogs.chooseFolders()) }.disabled(detecting)
                     .qaControl("wizard.addFolders", title: "Agregar carpetas…", enabled: !detecting) {
-                        addFolders(WorkspacePrompts.chooseFolders())
+                        addFolders(controller.session.dialogs.chooseFolders())
                     }
             }
             .padding(16)
@@ -194,6 +194,8 @@ struct ProjectWizard: View {
     }
 
     private func addFolders(_ urls: [URL]) {
+        QAProbe.action("wizard.addFolders.request", ["folders": QAField.count(urls.count),
+                                                     "projects": QAField.count(draft.projects.count)])
         guard !urls.isEmpty else { return }
         detecting = true
         error = nil
@@ -207,7 +209,14 @@ struct ProjectWizard: View {
                     throw ProjectDraftError.invalid("Podés agregar hasta \(WorkspaceLimits.projects) subproyectos.")
                 }
                 draft.projects.append(contentsOf: additions)
-            } catch { self.error = error.localizedDescription }
+                QAProbe.action("wizard.addFolders.ok", ["added": QAField.count(additions.count),
+                                                        "projects": QAField.count(draft.projects.count)])
+            } catch {
+                self.error = error.localizedDescription
+                QAProbe.failure("wizard.addFolders.rejected", error.localizedDescription,
+                                ["projects": QAField.count(draft.projects.count),
+                                 "limit": QAField.count(WorkspaceLimits.projects)])
+            }
         }
     }
 

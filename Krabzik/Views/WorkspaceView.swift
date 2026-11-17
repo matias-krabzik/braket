@@ -56,6 +56,7 @@ struct WorkspaceView: View {
         .tint(Theme.accent)
         .disabled(controller.isRestoringSession)
         .preferredColorScheme(Theme.colorScheme)
+        .qaCommands(AppMenuCommands(controller: controller).all)
         .frame(minWidth: controller.workspace == nil && controller.documents.isEmpty ? 760 : 900,
                minHeight: controller.workspace == nil && controller.documents.isEmpty ? 420 : 580)
         .toolbar {
@@ -269,7 +270,7 @@ struct WorkspaceView: View {
                 } else if isMarkdown(document) {
                     markdownContent(document)
                 } else {
-                    CodeEditor(document: document, theme: AppSettings.shared.theme, uiScale: controller.settings.uiScale,
+                    CodeEditor(document: document, theme: Theme.settings.theme, uiScale: controller.settings.uiScale,
                                completion: { text, position in
                                    let connection = controller.connections.selected(for: document)
                                    let database = connection.map { controller.database.state($0.id).currentDatabase } ?? ""
@@ -322,14 +323,14 @@ struct WorkspaceView: View {
         } ?? []
         switch document.markdownMode {
         case .edit:
-            CodeEditor(document: document, theme: AppSettings.shared.theme, uiScale: controller.settings.uiScale).id(document.id)
+            CodeEditor(document: document, theme: Theme.settings.theme, uiScale: controller.settings.uiScale).id(document.id)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .preview:
             MarkdownPreview(document: document, projectRoots: roots).id(document.id)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .split:
             HSplitView {
-                CodeEditor(document: document, theme: AppSettings.shared.theme, uiScale: controller.settings.uiScale).id(document.id)
+                CodeEditor(document: document, theme: Theme.settings.theme, uiScale: controller.settings.uiScale).id(document.id)
                     .frame(minWidth: 230, maxWidth: .infinity, maxHeight: .infinity)
                 MarkdownPreview(document: document, projectRoots: roots).id(document.id)
                     .frame(minWidth: 230, maxWidth: .infinity, maxHeight: .infinity)

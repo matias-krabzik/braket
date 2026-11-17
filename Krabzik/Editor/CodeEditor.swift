@@ -3,7 +3,7 @@ import SwiftUI
 
 enum EditorPalette {
     @MainActor static var background: NSColor {
-        background(for: AppSettings.shared.theme)
+        background(for: Theme.settings.theme)
     }
     static func background(for theme: AppTheme) -> NSColor {
         if theme == .light { return NSColor(srgbRed: 0.99, green: 0.99, blue: 0.995, alpha: 1) }
@@ -232,13 +232,18 @@ private final class ObserverToken: @unchecked Sendable {
         textView.requestCompletion = { [weak self] in
             guard let self, let completion = self.completion else { return }
             let values = completion(self.textView.string, self.textView.selectedRange().location)
+            QAProbe.action("editor.completion.show", ["count": QAField.count(values.count),
+                                                      "first": QAField.text(values.first ?? "")])
             self.suggestions.show(values, in: self, textView: self.textView)
         }
         textView.completionKey = { [weak self] event in self?.suggestions.handle(event) ?? false }
         suggestions.accept = { [weak self] value in
             guard let self else { return }
             self.window?.makeFirstResponder(self.textView)
+            let replaced = (self.textView.string as NSString).substring(with: self.textView.rangeForUserCompletion)
             self.textView.insertText(value, replacementRange: self.textView.rangeForUserCompletion)
+            QAProbe.action("editor.completion.accept", ["value": QAField.text(value),
+                                                        "replaced": QAField.text(replaced)])
             self.completionWork?.cancel()
         }
         textView.setSelectedRange(NSRange(location: 0, length: 0))
