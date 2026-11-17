@@ -38,6 +38,7 @@ struct ProjectWizard: View {
             footer.padding(18)
         }
         .frame(width: 780, height: 570)
+        .qaScreen("wizard")
         .background(Theme.background)
         .tint(Theme.accent)
         .preferredColorScheme(Theme.colorScheme)
@@ -69,6 +70,11 @@ struct ProjectWizard: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(detecting || (index > 0 && draft.validationMessage != nil))
+                .qaControl("wizard.step.\(index)", title: steps[index],
+                           enabled: !detecting && !(index > 0 && draft.validationMessage != nil)) {
+                    error = nil
+                    step = index
+                }
             }
             Spacer()
         }
@@ -96,6 +102,9 @@ struct ProjectWizard: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button("Agregar carpetas…") { addFolders(WorkspacePrompts.chooseFolders()) }.disabled(detecting)
+                    .qaControl("wizard.addFolders", title: "Agregar carpetas…", enabled: !detecting) {
+                        addFolders(WorkspacePrompts.chooseFolders())
+                    }
             }
             .padding(16)
             .background(dropTarget ? Theme.accent.opacity(0.12) : .clear)
@@ -154,21 +163,33 @@ struct ProjectWizard: View {
     private var footer: some View {
         HStack(spacing: 12) {
             Button("Cancelar") { dismiss() }.keyboardShortcut(.cancelAction).disabled(detecting)
+                .qaControl("wizard.cancel", title: "Cancelar", enabled: !detecting) { dismiss() }
             Spacer()
             if detecting || busy { ProgressView().controlSize(.small) }
             if step > 0 {
                 Button("Atrás") { error = nil
                 step -= 1 }.disabled(detecting)
+                    .qaControl("wizard.back", title: "Atrás", enabled: !detecting) {
+                        error = nil
+                        step -= 1
+                    }
             }
             if step < 2 {
                 Button(step == 0 ? "Continuar" : "Ver resumen") { error = nil
                 step += 1 }
                     .disabled(draft.validationMessage != nil || detecting)
+                    .qaControl("wizard.next", title: step == 0 ? "Continuar" : "Ver resumen",
+                               enabled: draft.validationMessage == nil && !detecting) {
+                        error = nil
+                        step += 1
+                    }
             }
             Button(step < 2 ? "Crear ahora" : "Crear proyecto", action: create)
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(draft.validationMessage != nil || detecting)
+                .qaControl("wizard.create", title: step < 2 ? "Crear ahora" : "Crear proyecto",
+                           enabled: draft.validationMessage == nil && !detecting, action: create)
         }
     }
 
@@ -191,6 +212,9 @@ struct ProjectWizard: View {
     }
 
     private func create() {
+        QAProbe.action("wizard.create.tap", ["name": draft.trimmedName, "step": QAField.count(step),
+                                             "projects": QAField.count(draft.projects.count),
+                                             "validation": QAField.text(draft.validationMessage ?? "")])
         busy = true
         error = nil
         Task {

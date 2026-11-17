@@ -167,25 +167,23 @@ struct SQLResultGrid: NSViewRepresentable {
             beginEditing(row: modelRow(sender.clickedRow), column: sender.clickedColumn)
         }
         private func beginEditing(row: Int, column: Int) {
-            guard let sender = table, draft.canEdit, row >= 0, column >= 0, !draft.deleted.contains(row),
-                  draft.column(column)?.generated != true,
+            guard let sender = table, draft.canEditCell(row: row, column: column),
                   let field = sender.view(atColumn: column, row: visibleRow(row), makeIfNecessary: true) as? SQLGridField else { return }
             field.isEditable = true
             field.isSelectable = true
             if draft.value(row: row, column: column) == .null || draft.value(row: row, column: column) == .serverDefault {
                 field.stringValue = ""
             }
-            draft.selectedCell = SQLCell(row: row, column: column)
-            draft.isEditingCell = true
+            draft.beginEditing(row: row, column: column)
             editing = true
             SQLGridTable.editingField = field
             field.selectText(nil)
         }
         func controlTextDidEndEditing(_ notification: Notification) {
             guard let field = notification.object as? SQLGridField, editing else { return }
-            draft.set(.text(field.stringValue), row: field.rowIndex, column: field.columnIndex)
+            draft.selectedCell = SQLCell(row: field.rowIndex, column: field.columnIndex)
+            draft.endEditing(commit: .text(field.stringValue))
             editing = false
-            draft.isEditingCell = false
             SQLGridTable.editingField = nil
             field.isEditable = false
             table?.reloadData()
@@ -197,7 +195,7 @@ struct SQLResultGrid: NSViewRepresentable {
             }
             if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
                 editing = false
-                draft.isEditingCell = false
+                draft.endEditing()
                 SQLGridTable.editingField = nil
                 table?.window?.makeFirstResponder(table)
                 table?.reloadData()

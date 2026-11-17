@@ -168,6 +168,7 @@ final class FileCommands {
         }
         do {
             let result = try ExplorerFileSystem(roots: roots).move(url, to: url.deletingLastPathComponent(), name: name)
+            QAProbe.action("file.rename.ok", ["from": QAField.path(url), "to": QAField.path(result)])
             docs.relocate(from: url, to: result)
             let base = workspaceURL.deletingLastPathComponent().path + "/"
             workspace.scripts = workspace.scripts.map { path in
@@ -201,6 +202,9 @@ final class FileCommands {
 
     @discardableResult
     func save(_ document: EditorDocument) async -> Bool {
+        QAProbe.action("file.save.request", ["file": QAField.path(document.url),
+                                             "draft": QAField.bool(document.isDraft),
+                                             "dirty": QAField.bool(document.isDirty)])
         do {
             if document.isDraft {
                 if document.pixelArt != nil {
@@ -220,8 +224,12 @@ final class FileCommands {
                 session.touch()
                 return true
             }
-            return try await docs.save(document)
+            let saved = try await docs.save(document)
+            QAProbe.action(saved ? "file.save.ok" : "file.save.cancelled",
+                           ["file": QAField.path(document.url), "dirty": QAField.bool(document.isDirty)])
+            return saved
         } catch {
+            QAProbe.failure("file.save.failed", AppError.describe(error), ["file": QAField.path(document.url)])
             session.errors.report(error)
             return false
         }
@@ -275,13 +283,24 @@ final class FileCommands {
     @discardableResult
     func close(_ document: EditorDocument,
                cancelQuery: @MainActor (SQLExecution) -> Void = { _ in }) async -> Bool {
+        QAProbe.action("file.close.request", ["file": QAField.path(document.url),
+                                              "dirty": QAField.bool(document.isDirty),
+                                              "running": QAField.bool(document.sqlExecution.isRunning)])
         if document.sqlExecution.isRunning {
             guard session.dialogs.confirmCancelQuery() else { return false }
             cancelQuery(document.sqlExecution)
         }
-        guard document.sqlExecution.drafts.values.allSatisfy({ !$0.sending && $0.confirmDiscard() }) else { return false }
-        guard await confirmSave(document) else { return false }
+        guard document.sqlExecution.drafts.values.allSatisfy({ !$0.sending && $0.confirmDiscard() }) else {
+            QAProbe.action("file.close.cancelled", ["file": QAField.path(document.url), "stage": "grid"])
+            return false
+        }
+        guard await confirmSave(document) else {
+            QAProbe.action("file.close.cancelled", ["file": QAField.path(document.url), "stage": "save"])
+            return false
+        }
         docs.close(docs.documents.first { $0.sqlExecution === document.sqlExecution } ?? document)
+        QAProbe.action("file.close.ok", ["file": QAField.path(document.url),
+                                         "open": QAField.count(docs.documents.count)])
         return true
     }
 

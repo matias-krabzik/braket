@@ -25,6 +25,7 @@ struct ConnectionsSettingsView: View {
                 Button { editing = DatabaseConnection() } label: {
                     Label("Nueva conexión", systemImage: "plus")
                 }
+                .qaControl("connections.new", title: "Nueva conexión") { editing = DatabaseConnection() }
             }.padding(20)
             HStack(spacing: 6) {
                 Circle().fill(connectedCount > 0 ? Color.green : .secondary).frame(width: 6, height: 6)
@@ -53,6 +54,7 @@ struct ConnectionsSettingsView: View {
             }.padding(20)
         }
         .background(Theme.background)
+        .qaScreen("connections")
         .sheet(item: $editing) { ConnectionSheet(connection: $0, controller: controller) }
         .onAppear {
             if !controller.database.schema.selectionHosts.contains(selectionHost) {
@@ -100,13 +102,19 @@ struct ConnectionsSettingsView: View {
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 Spacer()
                 Button("Editar") { editing = connection }
+                    .qaControl("connections.card.edit." + connection.name, title: "Editar",
+                               enabled: !state.busy && state.status != .connecting) { editing = connection }
                 Button(state.status == .connected ? "Desconectar" : "Conectar") {
-                    if state.status == .connected { Task { _ = await controller.database.disconnect(connection) } }
-                    else { controller.database.connect(connection) }
+                    toggle(connection, state: state)
                 }
+                .qaControl("connections.card.toggle." + connection.name,
+                           title: state.status == .connected ? "Desconectar" : "Conectar",
+                           enabled: !state.busy && state.status != .connecting) { toggle(connection, state: state) }
                 Menu {
                     Button("Quitar conexión…", role: .destructive) { removing = connection }
                 } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).fixedSize()
+                    .qaControl("connections.card.remove." + connection.name, title: "Quitar conexión…",
+                               enabled: !state.busy && state.status != .connecting) { removing = connection }
             }.disabled(state.busy || state.status == .connecting)
             if state.inTransaction {
                 Label("Transacción abierta", systemImage: "exclamationmark.circle")
@@ -124,14 +132,27 @@ struct ConnectionsSettingsView: View {
                 Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled)
             }
             if state.status == .connected {
-                Button("Elegir bases de datos…") {
-                    Task { await controller.database.schema.discover(connection, client: controller.database.client, choose: true) }
-                }
+                Button("Elegir bases de datos…") { chooseDatabases(connection) }
+                    .qaControl("connections.card.databases." + connection.name, title: "Elegir bases de datos…") {
+                        chooseDatabases(connection)
+                    }
             }
         }
         .padding(16)
         .background(Theme.sidebar, in: RoundedRectangle(cornerRadius: 12))
         .overlay { RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1) }
+    }
+}
+
+private extension ConnectionsSettingsView {
+    /// Conectar o desconectar, en un solo sitio: el botón cambia de título, no de acción.
+    func toggle(_ connection: DatabaseConnection, state: DatabaseState) {
+        if state.status == .connected { Task { _ = await controller.database.disconnect(connection) } }
+        else { controller.database.connect(connection) }
+    }
+
+    func chooseDatabases(_ connection: DatabaseConnection) {
+        Task { await controller.database.schema.discover(connection, client: controller.database.client, choose: true) }
     }
 }
 
@@ -241,13 +262,17 @@ struct ConnectionSheet: View {
             }
             HStack {
                 Button("Probar") { test() }.disabled(busy)
+                    .qaControl("connection.sheet.test", title: "Probar", enabled: !busy, action: test)
                 if busy { ProgressView().controlSize(.small) }
                 Spacer()
                 Button("Cancelar") { dismiss() }.keyboardShortcut(.cancelAction).disabled(busy)
+                    .qaControl("connection.sheet.cancel", title: "Cancelar", enabled: !busy) { dismiss() }
                 Button("Guardar") { save() }.keyboardShortcut(.defaultAction).disabled(busy)
+                    .qaControl("connection.sheet.save", title: "Guardar", enabled: !busy, action: save)
             }
         }
         .padding(24).frame(width: 580)
+        .qaScreen("connection.sheet")
         .task {
             do { password = try CredentialStore.read(for: connection) }
             catch { message = error.localizedDescription }
@@ -282,6 +307,9 @@ struct ConnectionSheet: View {
     }
 
     private func test() {
+        QAProbe.action("connection.test.request", ["name": connection.name,
+                                                   "host": connection.host + ":" + String(connection.port),
+                                                   "tls": connection.tls.label])
         busy = true
         message = nil
         Task {
@@ -291,9 +319,11 @@ struct ConnectionSheet: View {
                 try await controller.database.client.test(value, password: password)
                 succeeded = true
                 message = "Conexión correcta"
+                QAProbe.sql("connection.test.ok", ["name": connection.name])
             } catch {
                 succeeded = false
                 message = MySQLClient.message(error)
+                QAProbe.failure("connection.test.failed", message ?? "", ["name": connection.name])
             }
         }
     }
@@ -341,6 +371,9 @@ struct SQLToolbar: View {
                 Button { controller.database.showingConnections = true } label: {
                     Image(systemName: "slider.horizontal.3")
                 }.help("Administrar conexiones globales").accessibilityLabel("Administrar conexiones")
+                    .qaControl("sql.toolbar.manageConnections", title: "Administrar conexiones") {
+                        controller.database.showingConnections = true
+                    }
                 if let connection {
                     let state = controller.database.state(connection.id)
                     let names = controller.database.schema.preference(connection).visible
@@ -355,19 +388,28 @@ struct SQLToolbar: View {
                 SQLTimeoutControl(execution: document.sqlExecution)
                 if let connection {
                     let state = controller.database.state(connection.id)
-                    Button(state.status == .connected ? "Desconectar" : "Conectar") {
-                        if state.status == .connected { Task { _ = await controller.database.disconnect(connection) } }
-                        else { controller.database.connect(connection) }
-                    }.disabled(state.busy || state.status == .connecting || document.sqlExecution.isRunning || controller.isReadOnly)
+                    let enabled = !state.busy && state.status != .connecting
+                        && !document.sqlExecution.isRunning && !controller.isReadOnly
+                    Button(state.status == .connected ? "Desconectar" : "Conectar") { toggle(connection, state: state) }
+                        .disabled(!enabled)
+                        .qaControl("sql.toolbar.toggleConnection",
+                                   title: state.status == .connected ? "Desconectar" : "Conectar",
+                                   enabled: enabled) { toggle(connection, state: state) }
                 }
                 if document.sqlExecution.isRunning {
                     Button { controller.database.cancel(document.sqlExecution) } label: {
                         Label("Cancelar", systemImage: "stop.fill")
                     }.disabled(document.sqlExecution.isCancelling)
+                        .qaControl("sql.toolbar.cancel", title: "Cancelar",
+                                   enabled: !document.sqlExecution.isCancelling) {
+                            controller.database.cancel(document.sqlExecution)
+                        }
                 } else {
                     Button(action: controller.executeSQL) { Label("Ejecutar", systemImage: "play.fill") }
                         .disabled(!canExecute).help("Ejecutar selección o sentencia bajo el cursor (⌘↩)")
                         .accessibilityLabel("Ejecutar SQL")
+                        .qaControl("sql.toolbar.execute", title: "Ejecutar", enabled: canExecute,
+                                   action: controller.executeSQL)
                 }
             }
             HStack(spacing: 8) {
@@ -391,5 +433,11 @@ struct SQLToolbar: View {
         }
         .padding(.horizontal, 18).padding(.vertical, 10)
         .background(Theme.bar)
+        .qaScreen("sql.toolbar")
+    }
+
+    private func toggle(_ connection: DatabaseConnection, state: DatabaseState) {
+        if state.status == .connected { Task { _ = await controller.database.disconnect(connection) } }
+        else { controller.database.connect(connection) }
     }
 }

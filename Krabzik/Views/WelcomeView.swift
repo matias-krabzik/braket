@@ -18,6 +18,7 @@ struct WelcomeView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(WelcomeBackground())
         .disabled(controller.isSwitchingWorkspace)
+        .qaScreen("welcome")
     }
 
     private var sidebar: some View {
@@ -27,14 +28,14 @@ struct WelcomeView: View {
                 .padding(.horizontal, 8)
                 .padding(.bottom, 28)
             VStack(spacing: 10) {
-                WelcomeAction(title: "Abrir proyecto…", icon: "folder", shortcut: "⌘O", prominent: true,
-                              action: controller.chooseWorkspace)
-                WelcomeAction(title: "Crear proyecto…", icon: "plus", shortcut: "⇧⌘N", prominent: false,
-                              action: controller.createWorkspace)
-                WelcomeAction(title: "Nueva imagen pixel art", icon: "square.grid.3x3", shortcut: "", prominent: false,
-                              action: { controller.files.createPixelArt() })
-                WelcomeAction(title: "Abrir imagen pixel art…", icon: "photo", shortcut: "", prominent: false,
-                              action: controller.files.choosePixelArt)
+                WelcomeAction(id: "welcome.open", title: "Abrir proyecto…", icon: "folder", shortcut: "⌘O",
+                              prominent: true, action: controller.chooseWorkspace)
+                WelcomeAction(id: "welcome.create", title: "Crear proyecto…", icon: "plus", shortcut: "⇧⌘N",
+                              prominent: false, action: controller.createWorkspace)
+                WelcomeAction(id: "welcome.pixel.new", title: "Nueva imagen pixel art", icon: "square.grid.3x3",
+                              shortcut: "", prominent: false, action: { controller.files.createPixelArt() })
+                WelcomeAction(id: "welcome.pixel.open", title: "Abrir imagen pixel art…", icon: "photo",
+                              shortcut: "", prominent: false, action: controller.files.choosePixelArt)
             }
             Spacer(minLength: 32)
             SettingsLink {
@@ -89,8 +90,9 @@ struct WelcomeView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ForEach(controller.recentProjects, id: \.self) { url in
-                            RecentProjectRow(url: url, open: { Task { await controller.openWorkspace(url) } },
+                        ForEach(Array(controller.recentProjects.enumerated()), id: \.element) { index, url in
+                            RecentProjectRow(index: index, url: url,
+                                             open: { Task { await controller.openWorkspace(url) } },
                                              forget: { controller.recents.forget(url) })
                                 .contextMenu {
                                     Button("Abrir proyecto") { Task { await controller.openWorkspace(url) } }
@@ -140,6 +142,7 @@ private struct WelcomeBackground: View {
 }
 
 private struct WelcomeAction: View {
+    let id: String
     let title: String
     let icon: String
     let shortcut: String
@@ -168,10 +171,12 @@ private struct WelcomeAction: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
+        .qaControl(id, title: title, action: action)
     }
 }
 
 private struct RecentProjectRow: View {
+    let index: Int
     let url: URL
     let open: () -> Void
     let forget: () -> Void
@@ -212,10 +217,12 @@ private struct RecentProjectRow: View {
             .help("Quitar de recientes. Los archivos se conservan.")
             .accessibilityLabel("Quitar \(name) de recientes")
             .accessibilityHint("Los archivos se conservan.")
+            .qaControl("welcome.recent.forget.\(index)", title: "Quitar de recientes", action: forget)
         }
         .background(isHovered ? Theme.sidebar.opacity(0.6) : Color.clear)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
         .onHover { isHovered = $0 }
+        .qaControl("welcome.recent.open.\(index)", title: name, action: open)
         .task(id: url) {
             model = try? await Task.detached(priority: .utility) { try Workspace.read(from: url) }.value
         }

@@ -90,7 +90,7 @@ extension WorkspaceController {
         controller.confirmTrust = TrustPrompts.ask
         controller.projects.confirmCommand = TrustPrompts.askCommand
         controller.workflows.confirmCommand = TrustPrompts.askCommand
-        controller.session.dialogs = .real
+        controller.session.dialogs = WorkspaceDialogs.real.logged()
         return controller
     }
 }

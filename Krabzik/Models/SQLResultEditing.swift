@@ -49,6 +49,45 @@ final class SQLResultDraft {
         guard canResetSelected, let cell = selectedCell else { return }
         if cell.row < result.rows.count { changes.removeValue(forKey: cell) }
         else { inserted[cell.row - result.rows.count][cell.column] = insertedOriginals[cell.row - result.rows.count][cell.column] }
+        QAProbe.action("grid.reset", qaFields)
+    }
+
+    /// Si esta celda se puede poner en modo edición. Es la condición que la grilla
+    /// consulta antes de abrir el campo, y la que una prueba afirma antes de escribir.
+    func canEditCell(row: Int, column: Int) -> Bool {
+        canEdit && row >= 0 && column >= 0 && row < rowCount && !deleted.contains(row)
+            && self.column(column)?.generated != true
+    }
+
+    /// Entra en modo edición en una celda. La grilla de AppKit llama acá para la parte
+    /// de modelo y después abre el campo; un escenario de QA llama acá y escribe con
+    /// `endEditing(commit:)`. Un solo sitio decide si la celda es editable.
+    @discardableResult
+    func beginEditing(row: Int, column: Int) -> Bool {
+        guard canEditCell(row: row, column: column) else {
+            QAProbe.sql("grid.edit.denied", ["row": QAField.count(row), "column": QAField.count(column),
+                                             "reason": QAField.text(reason.isEmpty ? "celda no editable" : reason)])
+            return false
+        }
+        selectedCell = SQLCell(row: row, column: column)
+        isEditingCell = true
+        QAProbe.action("grid.edit.begin", ["row": QAField.count(row), "column": QAField.count(column),
+                                           "value": QAField.text(value(row: row, column: column).display)])
+        QAProbe.state("state.draft", qaFields)
+        return true
+    }
+
+    /// Sale del modo edición. Con `commit` guarda el valor en la celda que se estaba
+    /// editando; sin él, descarta lo tecleado y deja la celda como estaba.
+    func endEditing(commit committed: SQLCellValue? = nil) {
+        let cell = selectedCell
+        isEditingCell = false
+        if let committed, let cell { set(committed, row: cell.row, column: cell.column) }
+        QAProbe.action("grid.edit.end", ["committed": QAField.bool(committed != nil),
+                                         "row": QAField.count(cell?.row ?? -1),
+                                         "column": QAField.count(cell?.column ?? -1),
+                                         "value": QAField.text(committed?.display ?? "")])
+        QAProbe.state("state.draft", qaFields)
     }
 
     var deleted: Set<Int> = []
@@ -72,6 +111,7 @@ final class SQLResultDraft {
         guard !hasChanges, !sent else { return }
         table = schema
         reason = Self.readOnlyReason(result, table: schema) ?? ""
+        QAProbe.state("state.draft", qaFields)
     }
 
     static func readOnlyReason(_ result: SQLResult, table: SQLSchemaTable?) -> String? {
@@ -127,9 +167,22 @@ final class SQLResultDraft {
     }
 
     func set(_ value: SQLCellValue, row: Int, column: Int) {
-        guard canEdit, !deleted.contains(row), let metadata = self.column(column), !metadata.generated else { return }
-        if value == .null && !metadata.nullable { return }
-        if value == .serverDefault && !metadata.canDefault { return }
+        guard canEdit, !deleted.contains(row), let metadata = self.column(column), !metadata.generated else {
+            QAProbe.sql("grid.set.denied", ["row": QAField.count(row), "column": QAField.count(column),
+                                            "reason": QAField.text(reason.isEmpty ? "columna no editable" : reason)])
+            return
+        }
+        if value == .null && !metadata.nullable {
+            QAProbe.sql("grid.set.denied", ["row": QAField.count(row), "column": QAField.count(column),
+                                            "reason": "la columna no admite NULL"])
+            return
+        }
+        if value == .serverDefault && !metadata.canDefault {
+            QAProbe.sql("grid.set.denied", ["row": QAField.count(row), "column": QAField.count(column),
+                                            "reason": "la columna no tiene DEFAULT"])
+            return
+        }
+        defer { QAProbe.state("state.draft", qaFields) }
         if row >= result.rows.count { inserted[row - result.rows.count][column] = value
         return }
         let cell = SQLCell(row: row, column: column)
@@ -138,7 +191,12 @@ final class SQLResultDraft {
     }
 
     func addRow(duplicating row: Int? = nil) {
-        guard canInsert else { return }
+        guard canInsert else {
+            QAProbe.sql("grid.addRow.denied", ["reason": QAField.text(reason.isEmpty ? "falta una columna con DEFAULT" : reason)])
+            return
+        }
+        defer { QAProbe.state("state.draft", qaFields) }
+        QAProbe.action("grid.addRow", ["duplicating": QAField.count(row ?? -1)])
         inserted.append(result.columns.indices.map { index in
             let metadata = column(index)
             if metadata?.autoIncrement == true || metadata?.generated == true { return .serverDefault }
@@ -150,7 +208,15 @@ final class SQLResultDraft {
     }
 
     func deleteRow(_ row: Int) {
-        guard canEdit, (0..<rowCount).contains(row) else { return }
+        guard canEdit, (0..<rowCount).contains(row) else {
+            QAProbe.sql("grid.deleteRow.denied", ["row": QAField.count(row),
+                                                  "reason": QAField.text(reason.isEmpty ? "fila fuera de rango" : reason)])
+            return
+        }
+        defer {
+            QAProbe.action("grid.deleteRow", ["row": QAField.count(row)])
+            QAProbe.state("state.draft", qaFields)
+        }
         if row >= result.rows.count {
             inserted.remove(at: row - result.rows.count)
             insertedOriginals.remove(at: row - result.rows.count)
@@ -160,7 +226,8 @@ final class SQLResultDraft {
         else { deleted.insert(row) }
     }
 
-    func discard() { changes = [:]
+    func discard() { QAProbe.action("grid.discard", qaFields)
+    changes = [:]
     inserted = []
     insertedOriginals = []
     selectedCell = nil
@@ -201,13 +268,29 @@ final class SQLResultDraft {
         return output
     }
 
+    /// Cómo se pregunta antes de perder cambios que no se enviaron. Punto de inyección
+    /// por el mismo motivo que `DatabaseController.askBeforeWriting`: el `NSAlert` real
+    /// cuelga una corrida de pruebas. El diálogo se arma en `discardAlert()`.
+    @MainActor
+    static var confirmDiscardChanges: (SQLResultDraft) -> Bool = { draft in
+        draft.discardAlert().runModal() == .alertFirstButtonReturn
+    }
+
     func confirmDiscard() -> Bool {
         guard hasChanges else { return true }
+        let confirmed = Self.confirmDiscardChanges(self)
+        QAProbe.dialog("dialog.grid.discardChanges", answer: confirmed ? "discard" : "cancel",
+                       ["changes": QAField.count(changes.count), "inserted": QAField.count(inserted.count),
+                        "deleted": QAField.count(deleted.count)])
+        return confirmed
+    }
+
+    func discardAlert() -> NSAlert {
         let alert = NSAlert()
         alert.messageText = "¿Descartar los cambios pendientes de este resultado?"
         alert.informativeText = "Todavía no se enviaron a la base de datos."
         alert.addButton(withTitle: "Descartar")
         alert.addButton(withTitle: "Cancelar")
-        return alert.runModal() == .alertFirstButtonReturn
+        return alert
     }
 }

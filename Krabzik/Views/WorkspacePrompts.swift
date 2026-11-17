@@ -318,6 +318,89 @@ struct WorkspaceDialogs {
     var confirmStopProcesses: () -> Bool = { false }
     var confirmSaveBeforeSending: ([String]) -> Bool = { _ in false }
 
+    /// Los mismos diálogos, con cada pregunta y cada respuesta anotadas en el registro
+    /// de QA. Se envuelve una sola vez, en `WorkspaceController.forApp()` y en el arnés
+    /// de pruebas, así ninguna respuesta del usuario queda sin registrar y no hay que
+    /// repetir la emisión en los veinte sitios que preguntan.
+    func logged() -> WorkspaceDialogs {
+        var logged = self
+        logged.chooseWorkspace = { [chooseWorkspace] in
+            let url = chooseWorkspace()
+            QAProbe.dialog("dialog.file.chooseWorkspace", answer: url == nil ? "cancel" : "choose",
+                           ["url": QAField.path(url)])
+            return url
+        }
+        logged.createWorkspace = { [createWorkspace] in
+            let url = createWorkspace()
+            QAProbe.dialog("dialog.file.createWorkspace", answer: url == nil ? "cancel" : "choose",
+                           ["url": QAField.path(url)])
+            return url
+        }
+        logged.chooseFolders = { [chooseFolders] in
+            let urls = chooseFolders()
+            QAProbe.dialog("dialog.file.chooseFolders", answer: urls.isEmpty ? "cancel" : "choose",
+                           ["count": QAField.count(urls.count)])
+            return urls
+        }
+        logged.chooseScripts = { [chooseScripts] in
+            let urls = chooseScripts()
+            QAProbe.dialog("dialog.file.chooseScripts", answer: urls.isEmpty ? "cancel" : "choose",
+                           ["count": QAField.count(urls.count)])
+            return urls
+        }
+        logged.createFile = { [createFile] name, directory in
+            let url = createFile(name, directory)
+            QAProbe.dialog("dialog.file.createFile", answer: url == nil ? "cancel" : "create",
+                           ["name": name, "url": QAField.path(url)])
+            return url
+        }
+        logged.chooseScriptsDirectory = { [chooseScriptsDirectory] directory in
+            let url = chooseScriptsDirectory(directory)
+            QAProbe.dialog("dialog.file.chooseScriptsDirectory", answer: url == nil ? "cancel" : "choose",
+                           ["url": QAField.path(url)])
+            return url
+        }
+        logged.saveCopy = { [saveCopy] name, directory in
+            let url = saveCopy(name, directory)
+            QAProbe.dialog("dialog.file.saveCopy", answer: url == nil ? "cancel" : "save",
+                           ["name": name, "url": QAField.path(url)])
+            return url
+        }
+        logged.confirmSave = { [confirmSave] name in
+            let decision = confirmSave(name)
+            QAProbe.dialog("dialog.file.confirmSave", answer: decision.qaAnswer, ["name": name])
+            return decision
+        }
+        logged.confirmDiscardChanges = { [confirmDiscardChanges] name in
+            let value = confirmDiscardChanges(name)
+            QAProbe.dialog("dialog.file.confirmDiscardChanges", answer: value ? "discard" : "cancel",
+                           ["name": name])
+            return value
+        }
+        logged.confirmCancelQuery = { [confirmCancelQuery] in
+            let value = confirmCancelQuery()
+            QAProbe.dialog("dialog.sql.confirmCancelQuery", answer: value ? "cancel-query" : "keep")
+            return value
+        }
+        logged.confirmStopAgent = { [confirmStopAgent] in
+            let value = confirmStopAgent()
+            QAProbe.dialog("dialog.agent.confirmStop", answer: value ? "stop" : "keep")
+            return value
+        }
+        logged.confirmStopProcesses = { [confirmStopProcesses] in
+            let value = confirmStopProcesses()
+            QAProbe.dialog("dialog.process.confirmStop", answer: value ? "stop" : "keep")
+            return value
+        }
+        logged.confirmSaveBeforeSending = { [confirmSaveBeforeSending] names in
+            let value = confirmSaveBeforeSending(names)
+            QAProbe.dialog("dialog.agent.confirmSaveBeforeSending", answer: value ? "save" : "cancel",
+                           ["count": QAField.count(names.count)])
+            return value
+        }
+        return logged
+    }
+
     /// Los diálogos de verdad.
     static var real: WorkspaceDialogs {
         WorkspaceDialogs(chooseWorkspace: WorkspacePrompts.chooseWorkspace,

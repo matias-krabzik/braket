@@ -24,6 +24,19 @@ final class DatabaseController {
         DatabaseController.writeAlert(audit, connection: connection, destination: destination)
             .runModal() == .alertFirstButtonReturn
     }
+    /// Las otras dos preguntas modales de la base, con el mismo criterio que
+    /// `askBeforeWriting`: un `NSAlert` real no se puede ejercitar en una prueba, así que
+    /// el diálogo se arma en un método estático —que sí se prueba— y acá queda el punto
+    /// donde se engancha. Un escenario de QA los contesta por guion y el registro deja
+    /// escrito qué se preguntó y qué se respondió.
+    @ObservationIgnored
+    var confirmDisconnectWithTransaction: (DatabaseConnection) -> Bool = { _ in
+        DatabaseController.disconnectAlert().runModal() == .alertFirstButtonReturn
+    }
+    @ObservationIgnored
+    var confirmCloseActiveConnections: () -> Bool = {
+        DatabaseController.closeConnectionsAlert().runModal() == .alertFirstButtonReturn
+    }
     @ObservationIgnored let client = MySQLClient()
     @ObservationIgnored private var connectionTasks: [UUID: Task<Void, Never>] = [:]
 
@@ -36,9 +49,16 @@ final class DatabaseController {
 
     func connect(_ connection: DatabaseConnection) {
         let state = state(connection.id)
-        guard state.status == .disconnected, !state.busy else { return }
+        QAProbe.action("connection.connect.request", ["name": connection.name,
+                                                      "status": state.qaStatus,
+                                                      "busy": QAField.bool(state.busy)])
+        guard state.status == .disconnected, !state.busy else {
+            QAProbe.sql("connection.connect.ignored", ["name": connection.name, "status": state.qaStatus])
+            return
+        }
         state.status = .connecting
         state.error = nil
+        QAProbe.state("state.connection", state.qaFields(connection))
         connectionTasks[connection.id] = Task {
             defer { connectionTasks.removeValue(forKey: connection.id) }
             do {
@@ -48,6 +68,7 @@ final class DatabaseController {
                 state.inTransaction = info.inTransaction
                 state.noBackslashEscapes = info.noBackslashEscapes
                 state.status = .connected
+                QAProbe.sql("connection.connect.ok", state.qaFields(connection))
                 let preferred = schema.preference(connection).defaultDatabase
                 if !preferred.isEmpty, preferred != info.database {
                     let updated = try await client.useDatabase(preferred, config: connection, password: password)
@@ -57,34 +78,69 @@ final class DatabaseController {
             } catch {
                 state.status = .disconnected
                 state.error = MySQLClient.message(error)
+                QAProbe.failure("connection.connect.failed", state.error ?? "", ["name": connection.name])
             }
+            QAProbe.state("state.connection", state.qaFields(connection))
         }
     }
 
     func disconnect(_ connection: DatabaseConnection) async -> Bool {
         let state = state(connection.id)
-        guard !state.busy, state.status != .connecting else { return false }
+        QAProbe.action("connection.disconnect.request", state.qaFields(connection))
+        guard !state.busy, state.status != .connecting else {
+            QAProbe.sql("connection.disconnect.ignored", ["name": connection.name, "status": state.qaStatus])
+            return false
+        }
         if state.inTransaction {
-            let alert = NSAlert()
-            alert.messageText = "¿Cerrar la conexión?"
-            alert.informativeText = "La transacción pendiente se revertirá."
-            alert.addButton(withTitle: "Cerrar conexión")
-            alert.addButton(withTitle: "Cancelar")
-            guard alert.runModal() == .alertFirstButtonReturn else { return false }
+            let confirmed = confirmDisconnectWithTransaction(connection)
+            QAProbe.dialog("dialog.connection.disconnectWithTransaction",
+                           answer: confirmed ? "close" : "cancel", ["name": connection.name])
+            guard confirmed else { return false }
         }
         if schema.loading.contains(connection.id) { schema.cancel(connection.id) }
         await client.disconnect(connection.id)
         state.status = .disconnected
         state.inTransaction = false
         state.error = nil
+        QAProbe.sql("connection.disconnect.ok", state.qaFields(connection))
+        QAProbe.state("state.connection", state.qaFields(connection))
         return true
+    }
+
+    /// El diálogo que avisa que cerrar la conexión revierte la transacción abierta.
+    static func disconnectAlert() -> NSAlert {
+        let alert = NSAlert()
+        alert.messageText = "¿Cerrar la conexión?"
+        alert.informativeText = "La transacción pendiente se revertirá."
+        alert.addButton(withTitle: "Cerrar conexión")
+        alert.addButton(withTitle: "Cancelar")
+        return alert
+    }
+
+    /// El diálogo que pregunta antes de cortar consultas y transacciones en curso.
+    static func closeConnectionsAlert() -> NSAlert {
+        let alert = NSAlert()
+        alert.messageText = "¿Cerrar las conexiones MySQL?"
+        alert.informativeText = "Se cancelarán las consultas en curso y se revertirán las transacciones pendientes."
+        alert.addButton(withTitle: "Cerrar conexiones")
+        alert.addButton(withTitle: "Cancelar")
+        return alert
     }
 
     func execute(_ document: EditorDocument, connection: DatabaseConnection,
                  queryOverride: String? = nil, databaseOverride: String? = nil,
                  pageIndex: Int = 0, targetResultID: UUID? = nil) {
         let state = state(connection.id), execution = document.sqlExecution
-        guard !execution.isRunning, !state.busy, state.status != .connecting else { return }
+        QAProbe.action("sql.execute.request", ["file": QAField.path(document.url),
+                                               "connection": connection.name,
+                                               "override": QAField.bool(queryOverride != nil),
+                                               "databaseOverride": databaseOverride ?? "",
+                                               "page": QAField.count(pageIndex),
+                                               "status": state.qaStatus])
+        guard !execution.isRunning, !state.busy, state.status != .connecting else {
+            QAProbe.sql("sql.execute.ignored", ["reason": execution.isRunning ? "running" : "busy"])
+            return
+        }
         let query: (text: String, startingLine: Int)
         do {
             query = try queryOverride.map { (text: $0, startingLine: 1) }
@@ -92,10 +148,12 @@ final class DatabaseController {
         }
         catch { execution.error = MySQLClient.message(error)
         resultsVisible = true
+        QAProbe.failure("sql.execute.rejected", execution.error ?? "", ["stage": "cursor"])
         return }
         guard !query.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             execution.error = "No hay una sentencia SQL bajo el cursor."
             resultsVisible = true
+            QAProbe.failure("sql.execute.rejected", execution.error ?? "", ["stage": "empty"])
             return
         }
         guard allowsExecution(query, connection: connection, state: state, execution: execution) else { return }
@@ -109,6 +167,9 @@ final class DatabaseController {
         }
         guard reusing || (execution.results.count < 200 && retainedBytes < 24_000_000) else {
             execution.error = "Cerrá algunas pestañas de resultados antes de ejecutar más consultas."
+            QAProbe.failure("sql.execute.rejected", execution.error ?? "",
+                            ["stage": "budget", "results": QAField.count(execution.results.count),
+                             "bytes": QAField.count(retainedBytes)])
             return
         }
         execution.targetResultID = targetResultID
@@ -125,9 +186,11 @@ final class DatabaseController {
                     pending.page = SQLPage(index: pageIndex)
                 }
                 guard execution.begin(pending) else { execution.targetResultID = nil
+                QAProbe.sql("sql.execute.cancelledByDraft", ["sql": QAField.sql(statement.text)])
                 return }
             }
         } catch { execution.error = MySQLClient.message(error)
+        QAProbe.failure("sql.execute.rejected", execution.error ?? "", ["stage": "split"])
         return }
         let timeoutSeconds = max(1, min(execution.timeoutSeconds, 3600))
         execution.timeoutSeconds = timeoutSeconds
@@ -142,6 +205,9 @@ final class DatabaseController {
         state.busy = true
         state.error = nil
         resultsVisible = true
+        QAProbe.sql("sql.execute.begin", ["sql": QAField.sql(query.text), "line": QAField.count(query.startingLine),
+                                          "connection": connection.name, "database": targetDatabase,
+                                          "timeout": QAField.count(timeoutSeconds)])
         execution.task = Task {
             defer {
                 execution.finish(error: execution.error)
@@ -150,6 +216,9 @@ final class DatabaseController {
                 execution.task = nil
                 execution.operationID = nil
                 state.busy = false
+                QAProbe.sql(execution.error == nil ? "sql.execute.ok" : "sql.execute.failed", execution.qaFields)
+                QAProbe.state("state.execution", execution.qaFields)
+                QAProbe.state("state.connection", state.qaFields(connection))
             }
             do {
                 try Task.checkCancellation()
@@ -169,7 +238,15 @@ final class DatabaseController {
                     let accepted = await MainActor.run { execution.begin(pending) }
                     if !accepted { throw CancellationError() }
                 }, onResult: { result in
-                    await MainActor.run { execution.receive(result) }
+                    await MainActor.run {
+                        execution.receive(result)
+                        QAProbe.sql("sql.result", ["sql": QAField.sql(result.sql),
+                                                   "columns": QAField.count(result.columns.count),
+                                                   "rows": QAField.count(result.rows.count),
+                                                   "affected": QAField.count(Int(result.affectedRows)),
+                                                   "truncated": QAField.bool(result.truncated),
+                                                   "error": QAField.text(result.error ?? "")])
+                    }
                 })
                 state.status = .connected
                 state.currentDatabase = info.database
@@ -216,12 +293,19 @@ final class DatabaseController {
             return false
         }
         guard audit.hasWrites else { return true }
+        QAProbe.sql("sql.writeGuard.writes", ["policy": connection.effectiveWritePolicy.rawValue,
+                                              "writes": QAField.count(audit.writes.count),
+                                              "total": QAField.count(audit.total)])
         guard connection.effectiveWritePolicy != .readOnly else {
             execution.error = Self.rejection(audit, connection: connection)
             resultsVisible = true
+            QAProbe.failure("sql.writeGuard.rejected", execution.error ?? "", ["connection": connection.name])
             return false
         }
-        return askBeforeWriting(audit, connection, state.destination(for: connection))
+        let approved = askBeforeWriting(audit, connection, state.destination(for: connection))
+        QAProbe.dialog("dialog.sql.confirmWrites", answer: approved ? "run" : "cancel",
+                       ["connection": connection.name, "writes": QAField.count(audit.writes.count)])
+        return approved
     }
 
     private static func rejection(_ audit: SQLWriteGuard.Audit, connection: DatabaseConnection) -> String {
@@ -261,7 +345,12 @@ final class DatabaseController {
 
     func selectDatabase(_ name: String, connection: DatabaseConnection) {
         let state = state(connection.id)
-        guard !state.busy, state.status != .connecting else { return }
+        QAProbe.action("connection.useDatabase.request", ["name": connection.name, "database": name,
+                                                          "status": state.qaStatus])
+        guard !state.busy, state.status != .connecting else {
+            QAProbe.sql("connection.useDatabase.ignored", ["name": connection.name])
+            return
+        }
         state.busy = true
         Task {
             defer { state.busy = false }
@@ -273,24 +362,35 @@ final class DatabaseController {
                 state.noBackslashEscapes = info.noBackslashEscapes
                 state.status = .connected
                 state.error = nil
-            } catch { state.error = MySQLClient.message(error) }
+                QAProbe.sql("connection.useDatabase.ok", state.qaFields(connection))
+            } catch {
+                state.error = MySQLClient.message(error)
+                QAProbe.failure("connection.useDatabase.failed", state.error ?? "", ["name": connection.name])
+            }
+            QAProbe.state("state.connection", state.qaFields(connection))
         }
     }
 
     func submit(_ draft: SQLResultDraft, profiles: [DatabaseConnection]) {
+        QAProbe.action("grid.submit.request", draft.qaFields)
         guard let connection = draft.result.connection, profiles.contains(connection), let table = draft.table else {
             draft.error = "La conexión cambió. Ejecutá la consulta nuevamente antes de enviar."
+            QAProbe.failure("grid.submit.rejected", draft.error ?? "", ["stage": "connection"])
             return
         }
         guard connection.effectiveWritePolicy != .readOnly else {
             draft.error = "El perfil «\(connection.name)» está en solo lectura: no se envían cambios."
+            QAProbe.failure("grid.submit.rejected", draft.error ?? "", ["stage": "writePolicy"])
             return
         }
         let state = state(connection.id)
         guard !state.busy else { draft.error = "La conexión está ocupada."
+        QAProbe.failure("grid.submit.rejected", draft.error ?? "", ["stage": "busy"])
         return }
         do {
             let mutations = try draft.mutations()
+            QAProbe.sql("grid.submit.plan", ["table": table.qualified, "statements": QAField.count(mutations.count),
+                                             "sql": QAField.sql(mutations.map(\.sql).joined(separator: "; "), limit: 400)])
             guard !mutations.isEmpty else { return }
             draft.sending = true
             state.busy = true
@@ -304,15 +404,22 @@ final class DatabaseController {
                     draft.sent = true
                     draft.reason = "Cambios enviados. Volvé a ejecutar la consulta para actualizar los datos."
                     draft.showingReview = false
+                    QAProbe.sql("grid.submit.ok", draft.qaFields)
                 } catch {
                     draft.error = MySQLClient.message(error)
                     if draft.error?.contains("COMMIT") == true { draft.reason = draft.error ?? "" }
+                    QAProbe.failure("grid.submit.failed", draft.error ?? "", ["table": table.qualified])
                 }
+                QAProbe.state("state.draft", draft.qaFields)
             }
-        } catch { draft.error = MySQLClient.message(error) }
+        } catch {
+            draft.error = MySQLClient.message(error)
+            QAProbe.failure("grid.submit.rejected", draft.error ?? "", ["stage": "mutations"])
+        }
     }
 
     func cancel(_ execution: SQLExecution) {
+        QAProbe.action("sql.cancel.request", execution.qaFields)
         guard let operation = execution.operationID, execution.isRunning, !execution.isCancelling else { return }
         execution.isCancelling = true
         execution.task?.cancel()
@@ -321,6 +428,9 @@ final class DatabaseController {
             if case .localOnly(let reason) = await client.cancel(operation) {
                 execution.cancelNote =
                     "Se cerró la conexión local, pero la consulta puede seguir en el servidor (\(reason))."
+                QAProbe.sql("sql.cancel.localOnly", ["reason": QAField.text(reason)])
+            } else {
+                QAProbe.sql("sql.cancel.ok")
             }
         }
     }
@@ -331,12 +441,9 @@ final class DatabaseController {
         let hasActivity = states.values.contains { $0.busy || $0.inTransaction }
         if !closeIdleConnections && !hasActivity { return true }
         if hasActivity && confirmActivity {
-            let alert = NSAlert()
-            alert.messageText = "¿Cerrar las conexiones MySQL?"
-            alert.informativeText = "Se cancelarán las consultas en curso y se revertirán las transacciones pendientes."
-            alert.addButton(withTitle: "Cerrar conexiones")
-            alert.addButton(withTitle: "Cancelar")
-            guard alert.runModal() == .alertFirstButtonReturn else { return false }
+            let confirmed = confirmCloseActiveConnections()
+            QAProbe.dialog("dialog.connection.closeActive", answer: confirmed ? "close" : "cancel")
+            guard confirmed else { return false }
         }
         schema.cancelAll()
         await client.closeAll()

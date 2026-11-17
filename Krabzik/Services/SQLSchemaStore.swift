@@ -75,9 +75,15 @@ final class SQLSchemaStore {
         loading.insert(connection.id)
         errors[connection.id] = nil
         progress[connection.id] = "Conectando para leer la estructura…"
+        QAProbe.action("schema.discover.begin", ["connection": connection.name,
+                                                 "choose": QAField.bool(choose)])
         let task = Task { await self.load(connection, client: client, choose: choose, token: token) }
         tasks[connection.id] = task
         await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+        QAProbe.sql("schema.discover.end", ["connection": connection.name,
+                                            "databases": QAField.count(snapshots[connection.id]?.databases.count ?? 0),
+                                            "tables": QAField.count(snapshots[connection.id]?.tables.count ?? 0),
+                                            "error": QAField.text(errors[connection.id] ?? "")])
     }
 
     private func load(_ connection: DatabaseConnection, client: any SQLSchemaSource, choose: Bool, token: UUID) async {

@@ -41,12 +41,14 @@ struct SQLResultsPanel: View {
                             }
                             .background(Theme.surfaceInk.opacity(execution.selectedResult?.id == result.id ? 0.1 : 0.025),
                                         in: RoundedRectangle(cornerRadius: 5))
+                            .qaControl("sql.result.tab.\(index)", title: "Consulta \(index + 1)",
+                                       enabled: !result.isLoading) { execution.selectedResultID = result.id }
                         }
                     }.padding(5)
                 }.scrollIndicators(.hidden)
                 SQLTimeoutControl(execution: execution)
                 Button(action: hide) { Image(systemName: "chevron.down") }.buttonStyle(.plain).padding(.horizontal, 12)
-            }.font(.system(size: Theme.zoom(12))).background(Theme.bar)
+            }.font(.system(size: Theme.zoom(12))).background(Theme.bar).qaScreen("sql.results")
             if let result = execution.selectedResult {
                 if result.isLoading {
                     VStack(spacing: 12) {
@@ -132,12 +134,22 @@ private struct SQLResultContent: View {
                     if draft.sending { ProgressView().controlSize(.small) }
                     Spacer()
                     Button("Cancelar") { draft.showingReview = false }.keyboardShortcut(.cancelAction).disabled(draft.sending)
-                    Button("Enviar cambios") { controller.database.submit(draft, profiles: controller.connections.profiles) }
-                        .disabled(draft.sending || !draft.canEdit || !draft.hasChanges || controller.isReadOnly)
+                        .qaControl("grid.review.cancel", title: "Cancelar", enabled: !draft.sending) {
+                            draft.showingReview = false
+                        }
+                    let canSubmit = !draft.sending && draft.canEdit && draft.hasChanges && !controller.isReadOnly
+                    Button("Enviar cambios") { submit() }
+                        .disabled(!canSubmit)
+                        .qaControl("grid.review.submit", title: "Enviar cambios", enabled: canSubmit, action: submit)
                 }
             }.padding(24).frame(width: 820, height: 540).interactiveDismissDisabled(draft.sending)
+                .qaScreen("grid.review")
         }
     }
+    private func submit() {
+        controller.database.submit(draft, profiles: controller.connections.profiles)
+    }
+
     private var preview: String {
         do {
             return "START TRANSACTION;\n\n" + (try draft.mutations()).map { ($0.verificationSQL.map { $0 + ";\n" } ?? "") + $0.sql + ";" }
@@ -180,40 +192,50 @@ private struct SQLResultToolbar: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            action("Actualizar", icon: "arrow.clockwise", enabled: !busy && result.connection != nil) { run() }
+            action("Actualizar", icon: "arrow.clockwise", enabled: !busy && result.connection != nil,
+                   id: "grid.refresh") { run() }
             Divider().frame(height: Theme.zoom(18))
-            action("Agregar fila", icon: "plus", enabled: !busy && draft.canInsert) { draft.addRow() }
-            action("Eliminar fila seleccionada", icon: "minus", enabled: !busy && draft.canDeleteSelected) {
+            action("Agregar fila", icon: "plus", enabled: !busy && draft.canInsert,
+                   id: "grid.addRow") { draft.addRow() }
+            action("Eliminar fila seleccionada", icon: "minus", enabled: !busy && draft.canDeleteSelected,
+                   id: "grid.deleteRow") {
                 if let cell = draft.selectedCell { draft.deleteRow(cell.row) }
             }
-            action("Restablecer campo seleccionado", icon: "arrow.uturn.backward", enabled: !busy && draft.canResetSelected) {
+            action("Restablecer campo seleccionado", icon: "arrow.uturn.backward",
+                   enabled: !busy && draft.canResetSelected, id: "grid.reset") {
                 draft.resetSelected()
             }
             action("Guardar cambios", icon: "square.and.arrow.down",
-                   enabled: !busy && draft.canEdit && draft.hasChanges && !draft.isEditingCell) { draft.showingReview = true }
+                   enabled: !busy && draft.canEdit && draft.hasChanges && !draft.isEditingCell,
+                   id: "grid.save") { draft.showingReview = true }
             Spacer(minLength: 6)
             if !result.columns.isEmpty {
                 if let page = result.page {
                     Text("100 filas · \(page.index + 1) de \(page.count.map(String.init) ?? "?")")
                         .help(page.totalRows
                             .map { "\($0) filas en total" } ?? "Total no disponible; podés navegar mientras haya más filas.")
-                    action("Página anterior", icon: "chevron.left", enabled: !busy && page.index > 0) { run(page: page.index - 1) }
-                    action("Página siguiente", icon: "chevron.right", enabled: !busy && page.hasNext) { run(page: page.index + 1) }
+                    action("Página anterior", icon: "chevron.left", enabled: !busy && page.index > 0,
+                           id: "grid.page.previous") { run(page: page.index - 1) }
+                    action("Página siguiente", icon: "chevron.right", enabled: !busy && page.hasNext,
+                           id: "grid.page.next") { run(page: page.index + 1) }
                 } else {
                     Text("\(result.rowCount) filas · 1 de 1").help("Se respeta el límite definido en tu consulta.")
-                    action("Página anterior", icon: "chevron.left", enabled: false) {}
-                    action("Página siguiente", icon: "chevron.right", enabled: false) {}
+                    action("Página anterior", icon: "chevron.left", enabled: false, id: "grid.page.previous") {}
+                    action("Página siguiente", icon: "chevron.right", enabled: false, id: "grid.page.next") {}
                 }
             }
         }
         .font(.system(size: Theme.zoom(11)))
         .padding(.horizontal, 12).padding(.vertical, 6).background(Theme.bar)
+        .qaScreen("grid.toolbar")
     }
 
-    private func action(_ title: String, icon: String, enabled: Bool, perform: @escaping () -> Void) -> some View {
+    private func action(_ title: String, icon: String, enabled: Bool, id: String,
+                        perform: @escaping () -> Void) -> some View {
         Button(action: perform) {
             Image(systemName: icon).font(.system(size: Theme.zoom(14)))
                 .frame(width: Theme.zoom(26), height: Theme.zoom(24)).contentShape(Rectangle())
         }.buttonStyle(.plain).disabled(!enabled).help(title).accessibilityLabel(title)
+            .qaControl(id, title: title, enabled: enabled, action: perform)
     }
 }

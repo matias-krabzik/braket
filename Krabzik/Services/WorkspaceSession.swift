@@ -82,7 +82,11 @@ final class WorkspaceSession {
                      ask: @MainActor (TrustPrompt) -> TrustDecision) -> TrustStore.Trust? {
         let known = trustStore.trust(for: url)
         guard known == .untrusted else { return known }
-        switch ask(TrustPrompt(for: project, at: url)) {
+        let decision = ask(TrustPrompt(for: project, at: url))
+        QAProbe.dialog("dialog.project.trust", answer: decision.qaAnswer,
+                       ["project": project.name, "url": QAField.path(url),
+                        "projects": QAField.count(project.projects.count)])
+        switch decision {
         case .cancel: return nil
         case .readOnly: return .untrusted
         case .trust:

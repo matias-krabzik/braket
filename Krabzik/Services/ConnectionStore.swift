@@ -45,6 +45,10 @@ final class ConnectionStore {
     }
 
     func select(_ id: UUID?, for document: EditorDocument) {
+        let name = id.flatMap { chosen in profiles.first { $0.id == chosen }?.name } ?? ""
+        QAProbe.action("connection.select", ["file": QAField.path(document.url), "connection": name,
+                                             "draft": QAField.bool(document.isDraft),
+                                             "running": QAField.bool(document.sqlExecution.isRunning)])
         guard !document.sqlExecution.isRunning,
               id == nil || profiles.contains(where: { $0.id == id }) else { return }
         if document.isDraft { document.draftConnectionID = id
@@ -57,7 +61,12 @@ final class ConnectionStore {
     /// Importa una sola vez los perfiles de proyectos confiables, sin sobrescribir el catálogo.
     func install(_ connections: [DatabaseConnection]) {
         database.editingConnection = nil
-        guard !session.isReadOnly, let url = session.url else { return }
+        guard !session.isReadOnly, let url = session.url else {
+            QAProbe.state("state.connections", ["profiles": QAField.count(profiles.count),
+                                                "imported": QAField.count(0),
+                                                "readOnly": QAField.bool(session.isReadOnly)])
+            return
+        }
         for original in connections {
             let key = url.standardizedFileURL.path + "|" + original.id.uuidString
             guard !migrated.contains(key) else { continue }
@@ -78,6 +87,9 @@ final class ConnectionStore {
                 defaults.set(Array(migrated), forKey: "mysql.migratedProfiles.v1")
             } catch { session.errors.report(error) }
         }
+        QAProbe.state("state.connections", ["profiles": QAField.count(profiles.count),
+                                            "imported": QAField.count(connections.count),
+                                            "readOnly": QAField.bool(session.isReadOnly)])
     }
 
     /// Qué cuenta como «otro extremo» y obliga a soltar la credencial anterior. Incluye
@@ -95,11 +107,23 @@ final class ConnectionStore {
             || previous.tlsClientKeyPath != connection.tlsClientKeyPath
     }
 
-    func save(_ connection: DatabaseConnection, password: String) async throws {
-        let connection = try connection.validated()
+    func save(_ requested: DatabaseConnection, password: String) async throws {
+        QAProbe.action("connection.save.request", ["name": requested.name,
+                                                   "host": requested.host + ":" + String(requested.port),
+                                                   "user": requested.username,
+                                                   "tls": requested.tls.label,
+                                                   "writePolicy": requested.effectiveWritePolicy.rawValue,
+                                                   "existing": QAField.bool(profiles.contains { $0.id == requested.id })])
+        let connection: DatabaseConnection
+        do { connection = try requested.validated() }
+        catch {
+            QAProbe.failure("connection.save.rejected", AppError.describe(error))
+            throw error
+        }
         let previous = profiles.first { $0.id == connection.id }
         if let previous {
             guard await database.disconnect(previous) else {
+                QAProbe.failure("connection.save.rejected", "La conexión está ocupada o se canceló el cambio.")
                 throw DatabaseFailure("La conexión está ocupada o se canceló el cambio.")
             }
         }
@@ -115,11 +139,18 @@ final class ConnectionStore {
         }
         if let previous, Self.endpointChanged(from: previous, to: connection) { forget(previous) }
         database.states[connection.id] = DatabaseState()
+        QAProbe.action("connection.save.ok", ["name": connection.name,
+                                              "profiles": QAField.count(profiles.count)])
+        QAProbe.state("state.connections", ["profiles": QAField.count(profiles.count)])
     }
 
     func remove(_ connection: DatabaseConnection) {
+        QAProbe.action("connection.remove.request", ["name": connection.name])
         Task {
-            guard await database.disconnect(connection) else { return }
+            guard await database.disconnect(connection) else {
+                QAProbe.action("connection.remove.cancelled", ["name": connection.name])
+                return
+            }
             do { try persist(profiles.filter { $0.id != connection.id }) }
             catch { session.errors.report(error)
                 return }
@@ -127,6 +158,9 @@ final class ConnectionStore {
             database.states.removeValue(forKey: connection.id)
             selections = selections.filter { $0.value != connection.id.uuidString }
             defaults.set(selections, forKey: Self.selectionsKey)
+            QAProbe.action("connection.remove.ok", ["name": connection.name,
+                                                    "profiles": QAField.count(profiles.count)])
+            QAProbe.state("state.connections", ["profiles": QAField.count(profiles.count)])
         }
     }
 

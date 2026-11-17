@@ -138,6 +138,8 @@ final class WorkspaceController {
     func start(arguments: [String] = ProcessInfo.processInfo.arguments) async {
         guard !started else { return }
         started = true
+        QADiagnostics.activateIfRequested(arguments: arguments)
+        QAProbe.action("app.start", ["restoring": QAField.bool(settings.restoreLastState)])
         if let index = arguments.firstIndex(of: "--workspace"), arguments.indices.contains(index + 1) {
             await openWorkspace(URL(fileURLWithPath: arguments[index + 1]))
             return
@@ -167,18 +169,29 @@ final class WorkspaceController {
     // MARK: - Abrir, crear y cerrar un proyecto
 
     func chooseWorkspace() {
+        QAProbe.action("project.choose.request", ["switching": QAField.bool(session.isSwitching)])
         guard !session.isSwitching, let url = session.dialogs.chooseWorkspace() else { return }
         Task { await openWorkspace(url) }
     }
 
     func createWorkspace() {
+        QAProbe.action("wizard.open.request", ["switching": QAField.bool(session.isSwitching)])
         guard !session.isSwitching else { return }
         showingProjectWizard = true
+        QAProbe.state("state.wizard", ["presented": QAField.bool(true)])
     }
 
     /// Crea exclusivamente un archivo nuevo; nunca sobrescribe uno que apareció durante el asistente.
     func createWorkspace(from draft: ProjectDraft) async throws -> Bool {
-        let project = try draft.workspace()
+        QAProbe.action("project.create.request", ["name": draft.trimmedName, "url": QAField.path(draft.url),
+                                                  "projects": QAField.count(draft.projects.count),
+                                                  "opening": QAField.bool(draft.openWhenCreated)])
+        let project: Workspace
+        do { project = try draft.workspace() }
+        catch {
+            QAProbe.failure("project.create.rejected", AppError.describe(error), ["name": draft.trimmedName])
+            throw error
+        }
         guard session.beginSwitch() else { return false }
         defer { session.endSwitch() }
         if draft.openWhenCreated { guard await prepareToLeave() else { return false } }
@@ -192,6 +205,8 @@ final class WorkspaceController {
             trust.approve(command: item.command, project: item.id, workspaceURL: draft.url)
         }
         recents.remember(draft.url)
+        QAProbe.action("project.create.ok", ["name": project.name, "url": QAField.path(draft.url),
+                                             "opening": QAField.bool(draft.openWhenCreated)])
         if draft.openWhenCreated { install(project, at: draft.url, trust: .trusted) }
         return true
     }
@@ -199,20 +214,42 @@ final class WorkspaceController {
     /// Se le pregunta por la confianza **antes** de molestar al usuario con lo que tiene
     /// abierto: si cancela ahí, su proyecto actual queda intacto.
     func openWorkspace(_ url: URL, prepared: Bool = false) async {
-        guard session.url != url.standardizedFileURL, session.beginSwitch() else { return }
+        QAProbe.action("project.open.request", ["url": QAField.path(url),
+                                                "current": QAField.path(session.url),
+                                                "switching": QAField.bool(session.isSwitching)])
+        guard session.url != url.standardizedFileURL, session.beginSwitch() else {
+            QAProbe.action("project.open.ignored", ["url": QAField.path(url)])
+            return
+        }
         defer { session.endSwitch() }
         do {
             let project = try await Task.detached(priority: .userInitiated) { try Workspace.read(from: url) }.value
-            guard let decided = session.decideTrust(for: project, at: url, ask: confirmTrust) else { return }
-            if !prepared { guard await prepareToLeave() else { return } }
+            guard let decided = session.decideTrust(for: project, at: url, ask: confirmTrust) else {
+                QAProbe.action("project.open.cancelled", ["url": QAField.path(url), "stage": "trust"])
+                return
+            }
+            if !prepared {
+                guard await prepareToLeave() else {
+                    QAProbe.action("project.open.cancelled", ["url": QAField.path(url), "stage": "prepareToLeave"])
+                    return
+                }
+            }
             install(project, at: url, trust: decided)
             if let state = workspaceStates[url.standardizedFileURL] { await restoreTabs(state) }
-        } catch { errors.report(error) }
+            QAProbe.action("project.open.ok", ["url": QAField.path(url), "name": project.name,
+                                               "readOnly": QAField.bool(decided == .untrusted)])
+        } catch {
+            QAProbe.failure("project.open.failed", AppError.describe(error), ["url": QAField.path(url)])
+            errors.report(error)
+        }
     }
 
     func requestCloseWorkspace(_ url: URL? = nil) {
+        QAProbe.action("project.close.request", ["url": QAField.path(url ?? workspaceURL),
+                                                 "switching": QAField.bool(isSwitchingWorkspace)])
         guard !isSwitchingWorkspace else { return }
         closingProjectURL = url ?? workspaceURL
+        QAProbe.state("state.closeSheet", ["presented": QAField.bool(closingProjectURL != nil)])
     }
 
     func closeWorkspace(_ requestedURL: URL? = nil, prepared: Bool = false) async {
@@ -245,6 +282,9 @@ final class WorkspaceController {
         connections.install([])
         session.close()
         restoration.clear()
+        QAProbe.action("project.close.ok", ["url": QAField.path(closing)])
+        QAProbe.state("state.workspace", ["url": "", "open": QAField.count(openWorkspaceURLs.count),
+                                          "readOnly": QAField.bool(false)])
     }
 
     /// Recablea los servicios para el proyecto que se acaba de adoptar. El orden importa:
@@ -270,6 +310,11 @@ final class WorkspaceController {
             · conexiones \(project.connections.count, privacy: .public) \
             · \(decided == .trusted ? "confiable" : "solo lectura", privacy: .public)
             """)
+        QAProbe.state("state.workspace", ["url": QAField.path(url), "name": project.name,
+                                          "projects": QAField.count(project.projects.count),
+                                          "connections": QAField.count(project.connections.count),
+                                          "readOnly": QAField.bool(decided == .untrusted),
+                                          "open": QAField.count(openWorkspaceURLs.count)])
     }
 
     func openTableQuery(_ table: SQLSchemaTable, connection: DatabaseConnection) {
@@ -312,6 +357,9 @@ final class WorkspaceController {
     /// El orden en que se le pregunta al usuario antes de dejar lo que está abierto:
     /// Codex, los archivos sin guardar, los procesos, la base. Cualquiera cancela todo.
     func prepareToLeave() async -> Bool {
+        QAProbe.action("project.prepareToLeave.begin", ["agent": QAField.bool(agent.isRunning),
+                                                        "processes": QAField.bool(runner.hasActiveProcesses),
+                                                        "dirty": QAField.count(docs.dirty.count)])
         guard fileOperation == nil else { return false }
         if agent.isRunning {
             guard session.dialogs.confirmStopAgent() else { return false }
@@ -323,8 +371,12 @@ final class WorkspaceController {
             workflows.stop()
             runner.stopAll()
         }
-        guard await database.prepareToLeave(closeIdleConnections: false) else { return false }
+        guard await database.prepareToLeave(closeIdleConnections: false) else {
+            QAProbe.action("project.prepareToLeave.cancelled", ["stage": "database"])
+            return false
+        }
         agent.shutdown()
+        QAProbe.action("project.prepareToLeave.ok")
         return true
     }
 
@@ -364,7 +416,13 @@ final class WorkspaceController {
     func executeSQL() {
         if SQLGridTable.reviewFocusedGrid() { return }
         guard let document = selectedDocument, document.language == "SQL",
-              let connection = connections.selected(for: document), !isReadOnly else { return }
+              let connection = connections.selected(for: document), !isReadOnly else {
+            QAProbe.action("sql.execute.unavailable", ["language": selectedDocument?.language ?? "",
+                                                       "readOnly": QAField.bool(isReadOnly),
+                                                       "connection": QAField.bool(selectedDocument
+                                                           .flatMap { connections.selected(for: $0) } != nil)])
+            return
+        }
         database.execute(document, connection: connection)
     }
 

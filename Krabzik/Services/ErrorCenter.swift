@@ -95,6 +95,8 @@ final class ErrorCenter {
             error en \(entry.context, privacy: .public): \
             \(entry.message, privacy: .private)
             """)
+        QAProbe.failure("error.reported", entry.message, ["context": entry.context,
+                                                          "pending": QAField.count(queue.count)])
         guard queue.count < Self.limit else { return }
         queue.append(entry)
     }
