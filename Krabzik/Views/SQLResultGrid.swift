@@ -1,6 +1,18 @@
 import SwiftUI
 
 final class SQLGridTable: NSTableView {
+    override func drawGrid(inClipRect clipRect: NSRect) {
+        guard numberOfRows > 0 else { return }
+        let rowsRect = NSRect(x: bounds.minX, y: bounds.minY, width: bounds.width,
+                              height: rect(ofRow: numberOfRows - 1).maxY - bounds.minY)
+        let visibleGrid = clipRect.intersection(rowsRect)
+        guard !visibleGrid.isEmpty else { return }
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect: visibleGrid).addClip()
+        super.drawGrid(inClipRect: visibleGrid)
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
     static weak var editingField: SQLGridField?
     var review: (() -> Void)?
     var contextualMenu: ((Int, Int) -> NSMenu)?
@@ -57,6 +69,14 @@ private final class SQLGridScrollView: NSScrollView {
     }
 }
 
+private final class SQLGridHeaderCell: NSTableHeaderCell {
+    var leadingInset: CGFloat = 8
+
+    override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
+        super.drawInterior(withFrame: cellFrame.insetBy(dx: leadingInset, dy: 0), in: controlView)
+    }
+}
+
 private final class SQLGridTextCell: NSTextFieldCell {
     private func centeredRect(in bounds: NSRect) -> NSRect {
         let content = super.drawingRect(forBounds: bounds)
@@ -75,8 +95,24 @@ struct SQLResultGrid: NSViewRepresentable {
     let theme: AppTheme
     func makeCoordinator() -> Coordinator { Coordinator(draft: draft) }
     static func dismantleNSView(_ scroll: NSScrollView, coordinator: Coordinator) {
-        coordinator.draft.scrollOrigin = scroll.contentView.bounds.origin
+        coordinator.draft.scrollOrigin = scrollOffset(in: scroll)
     }
+    static func scrollOffset(in scroll: NSScrollView) -> NSPoint {
+        let clip = scroll.contentView
+        return NSPoint(x: clip.bounds.minX + clip.contentInsets.left,
+                       y: clip.bounds.minY + clip.contentInsets.top)
+    }
+
+    static func restoreScrollOffset(_ offset: NSPoint, in scroll: NSScrollView) {
+        scroll.layoutSubtreeIfNeeded()
+        let clip = scroll.contentView
+        // AppKit places the table header in the clip view's top inset. Logical
+        // offset zero must include that inset so the first row stays below it.
+        clip.scroll(to: NSPoint(x: offset.x - clip.contentInsets.left,
+                                y: offset.y - clip.contentInsets.top))
+        scroll.reflectScrolledClipView(clip)
+    }
+
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = SQLGridScrollView()
         scroll.hasVerticalScroller = true
@@ -111,6 +147,10 @@ struct SQLResultGrid: NSViewRepresentable {
         guard let table = scroll.documentView as? SQLGridTable else { return }
         let coordinator = context.coordinator
         let changedResult = coordinator.draft.result.id != draft.result.id || table.tableColumns.isEmpty
+        if coordinator.draft !== draft {
+            coordinator.draft.scrollOrigin = Self.scrollOffset(in: scroll)
+            coordinator.restoredScroll = false
+        }
         coordinator.draft = draft
         coordinator.scale = scale
         coordinator.theme = theme
@@ -127,7 +167,7 @@ struct SQLResultGrid: NSViewRepresentable {
             for column in table.tableColumns { table.removeTableColumn(column) }
             for (index, name) in draft.result.columns.enumerated() {
                 let column = NSTableColumn(identifier: .init("\(index)"))
-                column.title = name
+                column.headerCell = SQLGridHeaderCell(textCell: name)
                 column.minWidth = 44
                 column.maxWidth = 4000
                 column.resizingMask = .userResizingMask
@@ -137,6 +177,7 @@ struct SQLResultGrid: NSViewRepresentable {
         for (index, column) in table.tableColumns.enumerated() {
             let font = Theme.nativeCodeFont(scale: scale, weight: .bold)
             column.headerCell.font = font
+            (column.headerCell as? SQLGridHeaderCell)?.leadingInset = 8 * scale
             let width = draft.widths[index].map { $0 * scale }
                 ?? Self.preferredWidth(for: index, in: draft, font: font, scale: scale)
             if coordinator.editing && coordinator.editingColumn == index { continue }
@@ -156,8 +197,8 @@ struct SQLResultGrid: NSViewRepresentable {
             coordinator.restoredScroll = true
             let origin = draft.scrollOrigin
             DispatchQueue.main.async {
-                scroll.contentView.scroll(to: origin)
-                scroll.reflectScrolledClipView(scroll.contentView)
+                guard coordinator.draft === draft else { return }
+                Self.restoreScrollOffset(origin, in: scroll)
             }
         }
     }

@@ -379,6 +379,7 @@ final class SQLWorkspaceTests: XCTestCase {
         XCTAssertNil(execution.task)
         XCTAssertTrue(execution.results.isEmpty)
         let error = execution.error ?? ""
+        XCTAssertEqual(document.queryMarkers[1]?.status, .failure)
         XCTAssertTrue(error.contains("Ventas (producción)"), error)
         XCTAssertTrue(error.contains("solo lectura"), error)
         XCTAssertTrue(error.contains("No se abrió ninguna conexión"), error)
@@ -409,6 +410,7 @@ final class SQLWorkspaceTests: XCTestCase {
         let execution = document.sqlExecution
         database.execute(document, connection: policy("Reportes", .readOnly), queryOverride: "SELECT * FROM users")
         XCTAssertTrue(execution.isRunning)
+        XCTAssertEqual(document.queryMarkers[1]?.status, .loading)
         XCTAssertNil(execution.error)
         await cancelBeforeItRuns(execution)
         // Sin restricciones: una escritura arranca igual que antes de que existiera la guarda.
@@ -420,6 +422,18 @@ final class SQLWorkspaceTests: XCTestCase {
         XCTAssertTrue(execution.isRunning)
         XCTAssertNil(execution.error)
         await cancelBeforeItRuns(execution)
+    }
+
+    @MainActor func testEditingSQLClearsQueryMarkersAndIgnoresLateResults() throws {
+        let document = try EditorDocument(url: URL(fileURLWithPath: "/tmp/consulta-marcadores.sql"),
+                                          data: Data("SELECT 1;".utf8))
+        let revision = document.queryMarkerRevision
+        document.setQueryMarker(.loading, line: 1, revision: revision)
+        XCTAssertEqual(document.queryMarkers[1]?.status, .loading)
+        document.markTextStale()
+        XCTAssertTrue(document.queryMarkers.isEmpty)
+        document.setQueryMarker(.success, line: 1, revision: revision)
+        XCTAssertTrue(document.queryMarkers.isEmpty)
     }
 
     @MainActor func testReadOnlyProfileBlocksGridEditingAndSubmitting() throws {

@@ -30,6 +30,7 @@ struct CodeEditor: NSViewRepresentable {
     let document: EditorDocument
     let theme: AppTheme
     let uiScale: Double
+    let wrapsLines: Bool
     var completion: ((String, Int) -> [String])?
 
     func makeNSView(context: Context) -> EditorSurface {
@@ -44,6 +45,7 @@ struct CodeEditor: NSViewRepresentable {
         view.textView.sqlCompletionEnabled = view.completion != nil
         view.applyTheme(theme)
         view.applyZoom(uiScale)
+        view.applyWrapLines(wrapsLines)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: EditorSurface, context: Context) -> CGSize? {
@@ -52,6 +54,9 @@ struct CodeEditor: NSViewRepresentable {
 }
 
 final class CodeTextView: NSTextView {
+    private let editHistory = UndoManager()
+    override var undoManager: UndoManager? { editHistory }
+
     var sqlCompletionEnabled = false
     var requestCompletion: (() -> Void)?
     var completionKey: ((NSEvent) -> Bool)?
@@ -154,7 +159,7 @@ private final class ObserverToken: @unchecked Sendable {
     deinit { NotificationCenter.default.removeObserver(token) }
 }
 
-@MainActor final class EditorSurface: NSView, NSTextViewDelegate {
+@MainActor final class EditorSurface: NSView, NSTextViewDelegate, @preconcurrency NSTextStorageDelegate {
     let scrollView = NSScrollView()
     let textView = CodeTextView(usingTextLayoutManager: true)
     weak var document: EditorDocument?
@@ -173,6 +178,8 @@ private final class ObserverToken: @unchecked Sendable {
     private var highlightedRange = NSRange(location: NSNotFound, length: 0)
     private var appliedTheme: AppTheme?
     private var appliedZoom = 1.0
+    private var appliedWrapLines = true
+    var lineNumberScale: CGFloat { CGFloat(appliedZoom) }
 
     init(document: EditorDocument) {
         self.document = document
@@ -229,6 +236,7 @@ private final class ObserverToken: @unchecked Sendable {
         textView.string = document.text
         textView.textStorage?.setAttributes(baseAttributes, range: NSRange(location: 0, length: (document.text as NSString).length))
         textView.delegate = self
+        textView.textStorage?.delegate = self
         textView.requestCompletion = { [weak self] in
             guard let self, let completion = self.completion else { return }
             let values = completion(self.textView.string, self.textView.selectedRange().location)
@@ -278,6 +286,9 @@ private final class ObserverToken: @unchecked Sendable {
     func applyZoom(_ scale: Double) {
         guard appliedZoom != scale else { return }
         appliedZoom = scale
+        let history = textView.undoManager
+        history?.disableUndoRegistration()
+        defer { history?.enableUndoRegistration() }
         let font = Theme.nativeCodeFont(scale: scale)
         let style = NSMutableParagraphStyle()
         style.minimumLineHeight = 23 * CGFloat(scale)
@@ -295,9 +306,29 @@ private final class ObserverToken: @unchecked Sendable {
             storage.addAttributes([.font: font, .paragraphStyle: style], range: range)
             storage.endEditing()
         }
-        gutter.ruleThickness = 54 * CGFloat(scale)
+        gutter.updateThickness()
         gutter.needsDisplay = true
         textView.needsLayout = true
+    }
+
+    func applyWrapLines(_ wraps: Bool) {
+        guard appliedWrapLines != wraps else { return }
+        appliedWrapLines = wraps
+        scrollView.hasHorizontalScroller = !wraps
+        textView.isHorizontallyResizable = !wraps
+        textView.autoresizingMask = wraps ? [.width] : []
+        textView.textContainer?.widthTracksTextView = wraps
+        textView.textContainer?.containerSize = NSSize(
+            width: wraps ? max(1, scrollView.contentSize.width) : 10_000_000,
+            height: 10_000_000
+        )
+        if wraps {
+            textView.setFrameSize(NSSize(width: max(1, scrollView.contentSize.width), height: textView.frame.height))
+        } else {
+            textView.sizeToFit()
+        }
+        textView.needsLayout = true
+        gutter.needsDisplay = true
     }
 
     func reloadFromDocument() {
@@ -305,8 +336,11 @@ private final class ObserverToken: @unchecked Sendable {
         let selection = textView.selectedRange()
         syntax = SyntaxHighlighter(text: document.text, url: document.url)
         highlightTask?.cancel()
+        textView.textStorage?.delegate = nil
         textView.string = document.text
+        textView.textStorage?.delegate = self
         lines = LineIndex(document.text)
+        gutter.updateThickness()
         textView.undoManager?.removeAllActions()
         textView.textStorage?.setAttributes(baseAttributes, range: NSRange(location: 0, length: (document.text as NSString).length))
         textView.setSelectedRange(NSRange(location: min(selection.location, (document.text as NSString).length), length: 0))
@@ -314,6 +348,11 @@ private final class ObserverToken: @unchecked Sendable {
         gutter.needsDisplay = true
         scheduleHighlight()
         updatePosition()
+    }
+
+    func refreshQueryMarkers() {
+        gutter.updateLoadingAnimation()
+        gutter.needsDisplay = true
     }
 
     /// Expuesto para las pruebas: indica si el surface sigue observando el scroll.
@@ -324,6 +363,7 @@ private final class ObserverToken: @unchecked Sendable {
     /// Si nadie la llama, `ObserverToken` quita el observador al liberarse y el resaltado
     /// pendiente no hace nada, porque captura `self` de forma débil.
     func teardown() {
+        gutter.stopLoadingAnimation()
         completionWork?.cancel()
         suggestions.hide()
         scrollObserver = nil
@@ -355,12 +395,19 @@ private final class ObserverToken: @unchecked Sendable {
         scheduleHighlight()
     }
 
-    func textView(_ textView: NSTextView, shouldChangeTextIn affectedCharRange: NSRange, replacementString: String?) -> Bool {
-        if let replacementString {
-            syntax.replace(affectedCharRange, with: replacementString)
-            lines.replace(affectedCharRange, with: replacementString)
-        }
-        return true
+    func textStorage(_ textStorage: NSTextStorage, didProcessEditing editedMask: NSTextStorageEditActions,
+                     range editedRange: NSRange, changeInLength delta: Int) {
+        guard editedMask.contains(.editedCharacters) else { return }
+        let originalRange = NSRange(location: editedRange.location, length: editedRange.length - delta)
+        let replacement = textStorage.mutableString.substring(with: editedRange)
+        syntax.replace(originalRange, with: replacement)
+        lines.replace(originalRange, with: replacement)
+        editRevision += 1
+        document?.markTextStale()
+        if document?.isDirty == false { document?.isDirty = true }
+        gutter.updateThickness()
+        gutter.needsDisplay = true
+        scheduleHighlight()
     }
 
     func textDidChange(_ notification: Notification) {
@@ -374,12 +421,7 @@ private final class ObserverToken: @unchecked Sendable {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
             }
         }
-        editRevision += 1
-        document?.markTextStale()
-        if document?.isDirty == false { document?.isDirty = true }
         textView.typingAttributes = baseAttributes
-        gutter.needsDisplay = true
-        scheduleHighlight()
         updatePosition()
     }
 
@@ -426,6 +468,11 @@ private final class ObserverToken: @unchecked Sendable {
         highlightTask = Task { [weak self] in
             let spans = await syntax.highlights(in: range)
             guard !Task.isCancelled, let self, self.editRevision == revision else { return }
+            // Syntax colors are presentation changes, never user edits. TextKit 2
+            // otherwise puts these attribute edits on the undo stack (and clears redo).
+            let history = self.textView.undoManager
+            history?.disableUndoRegistration()
+            defer { history?.enableUndoRegistration() }
             SyntaxHighlighter.apply(spans, to: storage, range: range)
         }
     }
@@ -433,11 +480,17 @@ private final class ObserverToken: @unchecked Sendable {
 
 @MainActor final class LineRuler: NSRulerView {
     weak var surface: EditorSurface?
+    private var loadingTimer: Timer?
+    private static let baseThickness: CGFloat = 76
+    private static let statusLaneWidth: CGFloat = 22
+    private static let numberToStatusGap: CGFloat = 8
+    private static let lineHeight: CGFloat = 23
+    private static let topInset: CGFloat = 18
 
     init(surface: EditorSurface) {
         self.surface = surface
         super.init(scrollView: surface.scrollView, orientation: .verticalRuler)
-        ruleThickness = 54
+        updateThickness()
         clientView = surface.textView
         wantsLayer = true
         clipsToBounds = true
@@ -445,27 +498,153 @@ private final class ObserverToken: @unchecked Sendable {
 
     required init(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateLoadingAnimation()
+    }
+
+    func updateLoadingAnimation() {
+        let loading = surface?.document?.queryMarkers.values.contains { $0.status == .loading } == true
+        guard window != nil, loading else {
+            stopLoadingAnimation()
+            return
+        }
+        guard loadingTimer == nil else { return }
+        let timer = Timer(timeInterval: 1 / 30, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.needsDisplay = true }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        loadingTimer = timer
+    }
+
+    func stopLoadingAnimation() {
+        loadingTimer?.invalidate()
+        loadingTimer = nil
+    }
+
+    func updateThickness() {
+        guard let surface else { return }
+        let scale = surface.lineNumberScale
+        let font = NSFont.monospacedSystemFont(ofSize: 12 * scale, weight: .regular)
+        let digitWidth = ("0" as NSString).size(withAttributes: [.font: font]).width
+        let digits = CGFloat(String(max(surface.lines.count, 99)).count)
+        let required = (8 + Self.statusLaneWidth + Self.numberToStatusGap + 12) * scale + digits * digitWidth
+        ruleThickness = max(Self.baseThickness * scale, required)
+    }
+
     override func drawHashMarksAndLabels(in rect: NSRect) {
         EditorPalette.background.setFill()
         bounds.fill()
-        guard let surface, let layout = surface.textView.textLayoutManager,
-              let content = layout.textContentManager,
-              let viewport = layout.textViewportLayoutController.viewportRange else { return }
-        let visible = surface.scrollView.contentView.bounds
+        guard let surface else { return }
+        let scale = surface.lineNumberScale
+        let rowHeight = Self.lineHeight * scale
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedSystemFont(ofSize: Theme.zoom(12), weight: .regular),
+            .font: NSFont.monospacedSystemFont(ofSize: 12 * scale, weight: .regular),
             .foregroundColor: EditorPalette.muted
         ]
-        layout.enumerateTextLayoutFragments(from: viewport.location, options: []) { fragment in
-            let frame = fragment.layoutFragmentFrame
-            if frame.minY > visible.maxY { return false }
-            let offset = content.offset(from: content.documentRange.location, to: fragment.rangeInElement.location)
-            let number = surface.lines.line(at: offset) + 1
+        let numberRight = ruleThickness - (Self.statusLaneWidth + Self.numberToStatusGap) * scale
+        func drawMarker(_ marker: SQLQueryMarker, at y: CGFloat) {
+            let dark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) != .aqua
+            let color: NSColor
+            switch marker.status {
+            case .loading:
+                color = dark ? NSColor(srgbRed: 0.922, green: 0.651, blue: 0.4, alpha: 1)
+                    : NSColor(srgbRed: 0.718, green: 0.353, blue: 0.141, alpha: 1)
+            case .success:
+                color = dark ? NSColor(srgbRed: 0.455, green: 0.835, blue: 0.608, alpha: 1)
+                    : NSColor(srgbRed: 0.129, green: 0.514, blue: 0.298, alpha: 1)
+            case .failure:
+                color = dark ? NSColor(srgbRed: 0.933, green: 0.478, blue: 0.494, alpha: 1)
+                    : NSColor(srgbRed: 0.769, green: 0.22, blue: 0.278, alpha: 1)
+            }
+            let size = 16 * scale
+            let x = numberRight + (Self.numberToStatusGap + (Self.statusLaneWidth - 16) / 2) * scale
+            let icon = NSRect(x: x, y: y + 1 * scale, width: size, height: size)
+            let center = NSPoint(x: icon.midX, y: icon.midY)
+            let radius = size * 23 / 64
+            color.setStroke()
+            if marker.status == .loading {
+                let turn = CGFloat(Date().timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.1) / 1.1 * 360)
+                let arc = NSBezierPath()
+                arc.appendArc(withCenter: center, radius: radius, startAngle: turn + 32, endAngle: turn + 292)
+                arc.lineWidth = size * 4.5 / 64
+                arc.lineCapStyle = .round
+                arc.stroke()
+                return
+            }
+            let ring = NSBezierPath(ovalIn: NSRect(x: center.x - radius, y: center.y - radius,
+                                                  width: radius * 2, height: radius * 2))
+            ring.lineWidth = size * 4 / 64
+            ring.stroke()
+            func point(_ x: CGFloat, _ y: CGFloat) -> NSPoint {
+                NSPoint(x: icon.minX + x * size / 64,
+                        y: icon.minY + (isFlipped ? y : 64 - y) * size / 64)
+            }
+            let glyph = NSBezierPath()
+            if marker.status == .success {
+                glyph.move(to: point(20, 33))
+                glyph.line(to: point(29, 41))
+                glyph.line(to: point(45, 23))
+            } else {
+                glyph.move(to: point(23, 23))
+                glyph.line(to: point(41, 41))
+                glyph.move(to: point(41, 23))
+                glyph.line(to: point(23, 41))
+            }
+            glyph.lineWidth = size * 5 / 64
+            glyph.lineCapStyle = .round
+            glyph.lineJoinStyle = .round
+            glyph.stroke()
+        }
+        func drawNumber(_ number: Int, at y: CGFloat) {
+            guard y + rowHeight >= bounds.minY, y <= bounds.maxY else { return }
             let label = "\(number)" as NSString
             let size = label.size(withAttributes: attributes)
-            let y = frame.minY + surface.textView.textContainerInset.height - visible.minY + 4
-            label.draw(at: NSPoint(x: self.ruleThickness - size.width - Theme.zoom(12), y: y), withAttributes: attributes)
-            return true
+            label.draw(at: NSPoint(x: numberRight - size.width, y: y), withAttributes: attributes)
+            if let marker = surface.document?.queryMarkers[number] { drawMarker(marker, at: y) }
         }
+
+        for row in visibleLineLabels() { drawNumber(row.number, at: row.y) }
+    }
+
+    /// TextKit includes the final empty line inside the preceding layout fragment.
+    /// Use individual line fragments so Enter never leaves a hole in the gutter.
+    func visibleLineLabels() -> [(number: Int, y: CGFloat)] {
+        guard let surface else { return [] }
+        let visible = surface.scrollView.contentView.bounds
+        let scale = surface.lineNumberScale
+        let rowHeight = Self.lineHeight * scale
+        var labels: [(number: Int, y: CGFloat)] = []
+        var lastNumber = 0
+        var nextY = (Self.topInset + 4) * scale - visible.minY
+        if let layout = surface.textView.textLayoutManager,
+           let content = layout.textContentManager,
+           let viewport = layout.textViewportLayoutController.viewportRange {
+            layout.enumerateTextLayoutFragments(from: viewport.location, options: []) { fragment in
+                let frame = fragment.layoutFragmentFrame
+                if frame.minY > visible.maxY { return false }
+                let offset = content.offset(from: content.documentRange.location, to: fragment.rangeInElement.location)
+                for line in fragment.textLineFragments {
+                    let number = surface.lines.line(at: offset + line.characterRange.location) + 1
+                    let y = frame.minY + line.typographicBounds.minY + surface.textView.textContainerInset.height
+                        - visible.minY + 4 * scale
+                    if number > lastNumber {
+                        labels.append((number, y))
+                        lastNumber = number
+                    }
+                    nextY = y + rowHeight
+                }
+                return true
+            }
+        }
+        if lastNumber >= surface.lines.count - 1 {
+            var number = lastNumber + 1
+            while nextY <= bounds.maxY {
+                labels.append((number, nextY))
+                number += 1
+                nextY += rowHeight
+            }
+        }
+        return labels
     }
 }

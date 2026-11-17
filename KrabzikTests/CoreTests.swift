@@ -324,6 +324,72 @@ final class CoreTests: XCTestCase {
         XCTAssertThrowsError(try EditorDocument(url: url, data: Data([0, 1, 2])))
     }
 
+    @MainActor func testEditorHistorySurvivesHighlightingAndOtherDocumentReload() async throws {
+        let directory = try temporaryDirectory()
+        let document = try EditorDocument(url: directory.appendingPathComponent("history.sql"), data: Data("SELECT 1;".utf8))
+        let surface = EditorSurface(document: document)
+        document.editorStorage = surface
+        let other = try EditorDocument(url: directory.appendingPathComponent("other.sql"), data: Data())
+        let otherSurface = EditorSurface(document: other)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = surface
+        window.makeKeyAndOrderFront(nil)
+        defer { surface.teardown(); otherSurface.teardown(); window.orderOut(nil) }
+        let history = try XCTUnwrap(surface.textView.undoManager)
+        history.groupsByEvent = false
+        func edit(_ action: () -> Void) {
+            surface.textView.breakUndoCoalescing()
+            history.beginUndoGrouping()
+            action()
+            history.endUndoGrouping()
+        }
+        surface.textView.setSelectedRange(NSRange(location: 9, length: 0))
+        edit { surface.textView.insertNewline(nil) }
+        edit { surface.textView.insertText("SELECT 2;", replacementRange: surface.textView.selectedRange()) }
+        try await Task.sleep(nanoseconds: 200_000_000)
+        let completed = "SELECT 1;\nSELECT 2;"
+        XCTAssertEqual(document.text, completed)
+        window.contentView = otherSurface
+        otherSurface.reloadFromDocument()
+        window.contentView = surface
+        window.makeFirstResponder(surface.textView)
+        history.undo()
+        XCTAssertEqual(document.text, "SELECT 1;\n")
+        XCTAssertEqual(surface.lines.starts, LineIndex(document.text).starts)
+        history.undo()
+        XCTAssertEqual(document.text, "SELECT 1;")
+        XCTAssertEqual(surface.lines.starts, [0])
+        try await Task.sleep(nanoseconds: 200_000_000)
+        surface.applyZoom(1.2)
+        XCTAssertTrue(history.canRedo)
+        history.redo()
+        history.redo()
+        XCTAssertEqual(document.text, completed)
+        XCTAssertEqual(surface.lines.starts, LineIndex(completed).starts)
+        XCTAssertEqual(surface.textView.selectedRange().location, completed.utf16.count)
+    }
+
+    @MainActor func testEditorTrailingNewlinesKeepContinuousGutter() async throws {
+        let document = try EditorDocument(url: temporaryDirectory().appendingPathComponent("lines.sql"), data: Data())
+        let surface = EditorSurface(document: document)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = surface
+        window.makeKeyAndOrderFront(nil)
+        defer { surface.teardown(); window.orderOut(nil) }
+        for _ in 0..<6 {
+            surface.layoutSubtreeIfNeeded()
+            try await Task.sleep(nanoseconds: 50_000_000)
+            let ruler = try XCTUnwrap(surface.scrollView.verticalRulerView as? LineRuler)
+            let labels = ruler.visibleLineLabels()
+            XCTAssertGreaterThan(labels.count, 8)
+            for index in 1..<labels.count {
+                XCTAssertEqual(labels[index].number, labels[index - 1].number + 1)
+                XCTAssertEqual(labels[index].y - labels[index - 1].y, 23, accuracy: 1)
+            }
+            surface.textView.insertNewline(nil)
+        }
+    }
+
     @MainActor func testEditorHasVisibleTextGeometry() async throws {
         let url = try temporaryDirectory().appendingPathComponent("example.php")
         let document = try EditorDocument(url: url, data: Data("<?php\n\nreturn 42;\n".utf8))
@@ -340,6 +406,28 @@ final class CoreTests: XCTestCase {
         XCTAssertLessThan(surface.textView.frame.width, 2000)
         XCTAssertNotNil(surface.textView.textLayoutManager)
         XCTAssertTrue(surface.scrollView.verticalRulerView?.clipsToBounds == true)
+    }
+
+    @MainActor func testEditorWrapLinesSwitchesBetweenWrappingAndHorizontalScrolling() throws {
+        let url = try temporaryDirectory().appendingPathComponent("long-line.sql")
+        let document = try EditorDocument(url: url, data: Data(("SELECT " + String(repeating: "customer_name, ", count: 40)).utf8))
+        let surface = EditorSurface(document: document)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 400),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = surface
+        defer { window.orderOut(nil) }
+        window.makeKeyAndOrderFront(nil)
+        surface.layoutSubtreeIfNeeded()
+
+        surface.applyWrapLines(false)
+        surface.layoutSubtreeIfNeeded()
+        XCTAssertTrue(surface.scrollView.hasHorizontalScroller)
+        XCTAssertGreaterThan(surface.textView.frame.width, surface.scrollView.contentSize.width)
+
+        surface.applyWrapLines(true)
+        surface.layoutSubtreeIfNeeded()
+        XCTAssertFalse(surface.scrollView.hasHorizontalScroller)
+        XCTAssertLessThanOrEqual(surface.textView.frame.width, surface.scrollView.contentSize.width + 1)
     }
 
     @MainActor func testEditorSurfaceTeardownIsIdempotentAndStopsObserving() async throws {

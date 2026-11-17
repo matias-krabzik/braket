@@ -50,6 +50,9 @@ final class AppSettings {
     var resultFontSize: Double {
         didSet { defaults.set(resultFontSize, forKey: "resultFontSize") }
     }
+    var wrapLines: Bool {
+        didSet { defaults.set(wrapLines, forKey: "editorWrapLines") }
+    }
     var codeFontScale: Double { codeFontSize / 14 }
     var resultFontScale: Double { resultFontSize / 14 }
     @ObservationIgnored private let defaults: UserDefaults
@@ -60,6 +63,7 @@ final class AppSettings {
         let savedResultSize = defaults.object(forKey: "resultFontSize") as? Double ?? 14
         codeFontSize = savedCodeSize.isFinite ? min(24, max(10, savedCodeSize)) : 14
         resultFontSize = savedResultSize.isFinite ? min(24, max(10, savedResultSize)) : 14
+        wrapLines = defaults.object(forKey: "editorWrapLines") as? Bool ?? true
         theme = AppTheme(rawValue: defaults.string(forKey: "appearanceTheme") ?? "") ?? .graphite
         restoreLastState = defaults.object(forKey: "restoreLastState") as? Bool ?? true
         let savedZoom = defaults.object(forKey: "markdownPreviewZoom") as? Double ?? 1

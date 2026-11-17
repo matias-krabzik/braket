@@ -4,6 +4,17 @@ import ImageIO
 import Observation
 import UniformTypeIdentifiers
 
+enum SQLQueryStatus {
+    case loading
+    case success
+    case failure
+}
+
+struct SQLQueryMarker {
+    let status: SQLQueryStatus
+    let message: String?
+}
+
 /// Un archivo abierto en el editor.
 ///
 /// El texto **no** se mantiene actualizado en cada tecla: `text` se relee de la vista
@@ -49,6 +60,7 @@ final class EditorDocument: Identifiable {
             cachedText = newValue
             textIsStale = false
             previewRevision += 1
+            invalidateQueryMarkers()
         }
     }
 
@@ -57,6 +69,8 @@ final class EditorDocument: Identifiable {
     @ObservationIgnored var originalData: Data
     @ObservationIgnored var editorStorage: AnyObject?
     @ObservationIgnored var selectedRange = NSRange(location: 0, length: 0)
+    @ObservationIgnored private(set) var queryMarkers: [Int: SQLQueryMarker] = [:]
+    @ObservationIgnored private(set) var queryMarkerRevision = 0
     let sqlExecution: SQLExecution
 
     var sqlToExecute: (text: String, startingLine: Int) {
@@ -120,12 +134,37 @@ final class EditorDocument: Identifiable {
         self.column = document.column
         self.markdownMode = document.markdownMode
         self.selectedRange = document.selectedRange
+        self.queryMarkers = document.queryMarkers
+        self.queryMarkerRevision = document.queryMarkerRevision
     }
 
     /// La llama el editor en cada cambio: O(1). El texto se relee cuando alguien lo pida.
     func markTextStale() {
         textIsStale = true
         previewRevision += 1
+        invalidateQueryMarkers()
+    }
+
+    func setQueryMarker(_ status: SQLQueryStatus, line: Int, revision: Int, message: String? = nil) {
+        guard revision == queryMarkerRevision, line > 0 else { return }
+        queryMarkers[line] = SQLQueryMarker(status: status, message: message)
+        (editorStorage as? EditorSurface)?.refreshQueryMarkers()
+    }
+
+    func finishLoadingQueryMarkers(error: String?, revision: Int) {
+        guard revision == queryMarkerRevision else { return }
+        let pending = queryMarkers.filter { $0.value.status == .loading }.map(\.key)
+        for line in pending {
+            queryMarkers[line] = SQLQueryMarker(status: error == nil ? .success : .failure, message: error)
+        }
+        if !pending.isEmpty { (editorStorage as? EditorSurface)?.refreshQueryMarkers() }
+    }
+
+    private func invalidateQueryMarkers() {
+        queryMarkerRevision &+= 1
+        guard !queryMarkers.isEmpty else { return }
+        queryMarkers.removeAll()
+        (editorStorage as? EditorSurface)?.refreshQueryMarkers()
     }
 
     /// Suelta la vista nativa del documento. Se llama al cerrar el documento o el proyecto.

@@ -137,7 +137,7 @@ final class DatabaseController {
 
     func execute(_ document: EditorDocument, connection: DatabaseConnection,
                  queryOverride: String? = nil, databaseOverride: String? = nil,
-                 pageIndex: Int = 0, targetResultID: UUID? = nil) {
+                 pageIndex: Int = 0, targetResultID: UUID? = nil, startingLineOverride: Int? = nil) {
         let state = state(connection.id), execution = document.sqlExecution
         QAProbe.action("sql.execute.request", ["file": QAField.path(document.url),
                                                "connection": connection.name,
@@ -151,10 +151,12 @@ final class DatabaseController {
         }
         let query: (text: String, startingLine: Int)
         do {
-            query = try queryOverride.map { (text: $0, startingLine: 1) }
+            query = try queryOverride.map { (text: $0, startingLine: startingLineOverride ?? 1) }
                 ?? document.queryAtCursor(noBackslashEscapes: state.noBackslashEscapes)
         }
         catch { execution.error = MySQLClient.message(error)
+        document.setQueryMarker(.failure, line: document.line, revision: document.queryMarkerRevision,
+                                message: execution.error)
         resultsVisible = true
         QAProbe.failure("sql.execute.rejected", execution.error ?? "", ["stage": "cursor"])
         return }
@@ -164,7 +166,13 @@ final class DatabaseController {
             QAProbe.failure("sql.execute.rejected", execution.error ?? "", ["stage": "empty"])
             return
         }
-        guard allowsExecution(query, connection: connection, state: state, execution: execution) else { return }
+        let markerRevision = document.queryMarkerRevision
+        guard allowsExecution(query, connection: connection, state: state, execution: execution) else {
+            if let error = execution.error {
+                document.setQueryMarker(.failure, line: query.startingLine, revision: markerRevision, message: error)
+            }
+            return
+        }
         let retainedBytes = execution.results.reduce(0) { total, result in
             total + result.rows.reduce(0) { $0 + $1.reduce(0) { $0 + 16 + ($1?.utf8.count ?? 0) } }
         }
@@ -175,6 +183,8 @@ final class DatabaseController {
         }
         guard reusing || (execution.results.count < 200 && retainedBytes < 24_000_000) else {
             execution.error = "Cerrá algunas pestañas de resultados antes de ejecutar más consultas."
+            document.setQueryMarker(.failure, line: query.startingLine, revision: markerRevision,
+                                    message: execution.error)
             QAProbe.failure("sql.execute.rejected", execution.error ?? "",
                             ["stage": "budget", "results": QAField.count(execution.results.count),
                              "bytes": QAField.count(retainedBytes)])
@@ -196,8 +206,11 @@ final class DatabaseController {
                 guard execution.begin(pending) else { execution.targetResultID = nil
                 QAProbe.sql("sql.execute.cancelledByDraft", ["sql": QAField.sql(statement.text)])
                 return }
+                document.setQueryMarker(.loading, line: statement.line, revision: markerRevision)
             }
         } catch { execution.error = MySQLClient.message(error)
+        document.setQueryMarker(.failure, line: query.startingLine, revision: markerRevision,
+                                message: execution.error)
         QAProbe.failure("sql.execute.rejected", execution.error ?? "", ["stage": "split"])
         return }
         let timeoutSeconds = max(1, min(execution.timeoutSeconds, 3600))
@@ -219,6 +232,7 @@ final class DatabaseController {
         execution.task = Task {
             defer {
                 execution.finish(error: execution.error)
+                document.finishLoadingQueryMarkers(error: execution.error, revision: markerRevision)
                 execution.isRunning = false
                 execution.isCancelling = false
                 execution.task = nil
@@ -245,9 +259,14 @@ final class DatabaseController {
                                                     onStatement: { pending in
                     let accepted = await MainActor.run { execution.begin(pending) }
                     if !accepted { throw CancellationError() }
+                    await MainActor.run {
+                        document.setQueryMarker(.loading, line: pending.line, revision: markerRevision)
+                    }
                 }, onResult: { result in
                     await MainActor.run {
                         execution.receive(result)
+                        document.setQueryMarker(result.error == nil ? .success : .failure,
+                                                line: result.line, revision: markerRevision, message: result.error)
                         QAProbe.sql("sql.result", ["sql": QAField.sql(result.sql),
                                                    "columns": QAField.count(result.columns.count),
                                                    "rows": QAField.count(result.rows.count),

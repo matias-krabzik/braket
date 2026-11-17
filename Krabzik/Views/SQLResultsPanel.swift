@@ -263,7 +263,8 @@ private struct SQLResultToolbar: View {
     private func run(page: Int? = nil) {
         guard let document = controller.sqlResultsDocument, let connection = result.connection else { return }
         controller.database.execute(document, connection: connection, queryOverride: result.sql, databaseOverride: result.database,
-                                    pageIndex: page ?? 0, targetResultID: page == nil ? nil : result.id)
+                                    pageIndex: page ?? 0, targetResultID: page == nil ? nil : result.id,
+                                    startingLineOverride: result.line)
     }
 
     var body: some View {

@@ -52,10 +52,11 @@ struct WorkspaceView: View {
                         }
                     }
                 }
-                EditorStatusBar(document: controller.workflowVisible ? nil : controller.selectedDocument)
+                EditorStatusBar(document: controller.workflowVisible ? nil : controller.selectedDocument,
+                                settings: controller.settings)
             } else if !controller.documents.isEmpty {
                 editorArea
-                EditorStatusBar(document: controller.selectedDocument)
+                EditorStatusBar(document: controller.selectedDocument, settings: controller.settings)
             } else {
                 WelcomeView(controller: controller)
             }
@@ -285,6 +286,7 @@ struct WorkspaceView: View {
                     markdownContent(document)
                 } else {
                     CodeEditor(document: document, theme: Theme.settings.theme, uiScale: controller.settings.codeFontScale,
+                               wrapsLines: controller.settings.wrapLines,
                                completion: { text, position in
                                    let connection = controller.connections.selected(for: document)
                                    let database = connection.map { controller.database.state($0.id).currentDatabase } ?? ""
@@ -337,14 +339,16 @@ struct WorkspaceView: View {
         } ?? []
         switch document.markdownMode {
         case .edit:
-            CodeEditor(document: document, theme: Theme.settings.theme, uiScale: controller.settings.codeFontScale).id(document.id)
+            CodeEditor(document: document, theme: Theme.settings.theme, uiScale: controller.settings.codeFontScale,
+                       wrapsLines: controller.settings.wrapLines).id(document.id)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .preview:
             MarkdownPreview(document: document, projectRoots: roots).id(document.id)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .split:
             HSplitView {
-                CodeEditor(document: document, theme: Theme.settings.theme, uiScale: controller.settings.codeFontScale).id(document.id)
+                CodeEditor(document: document, theme: Theme.settings.theme, uiScale: controller.settings.codeFontScale,
+                           wrapsLines: controller.settings.wrapLines).id(document.id)
                     .frame(minWidth: 230, maxWidth: .infinity, maxHeight: .infinity)
                 MarkdownPreview(document: document, projectRoots: roots).id(document.id)
                     .frame(minWidth: 230, maxWidth: .infinity, maxHeight: .infinity)
@@ -1449,6 +1453,7 @@ private struct PixelArtEditorView: View {
 
 private struct EditorStatusBar: View {
     let document: EditorDocument?
+    let settings: AppSettings
 
     var body: some View {
         HStack(spacing: 18) {
@@ -1466,6 +1471,17 @@ private struct EditorStatusBar: View {
                     Text("\(document.line):\(document.column)").monospacedDigit()
                     Text(document.language)
                     Text("UTF-8")
+                    Button {
+                        settings.wrapLines.toggle()
+                    } label: {
+                        Image(systemName: settings.wrapLines ? "arrow.turn.down.right" : "arrow.right")
+                            .foregroundStyle(settings.wrapLines ? .primary : .secondary)
+                            .frame(width: Theme.zoom(18), height: Theme.zoom(18))
+                    }
+                    .buttonStyle(.plain)
+                    .help(settings.wrapLines ? "Desactivar ajuste de líneas" : "Activar ajuste de líneas")
+                    .accessibilityLabel("Ajustar líneas")
+                    .accessibilityValue(settings.wrapLines ? "Activado" : "Desactivado")
                 }
             } else { Spacer() }
         }

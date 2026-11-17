@@ -8,6 +8,16 @@ struct KrabzikApp: App {
     /// Las órdenes que el menú comparte con los escenarios de QA: ver `AppCommands.swift`.
     private var commands: AppMenuCommands { AppMenuCommands(controller: controller) }
 
+    private var activeEditHistory: UndoManager? {
+        // Observe text changes so SwiftUI refreshes the menu's enabled state.
+        _ = controller.selectedDocument?.previewRevision
+        if let textView = NSApp.keyWindow?.firstResponder as? NSTextView {
+            return textView.undoManager
+        }
+        return (controller.selectedDocument?.editorStorage as? EditorSurface)?.textView.undoManager
+            ?? NSApp.keyWindow?.undoManager
+    }
+
     var body: some Scene {
         Window("Braket", id: "workspace") {
             WorkspaceView(controller: controller)
@@ -23,7 +33,7 @@ struct KrabzikApp: App {
         .commands {
             SettingsCommands(controller: controller)
             CommandGroup(after: .appInfo) { CheckForUpdatesButton() }
-            CommandGroup(before: .undoRedo) {
+            CommandGroup(replacing: .undoRedo) {
                 if controller.selectedDocument?.pixelArt != nil {
                     Button("Deshacer") { controller.navigatePixelHistory(redo: false) }
                         .keyboardShortcut("z", modifiers: .command)
@@ -31,6 +41,13 @@ struct KrabzikApp: App {
                     Button("Rehacer") { controller.navigatePixelHistory(redo: true) }
                         .keyboardShortcut("z", modifiers: [.command, .shift])
                         .disabled(controller.isReadOnly || controller.selectedDocument?.pixelArt?.isReadOnly == true)
+                } else {
+                    Button("Deshacer") { activeEditHistory?.undo() }
+                        .keyboardShortcut("z", modifiers: .command)
+                        .disabled(activeEditHistory?.canUndo != true)
+                    Button("Rehacer") { activeEditHistory?.redo() }
+                        .keyboardShortcut("z", modifiers: [.command, .shift])
+                        .disabled(activeEditHistory?.canRedo != true)
                 }
             }
             CommandGroup(replacing: .newItem) {
@@ -121,7 +138,6 @@ private struct SettingsCommands: Commands {
     private var pendingDocumentURLs: [URL] = []
     private var requestingInitialWindow = false
     private var checkingTermination = false
-
     func applicationWillFinishLaunching(_ notification: Notification) {
         // A single SwiftUI Window cannot create external-event scenes. Handle
         // Finder documents directly so the home screen and editor keep one window.
