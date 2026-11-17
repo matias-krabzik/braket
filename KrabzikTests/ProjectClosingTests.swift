@@ -28,7 +28,7 @@ final class ProjectClosingTests: XCTestCase {
         return predicate()
     }
 
-    func testQuitKeepsProjectOpenWithoutPromptAndSavesEdits() async throws {
+    func testQuitAsksBeforeSavingEdits() async throws {
         let (controller, url, _) = try await environment()
         let file = url.deletingLastPathComponent().appendingPathComponent("query.sql")
         try Data("SELECT 1;".utf8).write(to: file)
@@ -36,14 +36,54 @@ final class ProjectClosingTests: XCTestCase {
         let document = try XCTUnwrap(controller.selectedDocument)
         document.text = "SELECT 2;"
         document.isDirty = true
+        var savePrompts = 0
+        controller.session.dialogs.confirmSave = { name in
+            XCTAssertEqual(name, "query.sql")
+            savePrompts += 1
+            return .save
+        }
         controller.session.dialogs.confirmStopProcesses = { XCTFail("No hay una ejecución activa")
         return false }
 
         let allowed = await controller.prepareToQuit()
         XCTAssertTrue(allowed)
+        XCTAssertEqual(savePrompts, 1)
         XCTAssertEqual(controller.workspaceURL, url)
         XCTAssertEqual(controller.documents.map(\.url), [file.standardizedFileURL])
         XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "SELECT 2;")
+    }
+
+    func testQuitCanDiscardDraftWithoutChoosingLocation() async throws {
+        let (controller, url, _) = try await environment()
+        let draft = try controller.docs.createDraft(name: "customers.sql", text: "SELECT 1;")
+        var prompts = 0
+        controller.session.dialogs.confirmSave = { name in
+            XCTAssertEqual(name, "customers.sql")
+            prompts += 1
+            return .discard
+        }
+        controller.session.dialogs.chooseScriptsDirectory = { _ in
+            XCTFail("Descartar no debe pedir carpeta de scripts")
+            return nil
+        }
+        controller.session.dialogs.saveCopy = { _, _ in
+            XCTFail("Descartar no debe abrir Guardar como")
+            return nil
+        }
+        let allowed = await controller.prepareToQuit()
+        XCTAssertTrue(allowed)
+        XCTAssertEqual(prompts, 1)
+        XCTAssertTrue(draft.isDraft)
+        XCTAssertEqual(controller.workspaceURL, url)
+    }
+
+    func testQuitCancellationKeepsDirtyDraftOpen() async throws {
+        let (controller, _, _) = try await environment()
+        let draft = try controller.docs.createDraft(name: "customers.sql", text: "SELECT 1;")
+        controller.session.dialogs.confirmSave = { _ in .cancel }
+        let allowed = await controller.prepareToQuit()
+        XCTAssertFalse(allowed)
+        XCTAssertTrue(controller.documents.contains { $0 === draft })
     }
 
     func testQuitWarnsAndCanBeCancelledWhenProcessRuns() async throws {

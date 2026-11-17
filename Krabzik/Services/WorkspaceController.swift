@@ -419,8 +419,8 @@ final class WorkspaceController {
         return true
     }
 
-    /// Cerrar la app conserva proyectos y pestañas. Solo consulta al usuario si
-    /// debe interrumpir una ejecución; guarda los cambios del editor antes de salir.
+    /// Al salir, pregunta por cada archivo con cambios antes de intentar guardarlo.
+    /// Elegir «No guardar» permite cerrar sin abrir un selector de ubicación.
     func prepareToQuit() async -> Bool {
         guard fileOperation == nil else { return false }
         for document in documents {
@@ -429,9 +429,7 @@ final class WorkspaceController {
         let running = runner.hasActiveProcesses || workflows.isRunning || agent.isRunning || database.hasActiveWork ||
             documents.contains { $0.sqlExecution.isRunning }
         if running && !session.dialogs.confirmStopProcesses() { return false }
-        for document in docs.dirty {
-            guard await files.save(document) else { return false }
-        }
+        guard await files.resolveDirty() else { return false }
         workflows.stop()
         agent.shutdown()
         return await database.prepareToLeave(confirmActivity: false)
