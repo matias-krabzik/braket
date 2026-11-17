@@ -48,9 +48,10 @@ Una línea de tiempo se lee así:
   0.002 state   state.draft       canEdit=true editing=false changes=1 hasChanges=true
 ```
 
-**Solo existe en Debug.** En Release cada llamada compila a cuerpo vacío y `QAProbe.isActive`
-es `false` constante: la app que se instala en `/Applications` no tiene registro de QA, ni
-archivo, ni costo.
+**Solo funciona en Debug.** En Release `QAProbe.isActive` es `false` constante y cada
+método tiene cuerpo vacío, así que la app que se instala en `/Applications` no abre ningún
+archivo, no escribe ninguna línea y no registra ningún control: del andamiaje quedan unas
+funciones vacías y algunos literales, nada que se ejecute. `--qa-log` tampoco hace nada ahí.
 
 **Privacidad.** Misma regla que `Log` (ver su documentación): las rutas van abreviadas con
 `~`, el SQL recortado, y las contraseñas no entran por ningún campo. Lo que sí entra

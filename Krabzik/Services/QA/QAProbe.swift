@@ -78,10 +78,10 @@ struct QAEvent: Sendable, Equatable {
 /// El registro de QA: una línea por cosa que pasa en la interfaz, para poder afirmar
 /// **cómo reacciona** la app y no solo que no se cayó.
 ///
-/// **Solo existe en Debug.** En Release cada llamada compila a nada: `emit` tiene cuerpo
-/// vacío y `isActive` es `false` constante, así que la app que se instala en
-/// `/Applications` no tiene registro de QA, ni archivo, ni costo. Ver
-/// docs/qa-automation.md.
+/// **Solo funciona en Debug.** En Release `isActive` es `false` constante y cada método
+/// tiene cuerpo vacío: la app que se instala en `/Applications` no abre ningún archivo ni
+/// escribe ninguna línea. Quedan las funciones vacías y algún literal, nada que se
+/// ejecute. Ver docs/qa-automation.md.
 ///
 /// **Privacidad.** Sigue la regla de `Log`, con una vuelta más: las rutas se abreviaron
 /// con `~` antes de llegar acá (`QAField.path`), el SQL se recorta, y las contraseñas no
