@@ -154,7 +154,8 @@ actor MySQLClient {
     }
 
     private func session(_ config: DatabaseConnection, password: String, history: SQLHistoryStore?) async throws -> Session {
-        if let existing = sessions[config.id], existing.configuration == config, !existing.connection.isClosed { return existing }
+        if let existing = sessions[config.id], existing.configuration.configurationWithoutTint == config.configurationWithoutTint,
+           !existing.connection.isClosed { return existing }
         let token = epoch
         let connection = try await open(config, password: password)
         do {

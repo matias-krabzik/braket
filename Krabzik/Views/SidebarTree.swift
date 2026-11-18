@@ -90,9 +90,7 @@ struct SidebarTreeNode<Value>: Identifiable {
 struct SidebarTree<Value, Content: View>: View {
     let nodes: [SidebarTreeNode<Value>]
     let name: (Value) -> String
-    var activate: (Value) -> Void = { _ in }
-    var selectedID: String?
-    var activateOnSingleClick = false
+    var menu: (Value) -> AnyView = { _ in AnyView(EmptyView()) }
     @ViewBuilder let content: (Value) -> Content
     @State private var expanded: Set<String> = []
     @State private var selected: String?
@@ -122,31 +120,35 @@ struct SidebarTree<Value, Content: View>: View {
         }
     }
 
+    private func toggle(_ row: Row) {
+        selected = row.id
+        guard row.node.expandable || !row.node.children.isEmpty else { return }
+        if expanded.contains(row.id) { expanded.remove(row.id) } else { expanded.insert(row.id) }
+    }
+
     private func rowView(_ row: Row) -> some View {
         let open = expanded.contains(row.id)
         let depth = CGFloat(row.ancestors.count)
-        let isSelected = (selectedID ?? selected) == row.id
+        let isSelected = selected == row.id
+        let leading = depth * SidebarTreeStyle.indent + SidebarTreeStyle.iconLeading
+        let horizontalInset: CGFloat = 7
         return HStack(spacing: 0) {
-            Color.clear.frame(width: Theme.zoom(depth * SidebarTreeStyle.indent + SidebarTreeStyle.iconLeading))
+            Color.clear.frame(width: Theme.zoom(leading))
             content(row.node.value)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.trailing, Theme.zoom(horizontalInset))
         }
         .frame(height: Theme.zoom(SidebarTreeStyle.rowHeight))
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
-            selected = row.id
-            activate(row.node.value)
-        }
-        .onTapGesture {
-            selected = row.id
-            if activateOnSingleClick { activate(row.node.value) }
-        }
+        .onTapGesture { toggle(row) }
+        .contextMenu { menu(row.node.value) }
+        .accessibilityAction { toggle(row) }
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .background(alignment: .leading) {
             if isSelected {
                 RoundedRectangle(cornerRadius: 5).fill(.primary.opacity(0.14))
-                    .padding(.leading, Theme.zoom(depth * SidebarTreeStyle.indent + SidebarTreeStyle.iconLeading))
-                    .padding(.trailing, Theme.zoom(8)).padding(.vertical, Theme.zoom(2))
+                    .padding(.leading, Theme.zoom(leading - horizontalInset))
+                    .padding(.vertical, Theme.zoom(2))
                     .allowsHitTesting(false)
             }
         }
@@ -161,12 +163,7 @@ struct SidebarTree<Value, Content: View>: View {
         .overlay(alignment: .leading) {
             if row.node.expandable || !row.node.children.isEmpty {
                 SidebarDisclosure(name: name(row.node.value), expanded: open) {
-                    selected = row.id
-                    var transaction = Transaction(animation: nil)
-                    transaction.disablesAnimations = true
-                    withTransaction(transaction) {
-                        if open { expanded.remove(row.id) } else { expanded.insert(row.id) }
-                    }
+                    toggle(row)
                 }
                 .frame(width: Theme.zoom(16), height: Theme.zoom(18))
                 .padding(.leading, Theme.zoom(depth * SidebarTreeStyle.indent + 8))

@@ -30,6 +30,14 @@ struct DatabaseConnection: Identifiable, Codable, Equatable, Sendable {
     var tlsClientCertificatePath: String?
     var tlsClientKeyPath: String?
 
+    /// El tinte describe la fila, no la sesión SQL ni su catálogo.
+    var configurationWithoutTint: Self {
+        var copy = self
+        copy.tintHex = nil
+        copy.tintStrength = nil
+        return copy
+    }
+
     var effectiveConnectTimeout: Int { connectTimeoutSeconds ?? 10 }
 
     /// La política vigente. Falla cerrada: lo que no se reconoce es solo lectura.
@@ -223,7 +231,8 @@ final class SQLExecution {
         results.firstIndex {
             (!pinned.contains($0.id) || $0.id == targetResultID) && (targetResultID == nil || $0.id == targetResultID)
                 && $0.sql.trimmingCharacters(in: .whitespacesAndNewlines) == result.sql.trimmingCharacters(in: .whitespacesAndNewlines)
-                && $0.connection == result.connection && $0.database == result.database && $0.resultIndex == result.resultIndex
+                && $0.connection?.configurationWithoutTint == result.connection?.configurationWithoutTint
+                && $0.database == result.database && $0.resultIndex == result.resultIndex
         }
     }
 
@@ -231,7 +240,8 @@ final class SQLExecution {
         let related = results.filter {
             (!pinned.contains($0.id) || $0.id == targetResultID) && (targetResultID == nil || $0.id == targetResultID)
                 && $0.sql.trimmingCharacters(in: .whitespacesAndNewlines) == result.sql.trimmingCharacters(in: .whitespacesAndNewlines)
-                && $0.connection == result.connection && $0.database == result.database
+                && $0.connection?.configurationWithoutTint == result.connection?.configurationWithoutTint
+                && $0.database == result.database
         }
         for previous in related {
             if let draft = drafts[previous.id], draft.sending || !draft.confirmDiscard() { return false }

@@ -179,7 +179,7 @@ final class DatabaseController {
         let reusing = execution.results.contains {
             !execution.pinned.contains($0.id) && $0.sql.trimmingCharacters(in: .whitespacesAndNewlines) == query.text
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-                && $0.connection == connection
+                && $0.connection?.configurationWithoutTint == connection.configurationWithoutTint
         }
         guard reusing || (execution.results.count < 200 && retainedBytes < 24_000_000) else {
             execution.error = "Cerrá algunas pestañas de resultados antes de ejecutar más consultas."

@@ -134,24 +134,29 @@ final class ConnectionStore {
             throw error
         }
         let previous = profiles.first { $0.id == connection.id }
-        if let previous {
+        let oldPassword = try CredentialStore.read(for: connection)
+        let keepSession = previous?.configurationWithoutTint == connection.configurationWithoutTint && oldPassword == password
+        if let previous, !keepSession {
             guard await database.disconnect(previous) else {
                 QAProbe.failure("connection.save.rejected", "La conexión está ocupada o se canceló el cambio.")
                 throw DatabaseFailure("La conexión está ocupada o se canceló el cambio.")
             }
         }
-        let oldPassword = try CredentialStore.read(for: connection)
         var updated = profiles
         if let index = updated.firstIndex(where: { $0.id == connection.id }) { updated[index] = connection }
         else { updated.append(connection) }
-        try CredentialStore.save(password, for: connection)
-        do { try persist(updated) }
-        catch {
-            try? CredentialStore.save(oldPassword, for: connection)
-            throw error
+        if keepSession {
+            try persist(updated)
+        } else {
+            try CredentialStore.save(password, for: connection)
+            do { try persist(updated) }
+            catch {
+                try? CredentialStore.save(oldPassword, for: connection)
+                throw error
+            }
+            if let previous, Self.endpointChanged(from: previous, to: connection) { forget(previous) }
+            database.states[connection.id] = DatabaseState()
         }
-        if let previous, Self.endpointChanged(from: previous, to: connection) { forget(previous) }
-        database.states[connection.id] = DatabaseState()
         QAProbe.action("connection.save.ok", ["name": connection.name,
                                               "profiles": QAField.count(profiles.count)])
         QAProbe.state("state.connections", ["profiles": QAField.count(profiles.count)])

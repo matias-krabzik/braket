@@ -3,7 +3,9 @@ import SwiftUI
 struct DatabaseExplorer: View {
     let controller: WorkspaceController
     @State private var ddl: String?
+    @State private var removing: DatabaseConnection?
     var body: some View {
+        let widestCount = controller.connections.profiles.map(countText).max { $0.count < $1.count } ?? ""
         VStack(spacing: 0) {
             HStack {
                 Text("BASES DE DATOS").font(Theme.interfaceFont(12, weight: .semibold)).foregroundStyle(.secondary)
@@ -12,16 +14,33 @@ struct DatabaseExplorer: View {
                     .buttonStyle(.plain).help("Administrar conexiones")
             }.padding(14)
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    ForEach(controller.connections.profiles) { connection in connectionTree(connection) }
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(controller.connections.profiles) { connection in
+                        if connection.id != controller.connections.profiles.first?.id {
+                            Divider().padding(.leading, 8)
+                        }
+                        connectionTree(connection, widestCount: widestCount)
+                    }
                     if controller.connections.profiles.isEmpty {
                         Text("Agregá una conexión global con +.").foregroundStyle(.secondary).padding()
                     }
-                }.padding(.trailing, 10).padding(.bottom, 14)
+                }.padding(.bottom, 14)
             }
         }
         .font(Theme.interfaceFont(13)).background(Theme.background)
         .qaScreen("explorer.databases")
+        .confirmationDialog("¿Eliminar la conexión guardada?", isPresented: Binding(get: { removing != nil },
+                              set: { if !$0 { removing = nil } }), titleVisibility: .visible) {
+            if let removing {
+                Button("Eliminar " + removing.name, role: .destructive) {
+                    controller.connections.remove(removing)
+                    self.removing = nil
+                }
+            }
+            Button("Cancelar", role: .cancel) { removing = nil }
+        } message: {
+            Text("Se quitará de todos los proyectos. Los scripts que la usan quedarán sin conexión asignada.")
+        }
         .sheet(isPresented: Binding(get: { ddl != nil }, set: { if !$0 { ddl = nil } })) {
             VStack(alignment: .leading) {
                 Text("Definición de la tabla").font(.headline)
@@ -34,41 +53,58 @@ struct DatabaseExplorer: View {
         }
     }
 
-    private func connectionTree(_ connection: DatabaseConnection) -> some View {
-        let store = controller.database.schema
-        let state = controller.database.state(connection.id)
-        return VStack(alignment: .leading, spacing: 6) {
-            SidebarTree(nodes: nodes(connection), name: { $0.name }, activate: { item in
-                if case .table(let table) = item { controller.openTableQuery(table, connection: connection) }
-            }) { item in
-                treeLabel(item, connection: connection)
-            }
-            if let snapshot = store.snapshot(connection) {
-                Text(snapshot.isPartial == true ? "Estructura parcial: la carga todavía no terminó."
-                     : "Estructura: " + snapshot.fetchedAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.system(size: Theme.zoom(9))).foregroundStyle(.tertiary)
-                    .padding(.leading, Theme.zoom(SidebarTreeStyle.iconLeading))
-            }
-            if state.status == .disconnected {
-                Button("Conectar") { controller.database.connect(connection) }.disabled(controller.isReadOnly)
-                    .padding(.leading, Theme.zoom(SidebarTreeStyle.iconLeading))
-            }
-            if let progress = store.progress[connection.id] {
-                Text(progress).font(Theme.interfaceFont(12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            if let error = store.errors[connection.id] ?? state.error {
-                Text(error).font(Theme.interfaceFont(12)).foregroundStyle(.orange).textSelection(.enabled)
-                    .qaLabel("explorer.schema.error." + connection.name, error)
-                Button("Reintentar carga") { Task { await store.discover(connection, client: controller.database.client) } }
-                    .disabled(store.loading.contains(connection.id) || controller.isReadOnly)
-                    .qaControl("explorer.schema.retry." + connection.name, title: "Reintentar carga",
-                               enabled: !store.loading.contains(connection.id) && !controller.isReadOnly) {
-                        Task { await store.discover(connection, client: controller.database.client) }
-                    }
-            } else if !store.loading.contains(connection.id), store.preference(connection).visible.isEmpty {
-                Text("Elegí las bases con el selector de la derecha.").font(Theme.interfaceFont(12)).foregroundStyle(.secondary)
+    private func connectionTree(_ connection: DatabaseConnection, widestCount: String) -> some View {
+        SidebarTree(nodes: nodes(connection), name: { $0.name },
+                    menu: { AnyView(contextMenu($0, connection: connection)) }) { item in
+            treeLabel(item, connection: connection, widestCount: widestCount)
+        }
+        .padding(.trailing, 10)
+        .background {
+            if let tint = FileIcons.groupTint(hex: connection.tintHex, strength: connection.tintStrength) {
+                Rectangle().fill(Color(nsColor: tint))
+                    .allowsHitTesting(false)
             }
         }
+    }
+
+    private func countText(_ connection: DatabaseConnection) -> String {
+        let schema = controller.database.schema
+        let visible = schema.snapshot(connection)?.databases.count ?? 0
+        let total = schema.catalog(for: connection).map { String($0.count) } ?? "—"
+        return "\(visible)/\(total)"
+    }
+
+    @ViewBuilder private func connectionControls(_ connection: DatabaseConnection, widestCount: String) -> some View {
+        let database = controller.database
+        let store = database.schema
+        let state = database.state(connection.id)
+        let connected = state.status == .connected
+        let connecting = state.status == .connecting
+        if store.loading.contains(connection.id) {
+            ProgressView().controlSize(.mini).help(store.progress[connection.id] ?? "Cargando estructura")
+        } else if let error = store.errors[connection.id] ?? state.error {
+            Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange).help(error)
+                .qaLabel("explorer.schema.error." + connection.name, error)
+        }
+
+        Group {
+            if connecting { ProgressView().controlSize(.mini) }
+            else { ConnectionPlug(connected: connected) }
+        }
+        .frame(width: Theme.zoom(32), height: Theme.zoom(24))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(connecting ? "Conectando" : connected ? "Conectada" : "Desconectada")
+        .help("Clic derecho para conectar o desconectar")
+
+        let count = countText(connection)
+        Text(widestCount).hidden().overlay { Text(count) }
+            .font(Theme.interfaceFont(12, weight: .medium).monospacedDigit())
+            .padding(.horizontal, 7).padding(.vertical, 2)
+            .background(Theme.bar, in: RoundedRectangle(cornerRadius: 5))
+            .fixedSize()
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Bases visibles / total disponible: " + count)
+            .help("Bases visibles / total disponible: " + count + "\nClic derecho para elegir bases")
     }
 
     private enum Item {
@@ -121,19 +157,12 @@ struct DatabaseExplorer: View {
         return [.init(id: root, value: .connection(connection), children: databases, expandable: true)]
     }
 
-    @ViewBuilder private func treeLabel(_ item: Item, connection: DatabaseConnection) -> some View {
-        let store = controller.database.schema
-        let state = controller.database.state(connection.id)
+    @ViewBuilder private func treeLabel(_ item: Item, connection: DatabaseConnection, widestCount: String) -> some View {
         HStack(spacing: Theme.zoom(7)) {
             Image(systemName: item.icon)
                 .font(.system(size: Theme.zoom(SidebarTreeStyle.iconSize)))
                 .foregroundStyle(.secondary)
                 .frame(width: Theme.zoom(24), height: Theme.zoom(24))
-                .overlay(alignment: .bottomTrailing) {
-                    if case .connection = item {
-                        Circle().fill(state.status == .connected ? .green : .secondary).frame(width: 6, height: 6)
-                    }
-                }
             Text(item.name).lineLimit(1).truncationMode(.middle)
                 .help({
                     if case .column(let column, _) = item { return column.type + (column.nullable ? " · NULL" : " · NOT NULL") }
@@ -145,28 +174,56 @@ struct DatabaseExplorer: View {
                 Text(column.type).foregroundStyle(.tertiary).lineLimit(1)
             }
             if case .connection = item {
-                if store.loading.contains(connection.id) {
-                    ProgressView().controlSize(.mini)
-                    Button { store.cancel(connection.id) } label: { Image(systemName: "xmark.circle") }
-                        .buttonStyle(.plain).help("Cancelar carga de estructura").accessibilityLabel("Cancelar carga de estructura")
-                }
-                Button {
-                    Task { await store.discover(connection, client: controller.database.client, choose: true) }
-                } label: {
-                    Text(store.available[connection.id].map { "\(store.preference(connection).visible.count)/\($0.count)" }
-                         ?? "\(store.preference(connection).visible.count) bases")
-                        .font(Theme.interfaceFont(12)).padding(3).background(Theme.bar, in: RoundedRectangle(cornerRadius: 3))
-                }.buttonStyle(.plain).help("Elegir bases visibles y predeterminada").disabled(controller.isReadOnly)
+                connectionControls(connection, widestCount: widestCount)
             }
         }
-        .contextMenu {
-            switch item {
+    }
+
+    @ViewBuilder private func contextMenu(_ item: Item, connection: DatabaseConnection) -> some View {
+        let store = controller.database.schema
+        let state = controller.database.state(connection.id)
+        switch item {
             case .connection:
-                Button("Conectar") { controller.database.connect(connection) }
-                    .disabled(controller.isReadOnly || state.status != .disconnected)
-                Button("Actualizar estructura") { Task { await store.discover(connection, client: controller.database.client) } }
-                Button("Desconectar") { Task { _ = await controller.database.disconnect(connection) } }.disabled(state.busy)
-                Button("Configurar") { controller.database.editingConnection = connection }
+                Button {
+                    if state.status == .connected { Task { _ = await controller.database.disconnect(connection) } }
+                    else { controller.database.connect(connection) }
+                } label: {
+                    Label {
+                        Text(state.status == .connecting ? "Conectando…" :
+                             state.status == .connected ? "Desconectar" : "Conectar")
+                    } icon: { ConnectionPlug(connected: state.status == .connected) }
+                }
+                .disabled(state.status == .connecting || state.busy ||
+                          (state.status != .connected && controller.isReadOnly))
+                Button("Nueva consulta", systemImage: "doc.badge.plus") { controller.newQuery(connection: connection) }
+                    .disabled(controller.isReadOnly || controller.isSwitchingWorkspace)
+                Divider()
+                Button("Elegir bases visibles…", systemImage: "cylinder.split.1x2") {
+                    Task { await store.discover(connection, client: controller.database.client, choose: true) }
+                }.disabled(controller.isReadOnly)
+                if store.loading.contains(connection.id) {
+                    Button("Cancelar carga de estructura", systemImage: "stop.circle") { store.cancel(connection.id) }
+                } else {
+                    Button("Actualizar estructura", systemImage: "arrow.clockwise") {
+                        Task { await store.discover(connection, client: controller.database.client) }
+                    }.disabled(controller.isReadOnly)
+                }
+                Divider()
+                Button("Editar conexión…", systemImage: "pencil") { controller.database.editingConnection = connection }
+                    .disabled(controller.isReadOnly)
+                Button("Duplicar conexión…", systemImage: "plus.square.on.square") {
+                    var copy = connection
+                    copy.id = UUID()
+                    copy.name += " (copia)"
+                    controller.database.editingConnection = copy
+                }.disabled(controller.isReadOnly)
+                Button("Copiar dirección del servidor", systemImage: "doc.on.doc") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(connection.host + ":" + String(connection.port), forType: .string)
+                }
+                Divider()
+                Button("Eliminar conexión…", systemImage: "trash", role: .destructive) { removing = connection }
+                    .disabled(controller.isReadOnly || state.busy || state.status == .connecting)
             case .database(let database, _):
                 Button("Usar en la sesión") { controller.database.selectDatabase(database, connection: connection) }
                 Button("Base predeterminada") {
@@ -176,6 +233,9 @@ struct DatabaseExplorer: View {
                     controller.database.selectDatabase(database, connection: connection)
                 }
             case .table(let table):
+                Button("Abrir consulta", systemImage: "doc.badge.plus") {
+                    controller.openTableQuery(table, connection: connection)
+                }.disabled(controller.isReadOnly)
                 Button("Copiar nombre SQL") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(table.qualified, forType: .string)
@@ -188,11 +248,50 @@ struct DatabaseExplorer: View {
                         } catch { store.errors[connection.id] = MySQLClient.message(error) }
                     }
                 }
-            case .column, .pending: EmptyView()
-            }
+            case .column, .pending:
+                Button("Copiar nombre", systemImage: "doc.on.doc") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(item.name, forType: .string)
+                }
         }
     }
 
+}
+
+private struct ConnectionPlug: View {
+    let connected: Bool
+
+    var body: some View {
+        Canvas { context, size in
+            context.scaleBy(x: size.width / 28, y: size.height / 14)
+            let ink: GraphicsContext.Shading = .color(connected ? .green : .secondary)
+            let left: CGFloat = connected ? 13.5 : 10
+            let right: CGFloat = connected ? 14.5 : 18
+            var wires = Path()
+            wires.move(to: CGPoint(x: 1, y: 7))
+            wires.addLine(to: CGPoint(x: left - 4, y: 7))
+            wires.move(to: CGPoint(x: right + 4, y: 7))
+            wires.addLine(to: CGPoint(x: 27, y: 7))
+            if !connected {
+                for y in [4.75, 9.25] {
+                    wires.move(to: CGPoint(x: left, y: y))
+                    wires.addLine(to: CGPoint(x: left + 3, y: y))
+                }
+            }
+            context.stroke(wires, with: ink, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+            var halves = Path()
+            halves.addArc(center: CGPoint(x: left, y: 7), radius: 5,
+                          startAngle: .degrees(90), endAngle: .degrees(270), clockwise: false)
+            halves.closeSubpath()
+            halves.move(to: CGPoint(x: right, y: 2))
+            halves.addArc(center: CGPoint(x: right, y: 7), radius: 5,
+                          startAngle: .degrees(-90), endAngle: .degrees(90), clockwise: false)
+            halves.closeSubpath()
+            context.fill(halves, with: ink)
+        }
+        .frame(width: Theme.zoom(26), height: Theme.zoom(13))
+        .accessibilityHidden(true)
+    }
 }
 
 struct DatabaseSelectionSheet: View {
@@ -210,7 +309,7 @@ struct DatabaseSelectionSheet: View {
             TextField("Filtrar bases", text: $search).textFieldStyle(.roundedBorder)
             ScrollView {
                 VStack(alignment: .leading) {
-                    ForEach((database.schema.available[connection.id] ?? []).filter {
+                    ForEach((database.schema.catalog(for: connection) ?? []).filter {
                         search.isEmpty || $0.localizedCaseInsensitiveContains(search)
                     }, id: \.self) { name in
                         Toggle(name, isOn: Binding(get: { visible.contains(name) }, set: {

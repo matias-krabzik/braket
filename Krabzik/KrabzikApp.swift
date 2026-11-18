@@ -250,6 +250,7 @@ private struct WindowBridge: NSViewRepresentable {
                 fitWindowToZoom(window, on: screen)
                 return
             }
+            window.titleVisibility = projectIsOpen ? .hidden : .visible
             configuredWindow = window
             appliedProjectIsOpen = projectIsOpen
             guard !window.styleMask.contains(.fullScreen) else { return }

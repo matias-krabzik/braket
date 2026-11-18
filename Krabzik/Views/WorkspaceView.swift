@@ -22,7 +22,6 @@ struct WorkspaceView: View {
             if let workspace = controller.workspace, let url = controller.workspaceURL {
                 if controller.isReadOnly { readOnlyBanner }
                 HStack(spacing: 0) {
-                    ProjectRail(controller: controller)
                     WorkspaceActivityBar(controller: controller).zIndex(1)
                     WorkspaceVerticalSplit(showsBottom: showsSQLResults ||
                                            (controller.selectedProcessesVisible && !controller.workflowVisible && !controller
@@ -34,9 +33,10 @@ struct WorkspaceView: View {
                                     if controller.database.browserShowsDatabases { DatabaseExplorer(controller: controller) }
                                     else { WorkspaceSidebar(controller: controller, workspace: workspace, url: url).id(url) }
                                 }
-                                .frame(minWidth: 230, idealWidth: 270, maxWidth: 420)
+                                .frame(minWidth: 230, idealWidth: controller.database.browserShowsDatabases ? 380 : 270, maxWidth: 420)
                                 .clipped()
-                                .background(SidebarWidthPersistence())
+                                .background(SidebarWidthPersistence(databases: controller.database.browserShowsDatabases)
+                                    .id(controller.database.browserShowsDatabases))
                             }
                             editorArea.frame(minWidth: 420, maxWidth: .infinity, minHeight: 180, maxHeight: .infinity)
                         }
@@ -71,6 +71,13 @@ struct WorkspaceView: View {
                minHeight: controller.workspace == nil && controller.documents.isEmpty ? 420 : 580)
         .toolbar {
             if controller.workspace != nil {
+                if #available(macOS 26, *) {
+                    projectToolbarItem.sharedBackgroundVisibility(.hidden)
+                    ToolbarSpacer(.flexible, placement: .primaryAction)
+                } else {
+                    projectToolbarItem
+                    ToolbarItem(placement: .principal) { Spacer() }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button { if let url = controller.workspaceURL {
                         controller.workflows.configure(url, root: controller.workflowRoot)
@@ -147,6 +154,15 @@ struct WorkspaceView: View {
                 + (pendientes == 0 ? "" : "\n\n(y \(pendientes) más)"))
         }
         .task { await controller.start() }
+    }
+
+    private var projectToolbarItem: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            HStack(spacing: 10) {
+                Text("Braket").font(Theme.interfaceFont().weight(.semibold))
+                ProjectPicker(controller: controller)
+            }
+        }
     }
 
     private var editorArea: some View {

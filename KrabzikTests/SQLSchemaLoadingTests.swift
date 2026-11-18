@@ -103,7 +103,19 @@ final class SQLSchemaLoadingTests: XCTestCase {
         let source = Source(waits: true)
         await store.discover(connection, client: source)
         XCTAssertEqual(store.choosing, connection)
-        XCTAssertEqual(store.available[connection.id], ["qa", "other"])
+        XCTAssertEqual(store.catalog(for: connection), ["qa", "other"])
+        let restored = SQLSchemaStore(defaults: defaults)
+        XCTAssertEqual(restored.catalog(for: connection), ["qa", "other"])
+        var tinted = connection
+        tinted.tintHex = "8863D7"
+        tinted.tintStrength = 0.18
+        XCTAssertEqual(restored.catalog(for: tinted), ["qa", "other"])
+        store.save(.init(visible: ["qa"]), for: connection)
+        await store.discover(connection, client: Source())
+        XCTAssertEqual(store.snapshot(tinted)?.databases, ["qa"])
+        var otherServer = connection
+        otherServer.host = "other.example"
+        XCTAssertNil(restored.catalog(for: otherServer))
         XCTAssertFalse(store.loading.contains(connection.id))
         let calls = await source.schemaCalls
         XCTAssertEqual(calls, 0)

@@ -346,6 +346,22 @@ final class WorkspaceController {
                                           "open": QAField.count(openWorkspaceURLs.count)])
     }
 
+    func newQuery(connection: DatabaseConnection) {
+        guard !isReadOnly, !isSwitchingWorkspace, workspace != nil else { return }
+        do {
+            let document = try docs.createDraft(name: "consulta.sql", text: "")
+            connections.select(connection.id, for: document)
+            workflowVisible = false
+            let preferred = database.schema.preference(connection).defaultDatabase
+            let target = preferred.isEmpty ? connection.database : preferred
+            let state = database.state(connection.id)
+            if !target.isEmpty, !state.busy, state.status != .connecting {
+                if state.status == .connected { database.selectDatabase(target, connection: connection) }
+                else { state.currentDatabase = target }
+            }
+        } catch { errors.report(error) }
+    }
+
     func openTableQuery(_ table: SQLSchemaTable, connection: DatabaseConnection) {
         QAProbe.action("table.query.request", ["table": table.qualified, "connection": connection.name,
                                                "readOnly": QAField.bool(isReadOnly)])

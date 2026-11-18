@@ -25,13 +25,30 @@ final class SQLSchemaStore {
     @ObservationIgnored private let readPassword: @Sendable (DatabaseConnection) throws -> String
     var choosing: DatabaseConnection?
     var selectionHosts: [UUID] = []
-    var available: [UUID: [String]] = [:]
+    private struct Catalog: Codable {
+        let connection: DatabaseConnection
+        let names: [String]
+    }
+    private var catalogs: [UUID: Catalog] = [:]
+
+    func catalog(for connection: DatabaseConnection) -> [String]? {
+        guard let catalog = catalogs[connection.id],
+              catalog.connection.configurationWithoutTint == connection.configurationWithoutTint else { return nil }
+        return catalog.names
+    }
+
+    private func rememberCatalog(_ names: [String], for connection: DatabaseConnection) {
+        catalogs[connection.id] = Catalog(connection: connection, names: names)
+        if let data = try? JSONEncoder().encode(catalogs) { defaults.set(data, forKey: "mysql.databaseCatalogs.v1") }
+    }
     @ObservationIgnored private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard,
          readPassword: @escaping @Sendable (DatabaseConnection) throws -> String = { try CredentialStore.read(for: $0) }) {
         self.defaults = defaults
         self.readPassword = readPassword
+        if let data = defaults.data(forKey: "mysql.databaseCatalogs.v1"),
+           let saved = try? JSONDecoder().decode([UUID: Catalog].self, from: data) { catalogs = saved }
         if let data = defaults.data(forKey: "mysql.schemaPreferences.v1"),
            let saved = try? JSONDecoder().decode([UUID: Preference].self, from: data) { preferences = saved }
         if let data = defaults.data(forKey: "mysql.schemaCache.v1"),
@@ -39,7 +56,8 @@ final class SQLSchemaStore {
     }
 
     func snapshot(_ connection: DatabaseConnection) -> SQLSchemaSnapshot? {
-        guard let cached = snapshots[connection.id], cached.connection == connection else { return nil }
+        guard let cached = snapshots[connection.id],
+              cached.connection.configurationWithoutTint == connection.configurationWithoutTint else { return nil }
         return cached
     }
 
@@ -98,7 +116,7 @@ final class SQLSchemaStore {
         }
         do {
             if !choose, preferences[id] != nil, preference(connection).visible.isEmpty {
-                snapshots[id] = SQLSchemaSnapshot(connection: connection, databases: [], tables: [], isPartial: false)
+                cache(SQLSchemaSnapshot(connection: connection, databases: [], tables: [], isPartial: false))
                 return
             }
             let password = try readPassword(connection)
@@ -108,9 +126,16 @@ final class SQLSchemaStore {
                 let names = try await client.databases(connection, password: password)
                 try Task.checkCancellation()
                 guard generations[id] == token else { return }
-                available[id] = names
+                rememberCatalog(names, for: connection)
                 choosing = connection
                 return
+            }
+            // Older schema caches contain only the selected databases, not the server total.
+            if catalog(for: connection) == nil {
+                let names = try? await client.databases(connection, password: password)
+                try Task.checkCancellation()
+                guard generations[id] == token else { return }
+                if let names { rememberCatalog(names, for: connection) }
             }
             let visible = preference(connection).visible
             var initial = snapshot(connection) ?? SQLSchemaSnapshot(connection: connection, databases: visible, tables: [])
@@ -130,14 +155,18 @@ final class SQLSchemaStore {
             }
             try Task.checkCancellation()
             guard generations[id] == token else { return }
-            snapshots[id] = snapshot
-            if let data = try? JSONEncoder().encode(snapshots), data.count <= 20_000_000 {
-                defaults.set(data, forKey: "mysql.schemaCache.v1")
-            }
+            cache(snapshot)
         } catch {
             guard generations[id] == token else { return }
             errors[id] = Task.isCancelled ? "Carga de estructura cancelada. Podés reintentar."
                 : (progress[id].map { $0 + "\n" } ?? "") + MySQLClient.message(error)
+        }
+    }
+
+    private func cache(_ snapshot: SQLSchemaSnapshot) {
+        snapshots[snapshot.connection.id] = snapshot
+        if let data = try? JSONEncoder().encode(snapshots), data.count <= 20_000_000 {
+            defaults.set(data, forKey: "mysql.schemaCache.v1")
         }
     }
 

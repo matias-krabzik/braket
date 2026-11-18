@@ -3,12 +3,20 @@ import SwiftUI
 
 /// Persiste solo los ajustes manuales: redimensionar la ventana no cambia la preferencia.
 struct SidebarWidthPersistence: NSViewRepresentable {
-    func makeNSView(context: Context) -> Probe { Probe() }
+    let databases: Bool
+
+    func makeNSView(context: Context) -> Probe {
+        let probe = Probe()
+        probe.databases = databases
+        return probe
+    }
     func updateNSView(_ nsView: Probe, context: Context) {}
 
     final class Probe: NSView {
         private weak var split: NSSplitView?
-        private let key = "workspace.sidebarWidth"
+        var databases = false
+        private var key: String { databases ? "workspace.databaseSidebarWidth" : "workspace.sidebarWidth" }
+        private var defaultWidth: CGFloat { databases ? 380 : 270 }
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
@@ -23,8 +31,8 @@ struct SidebarWidthPersistence: NSViewRepresentable {
                     guard split !== candidate else { return }
                     NotificationCenter.default.removeObserver(self)
                     split = candidate
-                    let savedWidth = UserDefaults.standard.object(forKey: key) as? Double ?? 270
-                    let width = savedWidth.isFinite ? min(360, max(270, savedWidth)) : 270
+                    let savedWidth = UserDefaults.standard.object(forKey: key) as? Double ?? defaultWidth
+                    let width = savedWidth.isFinite ? min(420, max(230, savedWidth)) : defaultWidth
                     candidate.layoutSubtreeIfNeeded()
                     candidate.setPosition(width, ofDividerAt: 0)
                     NotificationCenter.default.addObserver(self, selector: #selector(resized),
@@ -38,7 +46,7 @@ struct SidebarWidthPersistence: NSViewRepresentable {
         @objc private func resized() {
             guard let split, let width = split.subviews.first?.frame.width,
                   NSApp.currentEvent?.type == .leftMouseDragged || NSApp.currentEvent?.type == .leftMouseUp else { return }
-            UserDefaults.standard.set(Double(min(360, max(270, width))), forKey: key)
+            UserDefaults.standard.set(Double(min(420, max(230, width))), forKey: key)
         }
 
         deinit { NotificationCenter.default.removeObserver(self) }
