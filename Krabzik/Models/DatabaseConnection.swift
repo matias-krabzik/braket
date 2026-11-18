@@ -190,6 +190,7 @@ struct DatabaseFailure: LocalizedError, Sendable {
 struct SQLResult: Identifiable, Sendable {
     var id = UUID()
     var isLoading = false
+    var setValues: [SQLSetValue]?
     var resultIndex = 0
     var page: SQLPage?
     var statement: Int
@@ -237,6 +238,7 @@ final class SQLExecution {
     }
 
     func begin(_ result: SQLResult) -> Bool {
+        if result.setValues != nil { return true }
         let related = results.filter {
             (!pinned.contains($0.id) || $0.id == targetResultID) && (targetResultID == nil || $0.id == targetResultID)
                 && $0.sql.trimmingCharacters(in: .whitespacesAndNewlines) == result.sql.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -254,6 +256,7 @@ final class SQLExecution {
     }
 
     func receive(_ result: SQLResult) {
+        guard result.setValues == nil else { return }
         var updated = result
         if let index = matching(result) {
             updated.id = results[index].id

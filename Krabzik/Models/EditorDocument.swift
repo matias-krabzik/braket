@@ -71,6 +71,7 @@ final class EditorDocument: Identifiable {
     @ObservationIgnored var selectedRange = NSRange(location: 0, length: 0)
     @ObservationIgnored private(set) var queryMarkers: [Int: SQLQueryMarker] = [:]
     @ObservationIgnored private(set) var queryMarkerRevision = 0
+    @ObservationIgnored private(set) var setNotes: [Int: SQLSetNote] = [:]
     let sqlExecution: SQLExecution
 
     var sqlToExecute: (text: String, startingLine: Int) {
@@ -136,6 +137,7 @@ final class EditorDocument: Identifiable {
         self.selectedRange = document.selectedRange
         self.queryMarkers = document.queryMarkers
         self.queryMarkerRevision = document.queryMarkerRevision
+        self.setNotes = document.setNotes
     }
 
     /// La llama el editor en cada cambio: O(1). El texto se relee cuando alguien lo pida.
@@ -147,6 +149,7 @@ final class EditorDocument: Identifiable {
 
     func setQueryMarker(_ status: SQLQueryStatus, line: Int, revision: Int, message: String? = nil) {
         guard revision == queryMarkerRevision, line > 0 else { return }
+        if status == .loading { setNotes.removeValue(forKey: line) }
         queryMarkers[line] = SQLQueryMarker(status: status, message: message)
         (editorStorage as? EditorSurface)?.refreshQueryMarkers()
     }
@@ -160,9 +163,24 @@ final class EditorDocument: Identifiable {
         if !pending.isEmpty { (editorStorage as? EditorSurface)?.refreshQueryMarkers() }
     }
 
+    func setVariableNote(_ result: SQLResult, revision: Int) {
+        guard revision == queryMarkerRevision, let values = result.setValues, let connection = result.connection else { return }
+        let line = result.line + result.sql.filter { $0 == "\n" }.count
+        let displayed = result.error == nil ? values : [SQLSetValue(name: "SET", value: "Error")]
+        setNotes[line] = SQLSetNote(connectionID: connection.id, values: displayed, error: result.error)
+        (editorStorage as? EditorSurface)?.refreshQueryMarkers()
+    }
+
+    func clearVariableNotes(connectionID: UUID) {
+        let previous = setNotes.count
+        setNotes = setNotes.filter { $0.value.connectionID != connectionID }
+        if setNotes.count != previous { (editorStorage as? EditorSurface)?.refreshQueryMarkers() }
+    }
+
     private func invalidateQueryMarkers() {
         queryMarkerRevision &+= 1
-        guard !queryMarkers.isEmpty else { return }
+        guard !queryMarkers.isEmpty || !setNotes.isEmpty else { return }
+        setNotes.removeAll()
         queryMarkers.removeAll()
         (editorStorage as? EditorSurface)?.refreshQueryMarkers()
     }

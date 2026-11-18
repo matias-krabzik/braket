@@ -9,6 +9,12 @@ final class DatabaseController {
     var showingConnections = false
     var editingConnection: DatabaseConnection?
     var states: [UUID: DatabaseState] = [:]
+    private let annotatedDocuments = NSHashTable<EditorDocument>.weakObjects()
+
+    private func clearVariableNotes(_ connectionID: UUID) {
+        for document in annotatedDocuments.allObjects { document.clearVariableNotes(connectionID: connectionID) }
+    }
+
     var resultsVisible = false
     var browserShowsDatabases = false
     let schema = SQLSchemaStore()
@@ -64,6 +70,7 @@ final class DatabaseController {
             QAProbe.sql("connection.connect.ignored", ["name": connection.name, "status": state.qaStatus])
             return
         }
+        clearVariableNotes(connection.id)
         state.status = .connecting
         state.error = nil
         QAProbe.state("state.connection", state.qaFields(connection))
@@ -107,6 +114,7 @@ final class DatabaseController {
         }
         if schema.loading.contains(connection.id) { schema.cancel(connection.id) }
         await client.disconnect(connection.id)
+        clearVariableNotes(connection.id)
         state.status = .disconnected
         state.inTransaction = false
         state.error = nil
@@ -166,6 +174,7 @@ final class DatabaseController {
             QAProbe.failure("sql.execute.rejected", execution.error ?? "", ["stage": "empty"])
             return
         }
+        annotatedDocuments.add(document)
         let markerRevision = document.queryMarkerRevision
         guard allowsExecution(query, connection: connection, state: state, execution: execution) else {
             if let error = execution.error {
@@ -181,7 +190,8 @@ final class DatabaseController {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 && $0.connection?.configurationWithoutTint == connection.configurationWithoutTint
         }
-        guard reusing || (execution.results.count < 200 && retainedBytes < 24_000_000) else {
+        let beginsWithSet = SQLSetStatement(query.text, noBackslashEscapes: state.noBackslashEscapes) != nil
+        guard beginsWithSet || reusing || (execution.results.count < 200 && retainedBytes < 24_000_000) else {
             execution.error = "Cerrá algunas pestañas de resultados antes de ejecutar más consultas."
             document.setQueryMarker(.failure, line: query.startingLine, revision: markerRevision,
                                     message: execution.error)
@@ -200,12 +210,14 @@ final class DatabaseController {
                 pending.sql = statement.text
                 pending.connection = connection
                 pending.database = targetDatabase
+                pending.setValues = SQLSetStatement(statement.text, noBackslashEscapes: state.noBackslashEscapes) == nil ? nil : []
                 if SQLPagination(statement.text, page: pageIndex, noBackslashEscapes: state.noBackslashEscapes) != nil {
                     pending.page = SQLPage(index: pageIndex)
                 }
                 guard execution.begin(pending) else { execution.targetResultID = nil
                 QAProbe.sql("sql.execute.cancelledByDraft", ["sql": QAField.sql(statement.text)])
                 return }
+                if pending.setValues == nil { resultsVisible = true }
                 document.setQueryMarker(.loading, line: statement.line, revision: markerRevision)
             }
         } catch { execution.error = MySQLClient.message(error)
@@ -225,7 +237,6 @@ final class DatabaseController {
         execution.isCancelling = false
         state.busy = true
         state.error = nil
-        resultsVisible = true
         QAProbe.sql("sql.execute.begin", ["sql": QAField.sql(query.text), "line": QAField.count(query.startingLine),
                                           "connection": connection.name, "database": targetDatabase,
                                           "timeout": QAField.count(timeoutSeconds)])
@@ -245,6 +256,7 @@ final class DatabaseController {
             do {
                 try Task.checkCancellation()
                 let password = try CredentialStore.read(for: connection)
+                if await client.info(connection.id) == nil { clearVariableNotes(connection.id) }
                 if let databaseOverride, !databaseOverride.isEmpty {
                     _ = try await client.useDatabase(databaseOverride, config: connection, password: password)
                 } else if await client.info(connection.id) == nil {
@@ -257,7 +269,10 @@ final class DatabaseController {
                                                     password: password, operation: operation, timeoutSeconds: timeoutSeconds,
                                                     pageIndex: pageIndex,
                                                     onStatement: { pending in
-                    let accepted = await MainActor.run { execution.begin(pending) }
+                    let accepted = await MainActor.run {
+                        if pending.setValues == nil { self.resultsVisible = true }
+                        return execution.begin(pending)
+                    }
                     if !accepted { throw CancellationError() }
                     await MainActor.run {
                         document.setQueryMarker(.loading, line: pending.line, revision: markerRevision)
@@ -265,6 +280,7 @@ final class DatabaseController {
                 }, onResult: { result in
                     await MainActor.run {
                         execution.receive(result)
+                        document.setVariableNote(result, revision: markerRevision)
                         document.setQueryMarker(result.error == nil ? .success : .failure,
                                                 line: result.line, revision: markerRevision, message: result.error)
                         QAProbe.sql("sql.result", ["sql": QAField.sql(result.sql),
@@ -290,6 +306,7 @@ final class DatabaseController {
                     state.inTransaction = info.inTransaction
                 state.noBackslashEscapes = info.noBackslashEscapes
                 } else {
+                    clearVariableNotes(connection.id)
                     state.status = .disconnected
                     state.inTransaction = false
                 }
@@ -382,6 +399,7 @@ final class DatabaseController {
         Task {
             defer { state.busy = false }
             do {
+                if await client.info(connection.id) == nil { clearVariableNotes(connection.id) }
                 let password = try CredentialStore.read(for: connection)
                 let info = try await client.useDatabase(name, config: connection, password: password)
                 state.currentDatabase = info.database
@@ -474,7 +492,8 @@ final class DatabaseController {
         }
         schema.cancelAll()
         await client.closeAll()
-        for state in states.values {
+        for (id, state) in states {
+            clearVariableNotes(id)
             state.status = .disconnected
             state.inTransaction = false
         }

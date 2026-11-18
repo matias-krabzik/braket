@@ -5,6 +5,52 @@ import XCTest
 
 @MainActor
 final class SQLHistoryIntegrationTests: XCTestCase {
+    func testSetShowsEvaluatedNoteAndKeepsSessionForTheNextQuery() async throws {
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        let server = try await ServerBootstrap(group: group).childChannelInitializer { channel in
+            channel.pipeline.addHandler(HistoryMySQLHandler())
+        }.bind(host: "127.0.0.1", port: 0).get()
+        let database = DatabaseController()
+        do {
+            var config = DatabaseConnection(name: "SET wire test")
+            config.port = try XCTUnwrap(server.localAddress?.port)
+            config.database = "demo"
+            config.tls = .disabled
+            database.schema.preferences[config.id] = .init()
+            let document = try EditorDocument(url: URL(fileURLWithPath: "/tmp/set-wire.sql"),
+                                              data: Data("SET @limite = 5 * 2;\nSELECT @limite;".utf8))
+            func settle() async throws {
+                let limit = ContinuousClock.now + .seconds(5)
+                while document.sqlExecution.isRunning, ContinuousClock.now < limit {
+                    try await Task.sleep(for: .milliseconds(10))
+                }
+                XCTAssertFalse(document.sqlExecution.isRunning)
+                XCTAssertNil(document.sqlExecution.error)
+            }
+            database.execute(document, connection: config, queryOverride: "SET @limite = 5 * 2")
+            try await settle()
+            XCTAssertFalse(database.resultsVisible)
+            XCTAssertTrue(document.sqlExecution.results.isEmpty)
+            XCTAssertEqual(document.setNotes[1]?.values, [SQLSetValue(name: "@limite", value: "10")])
+            database.execute(document, connection: config, queryOverride: "SELECT @limite", startingLineOverride: 2)
+            try await settle()
+            XCTAssertTrue(database.resultsVisible)
+            XCTAssertEqual(document.sqlExecution.results.count, 1)
+            XCTAssertEqual(document.sqlExecution.selectedResult?.rows, [["10"]])
+            let disconnected = await database.disconnect(config)
+            XCTAssertTrue(disconnected)
+            XCTAssertTrue(document.setNotes.isEmpty)
+            await database.client.shutdown()
+            try await server.close().get()
+            try await group.shutdownGracefully()
+        } catch {
+            await database.client.shutdown()
+            try? await server.close().get()
+            try? await group.shutdownGracefully()
+            throw error
+        }
+    }
+
     func testActualClientRecordsStatementsErrorsMetadataAndTimeouts() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("output-wire-" + UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -61,6 +107,7 @@ private final class HistoryMySQLHandler: ChannelInboundHandler {
     typealias OutboundOut = ByteBuffer
     private var input = ByteBuffer()
     private var authenticated = false
+    private var variable: String?
 
     func channelActive(context: ChannelHandlerContext) {
         let capabilities: UInt32 = 0x0008_8201
@@ -99,7 +146,12 @@ private final class HistoryMySQLHandler: ChannelInboundHandler {
             return }
             let sql = String(decoding: payload.dropFirst(), as: UTF8.self)
             if sql.contains("SLEEP") { continue }
-            if sql == "BAD QUERY" {
+            if sql == "SET @limite = 5 * 2" {
+                variable = "10"
+                send([0, 0, 0, 2, 0, 0, 0], sequence: 1, context: context)
+            } else if sql.hasPrefix("SELECT @limite") || sql.hasPrefix("SELECT LEFT(CAST(@limite") {
+                result([variable], context: context)
+            } else if sql == "BAD QUERY" {
                 send([0xFF, 0x28, 0x04] + Array("#42000Syntax error".utf8), sequence: 1, context: context)
             } else if sql.hasPrefix("SELECT") || sql.hasPrefix("SHOW") {
                 result(sql.contains("CONNECTION_ID") ? ["1", "demo"] : ["1"], context: context)
@@ -110,7 +162,7 @@ private final class HistoryMySQLHandler: ChannelInboundHandler {
         input.discardReadBytes()
     }
 
-    private func result(_ values: [String], context: ChannelHandlerContext) {
+    private func result(_ values: [String?], context: ChannelHandlerContext) {
         send([UInt8(values.count)], sequence: 1, context: context)
         for (index, _) in values.enumerated() {
             let column = ["def", "demo", "", "", "value\(index)", ""].flatMap(text)
@@ -118,7 +170,7 @@ private final class HistoryMySQLHandler: ChannelInboundHandler {
             send(column, sequence: UInt8(index + 2), context: context)
         }
         send([0xFE, 0, 0, 2, 0], sequence: UInt8(values.count + 2), context: context)
-        send(values.flatMap(text), sequence: UInt8(values.count + 3), context: context)
+        send(values.flatMap { $0.map(text) ?? [0xFB] }, sequence: UInt8(values.count + 3), context: context)
         send([0xFE, 0, 0, 2, 0], sequence: UInt8(values.count + 4), context: context)
     }
 

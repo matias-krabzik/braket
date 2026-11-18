@@ -3,6 +3,49 @@ import AppKit
 import XCTest
 
 final class SQLWorkspaceTests: XCTestCase {
+    func testSetReadbackOnlyUsesAssignmentTargets() throws {
+        let set = try XCTUnwrap(SQLSetStatement("-- inicio\nSET @limite := 10, @total = COALESCE(5, 2) * 2, "
+                                               + "@nombre = 'a,b=otro', @@SESSION.sql_mode = 'ANSI'"))
+        XCTAssertEqual(set.targets.map(\.label), ["@limite", "@total", "@nombre", "sql_mode"])
+        XCTAssertEqual(set.targets.map(\.expression), ["@limite", "@total", "@nombre", "@@SESSION.`sql_mode`"])
+        XCTAssertFalse(try XCTUnwrap(set.query).contains("COALESCE"))
+        XCTAssertNil(SQLSetStatement("SELECT 'SET @x = 1'"))
+        XCTAssertNil(SQLSetStatement("UPDATE t SET x = 1"))
+        XCTAssertEqual(SQLSetStatement("SET GLOBAL max_connections = 100")?.targets.first?.expression,
+                       "@@GLOBAL.`max_connections`")
+        XCTAssertEqual(SQLSetStatement("SET NAMES utf8mb4")?.targets.count, 3)
+        XCTAssertTrue(SQLSetStatement("SET PASSWORD = 'secret'")?.targets.isEmpty == true)
+        XCTAssertTrue(SQLSetStatement("SET @x = 1 /*! + 1 */")?.targets.isEmpty == true)
+        XCTAssertEqual(SQLSetStatement("SET @`a,b` = 'x'")?.targets.first?.expression, "@`a,b`")
+    }
+
+    @MainActor func testSetNotesDoNotAlterResultsOrDocumentTextAndExpireOnEdit() throws {
+        let document = try EditorDocument(url: URL(fileURLWithPath: "/tmp/variables.sql"), data: Data("SET @n = 10;".utf8))
+        let connection = DatabaseConnection()
+        var set = SQLResult(statement: 1, line: 1)
+        set.connection = connection
+        set.sql = document.text
+        set.setValues = [SQLSetValue(name: "@n", value: "10")]
+        let execution = document.sqlExecution
+        var select = SQLResult(statement: 1, line: 2)
+        select.sql = "SELECT 1"
+        select.rows = [["1"]]
+        execution.receive(select)
+        let selected = execution.selectedResultID
+        XCTAssertTrue(execution.begin(set))
+        execution.receive(set)
+        document.setVariableNote(set, revision: document.queryMarkerRevision)
+        XCTAssertEqual(execution.results.count, 1)
+        XCTAssertEqual(execution.selectedResultID, selected)
+        XCTAssertEqual(document.setNotes[1]?.values, set.setValues)
+        XCTAssertEqual(document.text, "SET @n = 10;")
+        let revision = document.queryMarkerRevision
+        document.text = "SET @n = 20;"
+        XCTAssertTrue(document.setNotes.isEmpty)
+        document.setVariableNote(set, revision: revision)
+        XCTAssertTrue(document.setNotes.isEmpty)
+    }
+
     @MainActor func testRepeatedQueryReusesTabAndReplacesData() {
         let execution = SQLExecution()
         var result = SQLResult(statement: 1, line: 1)

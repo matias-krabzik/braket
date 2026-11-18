@@ -234,6 +234,9 @@ actor MySQLClient {
             pending.sql = statement.text
             pending.connection = configuration
             pending.database = session.database
+            let setStatement = SQLSetStatement(statement.text,
+                                               noBackslashEscapes: session.flags.contains(.SERVER_STATUS_NO_BACKSLASH_ESCAPES))
+            pending.setValues = setStatement == nil ? nil : []
             let pagination = pageIndex.flatMap {
                 SQLPagination(statement.text, page: $0, noBackslashEscapes: session.flags.contains(.SERVER_STATUS_NO_BACKSLASH_ESCAPES))
             }
@@ -271,6 +274,25 @@ actor MySQLClient {
                         if !reusable { throw error }
                     }
                 }
+                var setValues: [SQLSetValue]?
+                if let setStatement {
+                    setValues = setStatement.targets.isEmpty ? [SQLSetValue(name: "SET", value: "Aplicado")]
+                        : setStatement.targets.map { SQLSetValue(name: $0.label, value: "No disponible") }
+                    if let query = setStatement.query {
+                        do {
+                            let values = try await read(query, on: session.connection, configuration: configuration,
+                                                        history: nil, source: "Variables SET")
+                            if let row = values.rows.first, row.count == setStatement.targets.count {
+                                setValues = zip(setStatement.targets, row).map { target, value in
+                                    SQLSetValue(name: target.label, value: value.map { $0.count >= 2048 ? $0 + "…" : $0 } ?? "NULL")
+                                }
+                            }
+                        } catch {
+                            if timedOut.contains(operation) || cancelled.contains(operation) { throw error }
+                            setValues = setStatement.targets.map { SQLSetValue(name: $0.label, value: "No disponible") }
+                        }
+                    }
+                }
                 timeout.cancel()
                 if timedOut.contains(operation) { throw DatabaseFailure("La consulta superó el límite de \(timeoutSeconds) segundos.") }
                 for (index, result) in captured.0.enumerated() {
@@ -279,6 +301,7 @@ actor MySQLClient {
                     var contextual = result
                     contextual.resultIndex = index
                     contextual.sql = statement.text
+                    contextual.setValues = setValues
                     if let pagination {
                         let hasNext = result.rowCount > SQLPage.size
                         let knownTotal = totalRows ?? (!hasNext ? pagination.index * SQLPage.size + result.rowCount : nil)
@@ -302,6 +325,8 @@ actor MySQLClient {
                 if let captured {
                     for (index, result) in captured.0.enumerated() { var contextual = result
                     contextual.resultIndex = index
+                    contextual.sql = statement.text
+                    contextual.setValues = pending.setValues
                     contextual.connection = configuration
                     contextual.database = pending.database
                     await onResult(contextual) }

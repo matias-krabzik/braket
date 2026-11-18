@@ -54,6 +54,98 @@ struct CodeEditor: NSViewRepresentable {
 }
 
 final class CodeTextView: NSTextView {
+    weak var editorSurface: EditorSurface?
+    private var variableTooltips: [NSView.ToolTipTag: String] = [:]
+
+    override func sizeToFit() {
+        super.sizeToFit()
+        if textContainer?.widthTracksTextView == false, editorSurface?.document?.setNotes.isEmpty == false {
+            setFrameSize(NSSize(width: frame.width + 600 * (editorSurface?.lineNumberScale ?? 1), height: frame.height))
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        removeAllToolTips()
+        variableTooltips.removeAll()
+        guard let surface = editorSurface, let notes = surface.document?.setNotes, !notes.isEmpty,
+              let layout = textLayoutManager, let content = layout.textContentManager,
+              let viewport = layout.textViewportLayoutController.viewportRange else { return }
+        let scale = surface.lineNumberScale
+        layout.enumerateTextLayoutFragments(from: viewport.location, options: []) { fragment in
+            let frame = fragment.layoutFragmentFrame
+            if frame.minY > self.visibleRect.maxY { return false }
+            let offset = content.offset(from: content.documentRange.location, to: fragment.rangeInElement.location)
+            for line in fragment.textLineFragments {
+                let lineNumber = surface.lines.line(at: offset + line.characterRange.location)
+                guard let note = notes[lineNumber + 1] else { continue }
+                let end = lineNumber + 1 < surface.lines.count
+                    ? surface.lines.start(of: lineNumber + 1) - 1 : (self.textStorage?.length ?? 0)
+                guard offset + NSMaxRange(line.characterRange) >= end else { continue }
+                var x = frame.minX + line.typographicBounds.maxX + self.textContainerInset.width + 16 * scale
+                let y = frame.minY + line.typographicBounds.minY + self.textContainerInset.height + 2 * scale
+                for value in note.values {
+                    let available = self.visibleRect.maxX - x - 8 * scale
+                    guard available > 45 * scale else { break }
+                    let width = self.drawVariablePill(value, error: note.error, at: NSPoint(x: x, y: y),
+                                                      available: available, scale: scale)
+                    x += width + 7 * scale
+                }
+            }
+            return true
+        }
+    }
+
+    private func drawVariablePill(_ value: SQLSetValue, error: String?, at origin: NSPoint,
+                                  available: CGFloat, scale: CGFloat) -> CGFloat {
+        let size = (font?.pointSize ?? 15 * scale) * 0.88
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        let labelAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedSystemFont(ofSize: size, weight: .regular),
+            .foregroundColor: EditorPalette.muted, .paragraphStyle: paragraph
+        ]
+        let valueAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedSystemFont(ofSize: size, weight: .medium),
+            .foregroundColor: error == nil ? EditorPalette.green : NSColor.systemOrange, .paragraphStyle: paragraph
+        ]
+        let label = value.name as NSString
+        let text = value.value.replacingOccurrences(of: "\n", with: "↵").replacingOccurrences(of: "\r", with: "") as NSString
+        let padding = 8 * scale
+        let labelWidth = min(label.size(withAttributes: labelAttributes).width, min(180 * scale, available * 0.6))
+        let valueWidth = min(text.size(withAttributes: valueAttributes).width, 260 * scale)
+        let width = min(available, labelWidth + valueWidth + padding * 4 + 1)
+        let height = max(19 * scale, size + 6 * scale)
+        let rect = NSRect(origin: origin, size: NSSize(width: width, height: height))
+        let shape = NSBezierPath(roundedRect: rect, xRadius: height / 2, yRadius: height / 2)
+        let divider = rect.minX + labelWidth + padding * 2
+        NSGraphicsContext.saveGraphicsState()
+        shape.addClip()
+        NSColor.labelColor.withAlphaComponent(0.06).setFill()
+        rect.fill()
+        NSColor.labelColor.withAlphaComponent(0.045).setFill()
+        NSRect(x: divider, y: rect.minY, width: rect.maxX - divider, height: height).fill()
+        NSColor.separatorColor.setFill()
+        NSRect(x: divider, y: rect.minY + 3 * scale, width: 0.7, height: height - 6 * scale).fill()
+        let baselineInset = (height - label.size(withAttributes: labelAttributes).height) / 2
+        label.draw(in: NSRect(x: rect.minX + padding, y: rect.minY + baselineInset,
+                              width: labelWidth, height: height), withAttributes: labelAttributes)
+        text.draw(in: NSRect(x: divider + padding, y: rect.minY + baselineInset,
+                             width: max(0, rect.maxX - divider - padding * 2), height: height), withAttributes: valueAttributes)
+        NSGraphicsContext.restoreGraphicsState()
+        NSColor.labelColor.withAlphaComponent(0.18).setStroke()
+        shape.lineWidth = 0.7
+        shape.stroke()
+        let tag = addToolTip(rect, owner: self, userData: nil)
+        variableTooltips[tag] = error ?? (value.name + " = " + value.value)
+        return width
+    }
+
+    @objc func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint,
+                    userData: UnsafeMutableRawPointer?) -> String {
+        variableTooltips[tag] ?? ""
+    }
+
     private let editHistory = UndoManager()
     override var undoManager: UndoManager? { editHistory }
 
@@ -207,6 +299,7 @@ private final class ObserverToken: @unchecked Sendable {
             scrollView.topAnchor.constraint(equalTo: topAnchor), scrollView.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
 
+        textView.editorSurface = self
         textView.frame = NSRect(x: 0, y: 0, width: 900, height: 0)
         textView.minSize = NSSize(width: 0, height: 0)
         textView.maxSize = NSSize(width: 10_000_000, height: 10_000_000)
@@ -349,6 +442,8 @@ private final class ObserverToken: @unchecked Sendable {
     }
 
     func refreshQueryMarkers() {
+        textView.needsDisplay = true
+        if !appliedWrapLines { textView.sizeToFit() }
         gutter.updateLoadingAnimation()
         gutter.needsDisplay = true
     }

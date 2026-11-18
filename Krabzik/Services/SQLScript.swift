@@ -195,7 +195,14 @@ struct SQLWord: Sendable, Equatable {
 }
 
 /// Lo que queda de una sentencia cuando se saltea todo lo que no es código.
+struct SQLLexeme: Sendable {
+    let text: String
+    let depth: Int
+    var quoted = false
+}
+
 struct SQLWordScan: Sendable {
+    var lexemes: [SQLLexeme] = []
     /// Las palabras desnudas, en orden de aparición.
     var words: [SQLWord] = []
     /// `true` si hay un comentario ejecutable (`/*!` o `/*M!`) fuera de cadenas: eso es
@@ -213,7 +220,7 @@ extension SQLScript {
     /// Es el **único** recorrido léxico del proyecto: lo usan la paginación, para reconocer
     /// cláusulas externas, y `SQLWriteGuard`, para decidir si una sentencia escribe. Un
     /// segundo recorrido con sus propias reglas sería garantizar que se separen.
-    static func scan(_ sql: String, noBackslashEscapes: Bool = false) -> SQLWordScan {
+    static func scan(_ sql: String, noBackslashEscapes: Bool = false, collectLexemes: Bool = false) -> SQLWordScan {
         let bytes = Array(sql.utf8)
         var index = 0, depth = 0
         var scan = SQLWordScan()
@@ -221,7 +228,12 @@ extension SQLScript {
             let byte = bytes[index]
             let following = index + 1 < bytes.count ? bytes[index + 1] : 0
             if byte == Byte.singleQuote || byte == Byte.doubleQuote || byte == Byte.backtick {
+                let start = index
                 index = skipQuoted(bytes, from: index, noBackslashEscapes: noBackslashEscapes)
+                if collectLexemes {
+                    scan.lexemes.append(SQLLexeme(text: String(decoding: bytes[start..<min(index, bytes.count)], as: UTF8.self),
+                                                  depth: depth, quoted: true))
+                }
             } else if byte == Byte.hash
                 || (byte == Byte.hyphen && following == Byte.hyphen
                     && (index + 2 == bytes.count || bytes[index + 2] <= Byte.space)) {
@@ -244,7 +256,13 @@ extension SQLScript {
                 while index < bytes.count, isWordByte(bytes[index]) { index += 1 }
                 let word = String(decoding: bytes[start..<index], as: UTF8.self).uppercased()
                 scan.words.append(SQLWord(word: word, offset: start, depth: depth))
+                if collectLexemes {
+                    scan.lexemes.append(SQLLexeme(text: String(decoding: bytes[start..<index], as: UTF8.self), depth: depth))
+                }
             } else {
+                if collectLexemes, byte > Byte.space {
+                    scan.lexemes.append(SQLLexeme(text: String(decoding: [byte], as: UTF8.self), depth: depth))
+                }
                 index += 1
             }
         }

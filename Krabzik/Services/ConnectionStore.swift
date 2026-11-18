@@ -58,6 +58,9 @@ final class ConnectionStore {
                                              "running": QAField.bool(document.sqlExecution.isRunning)])
         guard !document.sqlExecution.isRunning,
               id == nil || profiles.contains(where: { $0.id == id }) else { return }
+        if let previous = selected(for: document), previous.id != id {
+            document.clearVariableNotes(connectionID: previous.id)
+        }
         if let id {
             recentIDs.removeAll { $0 == id }
             recentIDs.insert(id, at: 0)
