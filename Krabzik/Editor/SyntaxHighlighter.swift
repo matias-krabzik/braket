@@ -29,6 +29,7 @@ struct SyntaxSpan: Sendable {
     let token: String
 
     @MainActor var color: NSColor {
+        if token == "variable.sql" { return EditorPalette.blue }
         let category = token.split(separator: ".").first.map(String.init) ?? token
         switch category {
         case "comment": return EditorPalette.muted
@@ -77,9 +78,13 @@ actor SyntaxParser {
     private let embeddedLanguages: [String: SyntaxGrammar]
     private var embedded: [EmbeddedSyntax] = []
     private var ready = false
+    private let isSQL: Bool
+    private var sqlTokens: [SyntaxSpan]?
+    private var editorStructure: EditorStructure?
 
     init(text: String, language: Language?, query: Query?, injections: Query? = nil,
-         embeddedLanguages: [String: SyntaxGrammar] = [:]) {
+         embeddedLanguages: [String: SyntaxGrammar] = [:], isSQL: Bool = false) {
+        self.isSQL = isSQL
         source = NSMutableString(string: text)
         lines = LineIndex(text)
         self.query = query
@@ -112,6 +117,8 @@ actor SyntaxParser {
             layer.needsParse = true
         }
         needsParse = true
+        sqlTokens = nil
+        editorStructure = nil
     }
 
     private func point(at offset: Int) -> Point {
@@ -120,19 +127,46 @@ actor SyntaxParser {
     }
 
     func highlights(in range: NSRange) -> [SyntaxSpan] {
-        guard ready, let query, range.length > 0, NSMaxRange(range) <= source.length else { return [] }
+        guard range.length > 0, NSMaxRange(range) <= source.length else { return [] }
+        let lexical = sqlHighlights(in: range)
+        guard ready, let query else { return lexical }
         let deadline = Date.timeIntervalSinceReferenceDate + 0.25
         if needsParse {
             tree = parser.parse(tree: tree, readBlock: read)
             guard tree != nil else {
                 parser.reset()
-                return []
+                return lexical
             }
             needsParse = false
         }
-        guard let tree else { return [] }
+        guard let tree else { return lexical }
         var result = captures(query: query, tree: tree, range: range)
         result += embeddedHighlights(in: range, tree: tree, deadline: deadline)
+        return result + lexical
+    }
+
+    private func sqlHighlights(in range: NSRange) -> [SyntaxSpan] {
+        guard isSQL else { return [] }
+        if sqlTokens == nil { sqlTokens = SQLScript.scan(source as String, collectSyntax: true).syntax }
+        guard let tokens = sqlTokens else { return [] }
+        var low = 0, high = tokens.count
+        while low < high {
+            let middle = (low + high) / 2
+            if NSMaxRange(tokens[middle].range) <= range.location { low = middle + 1 } else { high = middle }
+        }
+        var result: [SyntaxSpan] = []
+        for token in tokens.dropFirst(low) {
+            if token.range.location >= NSMaxRange(range) { break }
+            let clipped = NSIntersectionRange(token.range, range)
+            if clipped.length > 0 { result.append(SyntaxSpan(range: clipped, token: token.token)) }
+        }
+        return result
+    }
+
+    func structure() -> EditorStructure {
+        if let editorStructure { return editorStructure }
+        let result = EditorStructure(source as String, sql: isSQL)
+        editorStructure = result
         return result
     }
 
@@ -250,7 +284,7 @@ actor SyntaxParser {
             }
         }
         parser = SyntaxParser(text: text, language: language.language, query: query,
-                              injections: injections, embeddedLanguages: embeddedLanguages)
+                              injections: injections, embeddedLanguages: embeddedLanguages, isSQL: language.id == .sql)
     }
 
     private static func query(for code: CodeLanguage) -> Query? {
@@ -283,6 +317,11 @@ actor SyntaxParser {
     func highlights(in range: NSRange) async -> [SyntaxSpan] {
         await pending?.value
         return await parser.highlights(in: range)
+    }
+
+    func structure() async -> EditorStructure {
+        await pending?.value
+        return await parser.structure()
     }
 
     static func apply(_ spans: [SyntaxSpan], to storage: NSTextStorage, range: NSRange) {

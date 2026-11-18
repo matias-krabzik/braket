@@ -40,6 +40,48 @@ import XCTest
         }
     }
 
+    func testMySQLSetArithmeticAndIncompleteStatements() async {
+        let code = "SET @limite = 10;\nSET @total = 5 * 2;\nSET @incompleta = 3 +"
+        let result = await spans(code, extension: "sql")
+        for number in ["10", "5", "2", "3"] {
+            XCTAssertEqual(color(number, in: code, spans: result), EditorPalette.orange, number)
+        }
+        for variable in ["@limite", "@total", "@incompleta"] {
+            XCTAssertEqual(color(variable, in: code, spans: result), EditorPalette.blue, variable)
+        }
+        XCTAssertEqual(color("*", in: code, spans: result), EditorPalette.purple)
+    }
+
+    func testSQLLexicalContextUnicodeAndNumericFormats() async {
+        let code = "-- 😀 77\nSET @n = .5 + 1.2e-3 + 0xFF + 0b101; /* 88 */\nSELECT 'it''s 99', `field123`; # 66"
+        let result = await spans(code, extension: "sql")
+        for number in [".5", "1.2e-3", "0xFF", "0b101"] {
+            XCTAssertEqual(color(number, in: code, spans: result), EditorPalette.orange, number)
+        }
+        for comment in ["77", "88", "66"] {
+            XCTAssertEqual(color(comment, in: code, spans: result), EditorPalette.muted, comment)
+        }
+        XCTAssertEqual(color("99", in: code, spans: result), EditorPalette.green)
+        XCTAssertEqual(color("field123", in: code, spans: result), EditorPalette.blue)
+    }
+
+    func testSQLIncrementalFallbackAndClippedViewport() async {
+        let code = "/* 9\n88 */\nSET @n = 5 * 2;"
+        let syntax = SyntaxHighlighter(text: code, url: URL(fileURLWithPath: "/tmp/test.sql"))
+        let viewport = (code as NSString).range(of: "88")
+        let partial = await syntax.highlights(in: viewport)
+        XCTAssertEqual(color("88", in: code, spans: partial), EditorPalette.muted)
+        XCTAssertTrue(partial.allSatisfy { NSIntersectionRange($0.range, viewport) == $0.range })
+        let range = (code as NSString).range(of: "2;")
+        syntax.replace(NSRange(location: range.location, length: 1), with: "'🐙'")
+        let edited = (code as NSString).replacingCharacters(in: NSRange(location: range.location, length: 1), with: "'🐙'")
+        let changed = await syntax.highlights(in: NSRange(location: 0, length: edited.utf16.count))
+        XCTAssertEqual(color("🐙", in: edited, spans: changed), EditorPalette.green)
+        syntax.replace(NSRange(location: range.location, length: 4), with: "2")
+        let restored = await syntax.highlights(in: NSRange(location: 0, length: code.utf16.count))
+        XCTAssertEqual(color("2;", in: code, spans: restored), EditorPalette.orange)
+    }
+
     func testVisibleRangeRetainsMultilineContext() async {
         let code = "/* comienza\nconst falso = 42\ntermina */\nconst real = 1;"
         let syntax = SyntaxHighlighter(text: code, url: URL(fileURLWithPath: "/tmp/test.js"))
@@ -147,6 +189,26 @@ import XCTest
             let incremental = await syntax.highlights(in: NSRange(location: 0, length: code.utf16.count))
             let fresh = await spans(code, extension: "html")
             XCTAssertEqual(incremental.map { "\($0.range):\($0.token)" }, fresh.map { "\($0.range):\($0.token)" }, old)
+        }
+    }
+
+    func testSQLNativeEditorColorsArithmeticAfterLayout() async throws {
+        let code = "SET @limite = 10;\nSET @total = 5 * 2;\nSELECT @limite, @total;"
+        let document = try EditorDocument(url: URL(fileURLWithPath: "/tmp/arithmetic.sql"), data: Data(code.utf8))
+        let surface = EditorSurface(document: document)
+        document.editorStorage = surface
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 500),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = surface
+        window.makeKeyAndOrderFront(nil)
+        defer { surface.teardown()
+        window.orderOut(nil) }
+        try await Task.sleep(for: .milliseconds(400))
+        let storage = try XCTUnwrap(surface.textView.textStorage)
+        for number in ["10", "5", "2"] {
+            let offset = (code as NSString).range(of: number).location
+            XCTAssertEqual(storage.attribute(.foregroundColor, at: offset, effectiveRange: nil) as? NSColor,
+                           EditorPalette.orange, number)
         }
     }
 

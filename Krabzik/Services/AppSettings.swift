@@ -53,12 +53,22 @@ final class AppSettings {
     var wrapLines: Bool {
         didSet { defaults.set(wrapLines, forKey: "editorWrapLines") }
     }
+    var editorOptions: EditorOptions {
+        didSet {
+            if let data = try? JSONEncoder().encode(editorOptions) { defaults.set(data, forKey: "editorOptions") }
+        }
+    }
     var codeFontScale: Double { codeFontSize / 14 }
     var resultFontScale: Double { resultFontSize / 14 }
     @ObservationIgnored private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        var savedEditorOptions = defaults.data(forKey: "editorOptions")
+            .flatMap { try? JSONDecoder().decode(EditorOptions.self, from: $0) } ?? EditorOptions()
+        if ![2, 4].contains(savedEditorOptions.indentWidth) { savedEditorOptions.indentWidth = 4 }
+        if !["upper", "lower", "preserve"].contains(savedEditorOptions.keywordCase) { savedEditorOptions.keywordCase = "upper" }
+        editorOptions = savedEditorOptions
         let savedCodeSize = defaults.object(forKey: "codeFontSize") as? Double ?? 14
         let savedResultSize = defaults.object(forKey: "resultFontSize") as? Double ?? 14
         codeFontSize = savedCodeSize.isFinite ? min(24, max(10, savedCodeSize)) : 14

@@ -19,9 +19,11 @@ struct SettingsView: View {
         var uiScale: Double
         var codeFontSize: Double
         var resultFontSize: Double
+        var editorOptions: EditorOptions
         var restoreLastState: Bool
 
         init(settings: AppSettings) {
+            editorOptions = settings.editorOptions
             theme = settings.theme
             uiScale = settings.uiScale
             codeFontSize = settings.codeFontSize
@@ -33,6 +35,7 @@ struct SettingsView: View {
     private var hasChanges: Bool { draft != GeneralDraft(settings: settings) }
 
     private func apply() {
+        settings.editorOptions = draft.editorOptions
         settings.theme = draft.theme
         settings.uiScale = draft.uiScale
         settings.codeFontSize = draft.codeFontSize
@@ -60,7 +63,9 @@ struct SettingsView: View {
         }
         var searchTerms: String {
             switch self {
-            case .general: "apariencia tema grafito fuente código resultados zoom iniciar diagnóstico mysql"
+            case .general:
+                "apariencia tema grafito fuente código resultados zoom iniciar diagnóstico mysql "
+                    + "editor paréntesis guías formato cierre"
             case .connections: "conexiones base datos mysql"
             case .updates: "actualizaciones versión"
             }
@@ -177,6 +182,24 @@ struct SettingsView: View {
                     Text("\(Int(draft.resultFontSize)) pt").frame(width: 52, alignment: .trailing)
                     Button("Restablecer") { draft.resultFontSize = 14 }.disabled(draft.resultFontSize == 14)
                 }
+            }
+            Section("Editor") {
+                Toggle("Resaltar pares y delimitadores sin pareja", isOn: $draft.editorOptions.matchBrackets)
+                Toggle("Colorear paréntesis por profundidad", isOn: $draft.editorOptions.rainbowBrackets)
+                Toggle("Mostrar guías de indentación", isOn: $draft.editorOptions.indentationGuides)
+                Toggle("Cerrar paréntesis y comillas automáticamente", isOn: $draft.editorOptions.autoClose)
+                Toggle("Resaltar referencias de variables SQL", isOn: $draft.editorOptions.variableReferences)
+                Toggle("Marcar la sentencia SQL activa", isOn: $draft.editorOptions.activeStatement)
+                Picker("Indentación", selection: $draft.editorOptions.indentWidth) {
+                    Text("2 espacios").tag(2)
+                    Text("4 espacios").tag(4)
+                }
+                Picker("Palabras clave SQL", selection: $draft.editorOptions.keywordCase) {
+                    Text("MAYÚSCULAS").tag("upper")
+                    Text("minúsculas").tag("lower")
+                    Text("Conservar").tag("preserve")
+                }
+                Text("Formatear selección o archivo SQL: ⌥⌘L").font(.callout).foregroundStyle(.secondary)
             }
             Section("Vista previa") {
                 typographyPreview

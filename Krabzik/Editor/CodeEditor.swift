@@ -31,6 +31,8 @@ struct CodeEditor: NSViewRepresentable {
     let theme: AppTheme
     let uiScale: Double
     let wrapsLines: Bool
+    var readOnly = false
+    var options = EditorOptions()
     var completion: ((String, Int) -> [String])?
 
     func makeNSView(context: Context) -> EditorSurface {
@@ -41,11 +43,14 @@ struct CodeEditor: NSViewRepresentable {
     }
 
     func updateNSView(_ view: EditorSurface, context: Context) {
+        view.textView.isEditable = !readOnly
         view.completion = document.language == "SQL" ? completion : nil
         view.textView.sqlCompletionEnabled = view.completion != nil
         view.applyTheme(theme)
         view.applyZoom(uiScale)
         view.applyWrapLines(wrapsLines)
+        _ = options
+        view.textView.needsDisplay = true
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: EditorSurface, context: Context) -> CGSize? {
@@ -56,6 +61,52 @@ struct CodeEditor: NSViewRepresentable {
 final class CodeTextView: NSTextView {
     weak var editorSurface: EditorSurface?
     private var variableTooltips: [NSView.ToolTipTag: String] = [:]
+
+    override func drawBackground(in rect: NSRect) {
+        super.drawBackground(in: rect)
+        drawAssistance(in: rect)
+        guard let search = editorSurface?.document?.search, search.visible, !search.matches.isEmpty,
+              let layout = textLayoutManager, let content = layout.textContentManager,
+              let viewport = layout.textViewportLayoutController.viewportRange else { return }
+        let start = content.offset(from: content.documentRange.location, to: viewport.location)
+        let end = content.offset(from: content.documentRange.location, to: viewport.endLocation)
+        var low = 0, high = search.matches.count
+        while low < high {
+            let middle = (low + high) / 2
+            if NSMaxRange(search.matches[middle].range) < start { low = middle + 1 } else { high = middle }
+        }
+        for index in low..<search.matches.count {
+            let match = search.matches[index].range
+            if match.location > end { break }
+            guard NSMaxRange(match) <= (textStorage?.length ?? 0),
+                  let location = content.location(content.documentRange.location, offsetBy: match.location),
+                  let endLocation = content.location(location, offsetBy: match.length),
+                  let range = NSTextRange(location: location, end: endLocation) else { continue }
+            let active = index == search.currentIndex
+            layout.enumerateTextSegments(in: range, type: .standard, options: []) { _, frame, _, _ in
+                let highlight = frame.offsetBy(dx: self.textContainerOrigin.x, dy: self.textContainerOrigin.y)
+                let shape = NSBezierPath(roundedRect: NSRect(x: highlight.minX, y: highlight.minY,
+                                                             width: max(2, highlight.width), height: highlight.height),
+                                         xRadius: 3, yRadius: 3)
+                NSColor.systemOrange.withAlphaComponent(active ? 0.3 : 0.13).setFill()
+                shape.fill()
+                if active {
+                    NSColor.systemOrange.withAlphaComponent(0.8).setStroke()
+                    shape.lineWidth = 1
+                    shape.stroke()
+                }
+                return true
+            }
+        }
+    }
+
+    override func performFindPanelAction(_ sender: Any?) {
+        guard let document = editorSurface?.document else { return }
+        let tag = (sender as? NSMenuItem)?.tag
+        if tag == NSTextFinder.Action.nextMatch.rawValue { document.search.navigate() }
+        else if tag == NSTextFinder.Action.previousMatch.rawValue { document.search.navigate(backwards: true) }
+        else { document.search.show(in: document, replace: tag == NSTextFinder.Action.showReplaceInterface.rawValue) }
+    }
 
     override func sizeToFit() {
         super.sizeToFit()
@@ -149,6 +200,7 @@ final class CodeTextView: NSTextView {
     private let editHistory = UndoManager()
     override var undoManager: UndoManager? { editHistory }
 
+    var formattingSQL = false
     var sqlCompletionEnabled = false
     var requestCompletion: (() -> Void)?
     var completionKey: ((NSEvent) -> Bool)?
@@ -165,12 +217,18 @@ final class CodeTextView: NSTextView {
 
     override func keyDown(with event: NSEvent) {
         if completionKey?(event) == true { return }
+        if event.keyCode == 53, editorSurface?.document?.search.visible == true {
+            editorSurface?.document?.search.hide()
+            return
+        }
         if event.modifierFlags.contains(.control), event.keyCode == 49 { complete(nil)
         return }
         super.keyDown(with: event)
     }
 
-    override func insertTab(_ sender: Any?) { insertText("    ", replacementRange: selectedRange()) }
+    override func insertTab(_ sender: Any?) {
+        insertText(String(repeating: " ", count: Theme.settings.editorOptions.indentWidth), replacementRange: selectedRange())
+    }
 
     override func insertBacktab(_ sender: Any?) {
         let selection = selectedRange()
@@ -188,7 +246,8 @@ final class CodeTextView: NSTextView {
             if original.character(at: offset) == 9 {
                 count = 1
             } else {
-                while count < 4, offset + count < NSMaxRange(line), original.character(at: offset + count) == 32 {
+                while count < Theme.settings.editorOptions.indentWidth, offset + count < NSMaxRange(line),
+                      original.character(at: offset + count) == 32 {
                     count += 1
                 }
             }
@@ -237,8 +296,15 @@ final class CodeTextView: NSTextView {
         let range = text.lineRange(for: NSRange(location: position, length: 0))
         let previous = text.substring(with: NSRange(location: range.location, length: max(0, position - range.location)))
         let indent = String(previous.prefix { $0 == " " || $0 == "\t" })
-        let extra = previous.trimmingCharacters(in: .whitespaces).hasSuffix("{") ? "    " : ""
-        insertText("\n" + indent + extra, replacementRange: selectedRange())
+        let opening = previous.trimmingCharacters(in: .whitespaces).last
+        let paired = opening.flatMap { ["(": ")", "[": "]", "{": "}"][$0] }
+        let extra = paired == nil ? "" : String(repeating: " ", count: Theme.settings.editorOptions.indentWidth)
+        if let paired, position < text.length, text.substring(with: NSRange(location: position, length: 1)) == String(paired) {
+            insertText("\n" + indent + extra + "\n" + indent, replacementRange: selectedRange())
+            setSelectedRange(NSRange(location: position + 1 + indent.utf16.count + extra.utf16.count, length: 0))
+        } else {
+            insertText("\n" + indent + extra, replacementRange: selectedRange())
+        }
     }
 }
 
@@ -265,6 +331,7 @@ private final class ObserverToken: @unchecked Sendable {
     private var scrollObserver: ObserverToken?
     private var gutter: LineRuler!
     private var paragraph: NSParagraphStyle
+    private(set) var structure: EditorStructure?
     private var editRevision = 0
     private var highlightedRevision = -1
     private var highlightedRange = NSRange(location: NSNotFound, length: 0)
@@ -318,8 +385,8 @@ private final class ObserverToken: @unchecked Sendable {
         textView.isAutomaticSpellingCorrectionEnabled = false
         textView.isContinuousSpellCheckingEnabled = false
         textView.isGrammarCheckingEnabled = false
-        textView.usesFindBar = true
-        textView.isIncrementalSearchingEnabled = true
+        textView.usesFindBar = false
+        textView.isIncrementalSearchingEnabled = false
         textView.font = Theme.nativeCodeFont()
         textView.textColor = EditorPalette.text
         textView.backgroundColor = EditorPalette.background
@@ -475,7 +542,9 @@ private final class ObserverToken: @unchecked Sendable {
         if window != nil {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                if self.document?.focusEditorOnOpen != false { self.window?.makeFirstResponder(self.textView) }
+                if self.document?.focusEditorOnOpen != false, self.document?.search.visible != true {
+                    self.window?.makeFirstResponder(self.textView)
+                }
                 self.scheduleHighlight()
             }
         }
@@ -498,6 +567,8 @@ private final class ObserverToken: @unchecked Sendable {
             syntax.replace(originalRange, with: replacement)
             lines.replace(originalRange, with: replacement)
             editRevision += 1
+            structure = nil
+            textView.needsDisplay = true
             document?.markTextStale()
             if document?.isDirty == false { document?.isDirty = true }
             gutter.updateThickness()
@@ -529,6 +600,7 @@ private final class ObserverToken: @unchecked Sendable {
 
     func textViewDidChangeSelection(_ notification: Notification) {
         suggestions.hide()
+        textView.needsDisplay = true
         updatePosition()
     }
 
@@ -563,7 +635,10 @@ private final class ObserverToken: @unchecked Sendable {
         let syntax = syntax
         highlightTask = Task { [weak self] in
             let spans = await syntax.highlights(in: range)
+            let structure = await syntax.structure()
             guard !Task.isCancelled, let self, self.editRevision == revision else { return }
+            self.structure = structure
+            self.textView.needsDisplay = true
             // Syntax colors are presentation changes, never user edits. TextKit 2
             // otherwise puts these attribute edits on the undo stack (and clears redo).
             let history = self.textView.undoManager

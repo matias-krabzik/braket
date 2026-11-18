@@ -72,6 +72,7 @@ final class EditorDocument: Identifiable {
     @ObservationIgnored private(set) var queryMarkers: [Int: SQLQueryMarker] = [:]
     @ObservationIgnored private(set) var queryMarkerRevision = 0
     @ObservationIgnored private(set) var setNotes: [Int: SQLSetNote] = [:]
+    let search = EditorSearch()
     let sqlExecution: SQLExecution
 
     var sqlToExecute: (text: String, startingLine: Int) {

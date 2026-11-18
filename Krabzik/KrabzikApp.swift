@@ -18,6 +18,17 @@ struct KrabzikApp: App {
             ?? NSApp.keyWindow?.undoManager
     }
 
+    private var canSearch: Bool {
+        guard !controller.workflowVisible, let document = controller.selectedDocument else { return false }
+        return document.pixelArt == nil && document.previewImage == nil
+    }
+
+    private func showSearch(replace: Bool) {
+        guard canSearch, let document = controller.selectedDocument else { return }
+        if document.language == "Markdown", document.markdownMode == .preview { document.markdownMode = .edit }
+        document.search.show(in: document, replace: replace)
+    }
+
     var body: some Scene {
         Window("Braket", id: "workspace") {
             WorkspaceView(controller: controller)
@@ -86,7 +97,7 @@ struct KrabzikApp: App {
                 AppCommandButton(commands.resetZoom).keyboardShortcut("0", modifiers: .command)
             }
             CommandMenu("Proyecto") {
-                AppCommandButton(commands.startProcesses).keyboardShortcut("r")
+                AppCommandButton(commands.startProcesses).keyboardShortcut("r", modifiers: [.command, .shift])
                 AppCommandButton(commands.stopProcesses).keyboardShortcut(".")
             }
             CommandMenu("SQL") {
@@ -99,12 +110,19 @@ struct KrabzikApp: App {
                 Button("Administrar conexiones…") { controller.database.showingConnections = true }
             }
             CommandGroup(after: .textEditing) {
-                Button("Buscar en el archivo") {
-                    let item = NSMenuItem()
-                    item.tag = NSTextFinder.Action.showFindInterface.rawValue
-                    NSApp.sendAction(#selector(NSTextView.performFindPanelAction(_:)), to: nil, from: item)
-                }.keyboardShortcut("f").disabled(controller.selectedDocument == nil ||
-                                                 controller.selectedDocument?.pixelArt != nil)
+                Button("Formatear SQL") {
+                    (controller.selectedDocument?.editorStorage as? EditorSurface)?.textView.formatSQL(nil)
+                }
+                .keyboardShortcut("l", modifiers: [.command, .option])
+                .disabled(controller.isReadOnly || controller.selectedDocument?.language != "SQL")
+                Button("Buscar en el archivo") { showSearch(replace: false) }
+                    .keyboardShortcut("f").disabled(!canSearch)
+                Button("Buscar y reemplazar") { showSearch(replace: true) }
+                    .keyboardShortcut("r").disabled(!canSearch)
+                Button("Siguiente coincidencia") { controller.selectedDocument?.search.navigate() }
+                    .keyboardShortcut("g").disabled(!canSearch)
+                Button("Coincidencia anterior") { controller.selectedDocument?.search.navigate(backwards: true) }
+                    .keyboardShortcut("g", modifiers: [.command, .shift]).disabled(!canSearch)
             }
         }
         Settings {

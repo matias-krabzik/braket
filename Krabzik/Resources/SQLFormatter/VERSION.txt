@@ -1,0 +1,3 @@
+sql-formatter 15.9.1
+https://github.com/sql-formatter-org/sql-formatter
+sha512-Xiwkk0F/5zPB8zZg5QrATyyhdu43lld6yok4oKVO29dubyGDjSRb21RsHpDOnN+xVvMTp3qL84mIsZNsJK+JWA==

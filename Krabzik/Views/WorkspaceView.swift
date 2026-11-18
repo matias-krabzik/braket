@@ -278,29 +278,37 @@ struct WorkspaceView: View {
                     }.font(.system(size: Theme.zoom(11))).padding(.horizontal, 18).padding(.vertical, 6)
                 }
                 if document.language == "SQL" { SQLToolbar(document: document, controller: controller) }
-                if document.pixelArt != nil {
-                    PixelArtEditorView(document: document, readOnly: controller.isReadOnly,
-                                       exportPNG: controller.files.exportPixelPNG,
-                                       reportError: { controller.errors.report($0) })
-                        .id(document.id)
-                } else if let image = document.previewImage {
-                    Image(nsImage: image)
-                        .resizable().interpolation(.high).scaledToFit()
-                        .padding(20)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .accessibilityLabel("Vista previa de \(document.url.lastPathComponent)")
-                } else if isMarkdown(document) {
-                    markdownContent(document)
-                } else {
-                    CodeEditor(document: document, theme: Theme.settings.theme, uiScale: controller.settings.codeFontScale,
-                               wrapsLines: controller.settings.wrapLines,
-                               completion: { text, position in
-                                   let connection = controller.connections.selected(for: document)
-                                   let database = connection.map { controller.database.state($0.id).currentDatabase } ?? ""
-                                   return controller.database.schema.completions(connection: connection, database: database,
-                                                                                 text: text, position: position)
-                               }).id(document.id)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ZStack(alignment: .topTrailing) {
+                    if document.pixelArt != nil {
+                        PixelArtEditorView(document: document, readOnly: controller.isReadOnly,
+                                           exportPNG: controller.files.exportPixelPNG,
+                                           reportError: { controller.errors.report($0) })
+                            .id(document.id)
+                    } else if let image = document.previewImage {
+                        Image(nsImage: image)
+                            .resizable().interpolation(.high).scaledToFit()
+                            .padding(20)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .accessibilityLabel("Vista previa de \(document.url.lastPathComponent)")
+                    } else if isMarkdown(document) {
+                        markdownContent(document)
+                    } else {
+                        CodeEditor(document: document, theme: Theme.settings.theme, uiScale: controller.settings.codeFontScale,
+                                   wrapsLines: controller.settings.wrapLines, readOnly: controller.isReadOnly,
+                                   options: controller.settings.editorOptions, completion: { text, position in
+                                       let connection = controller.connections.selected(for: document)
+                                       let database = connection.map { controller.database.state($0.id).currentDatabase } ?? ""
+                                       return controller.database.schema.completions(connection: connection, database: database,
+                                                                                     text: text, position: position)
+                                   }).id(document.id)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                    if document.search.visible, document.pixelArt == nil, document.previewImage == nil {
+                        EditorSearchBar(document: document, readOnly: controller.isReadOnly, search: document.search)
+                            .id(document.id)
+                            .frame(maxWidth: Theme.zoom(620))
+                            .padding(12)
+                    }
                 }
             } else {
                 VStack(spacing: 14) {
@@ -347,7 +355,8 @@ struct WorkspaceView: View {
         switch document.markdownMode {
         case .edit:
             CodeEditor(document: document, theme: Theme.settings.theme, uiScale: controller.settings.codeFontScale,
-                       wrapsLines: controller.settings.wrapLines).id(document.id)
+                       wrapsLines: controller.settings.wrapLines, readOnly: controller.isReadOnly,
+                       options: controller.settings.editorOptions).id(document.id)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .preview:
             MarkdownPreview(document: document, projectRoots: roots).id(document.id)
@@ -355,7 +364,8 @@ struct WorkspaceView: View {
         case .split:
             HSplitView {
                 CodeEditor(document: document, theme: Theme.settings.theme, uiScale: controller.settings.codeFontScale,
-                           wrapsLines: controller.settings.wrapLines).id(document.id)
+                           wrapsLines: controller.settings.wrapLines, readOnly: controller.isReadOnly,
+                           options: controller.settings.editorOptions).id(document.id)
                     .frame(minWidth: 230, maxWidth: .infinity, maxHeight: .infinity)
                 MarkdownPreview(document: document, projectRoots: roots).id(document.id)
                     .frame(minWidth: 230, maxWidth: .infinity, maxHeight: .infinity)

@@ -203,6 +203,7 @@ struct SQLLexeme: Sendable {
 
 struct SQLWordScan: Sendable {
     var lexemes: [SQLLexeme] = []
+    var syntax: [SyntaxSpan] = []
     /// Las palabras desnudas, en orden de aparición.
     var words: [SQLWord] = []
     /// `true` si hay un comentario ejecutable (`/*!` o `/*M!`) fuera de cadenas: eso es
@@ -220,16 +221,28 @@ extension SQLScript {
     /// Es el **único** recorrido léxico del proyecto: lo usan la paginación, para reconocer
     /// cláusulas externas, y `SQLWriteGuard`, para decidir si una sentencia escribe. Un
     /// segundo recorrido con sus propias reglas sería garantizar que se separen.
-    static func scan(_ sql: String, noBackslashEscapes: Bool = false, collectLexemes: Bool = false) -> SQLWordScan {
+    static func scan(_ sql: String, noBackslashEscapes: Bool = false, collectLexemes: Bool = false,
+                     collectSyntax: Bool = false) -> SQLWordScan {
         let bytes = Array(sql.utf8)
         var index = 0, depth = 0
         var scan = SQLWordScan()
+        var mappedByte = 0, mappedUTF16 = 0
+        func emit(_ start: Int, _ end: Int, _ token: String) {
+            guard collectSyntax else { return }
+            mappedUTF16 += String(decoding: bytes[mappedByte..<start], as: UTF8.self).utf16.count
+            let length = String(decoding: bytes[start..<end], as: UTF8.self).utf16.count
+            scan.syntax.append(SyntaxSpan(range: NSRange(location: mappedUTF16, length: length), token: token))
+            mappedByte = end
+            mappedUTF16 += length
+        }
         while index < bytes.count {
             let byte = bytes[index]
             let following = index + 1 < bytes.count ? bytes[index + 1] : 0
             if byte == Byte.singleQuote || byte == Byte.doubleQuote || byte == Byte.backtick {
                 let start = index
                 index = skipQuoted(bytes, from: index, noBackslashEscapes: noBackslashEscapes)
+                index = min(index, bytes.count)
+                emit(start, index, byte == Byte.backtick ? "type" : "string")
                 if collectLexemes {
                     scan.lexemes.append(SQLLexeme(text: String(decoding: bytes[start..<min(index, bytes.count)], as: UTF8.self),
                                                   depth: depth, quoted: true))
@@ -237,14 +250,27 @@ extension SQLScript {
             } else if byte == Byte.hash
                 || (byte == Byte.hyphen && following == Byte.hyphen
                     && (index + 2 == bytes.count || bytes[index + 2] <= Byte.space)) {
+                let start = index
                 while index < bytes.count, bytes[index] != Byte.newline { index += 1 }
+                emit(start, index, "comment")
             } else if byte == Byte.slash && following == Byte.asterisk {
+                let start = index
                 if executableComment(bytes, at: index) { scan.hasExecutableComment = true }
                 index += 2
                 while index + 1 < bytes.count, !(bytes[index] == Byte.asterisk && bytes[index + 1] == Byte.slash) {
                     index += 1
                 }
                 index = min(index + 2, bytes.count)
+                emit(start, index, "comment")
+            } else if collectSyntax, byte == 64 {
+                let start = index
+                index += 1
+                if index < bytes.count, bytes[index] == 64 { index += 1 }
+                while index < bytes.count, isWordByte(bytes[index]) || bytes[index] == 46 || bytes[index] >= 128 { index += 1 }
+                emit(start, index, "variable.sql")
+            } else if collectSyntax, let end = syntaxNumberEnd(bytes, at: index) {
+                emit(index, end, "number")
+                index = end
             } else if byte == Byte.openParen {
                 depth += 1
                 index += 1
@@ -260,6 +286,9 @@ extension SQLScript {
                     scan.lexemes.append(SQLLexeme(text: String(decoding: bytes[start..<index], as: UTF8.self), depth: depth))
                 }
             } else {
+                if collectSyntax, [43, 45, 42, 47, 37, 61, 60, 62, 33, 124, 38, 94, 126, 58].contains(byte) {
+                    emit(index, index + 1, "operator")
+                }
                 if collectLexemes, byte > Byte.space {
                     scan.lexemes.append(SQLLexeme(text: String(decoding: [byte], as: UTF8.self), depth: depth))
                 }
@@ -267,6 +296,37 @@ extension SQLScript {
             }
         }
         return scan
+    }
+
+    /// Cubre literales MySQL aun dentro de nodos ERROR de la gramática estructural.
+    private static func syntaxNumberEnd(_ bytes: [UInt8], at start: Int) -> Int? {
+        func digit(_ index: Int) -> Bool { index < bytes.count && (48...57).contains(bytes[index]) }
+        guard start == 0 || (!isWordByte(bytes[start - 1]) && bytes[start - 1] < 128) else { return nil }
+        guard digit(start) || (bytes[start] == 46 && digit(start + 1)) else { return nil }
+        var end = start
+        if bytes[start] == 48, start + 2 < bytes.count, [120, 88, 98, 66].contains(bytes[start + 1]) {
+            let binary = [98, 66].contains(bytes[start + 1])
+            end = start + 2
+            while end < bytes.count, binary ? [48, 49].contains(bytes[end])
+                : ((48...57).contains(bytes[end]) || (65...70).contains(bytes[end]) || (97...102).contains(bytes[end])) {
+                end += 1
+            }
+            return end > start + 2 ? end : nil
+        }
+        while digit(end) { end += 1 }
+        if end < bytes.count, bytes[end] == 46 {
+            end += 1
+            while digit(end) { end += 1 }
+        }
+        if end < bytes.count, [101, 69].contains(bytes[end]) {
+            var exponent = end + 1
+            if exponent < bytes.count, [43, 45].contains(bytes[exponent]) { exponent += 1 }
+            if digit(exponent) {
+                while digit(exponent) { exponent += 1 }
+                end = exponent
+            }
+        }
+        return end
     }
 
     /// Devuelve el índice que sigue a la cadena o identificador que empieza en `start`.
