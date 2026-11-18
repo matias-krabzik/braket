@@ -47,7 +47,6 @@ struct SettingsView: View {
 
     private enum Page: String, CaseIterable, Identifiable {
         case general = "Apariencia"
-        case project = "Proyecto"
         case connections = "Conexiones"
         case updates = "Actualizaciones"
 
@@ -55,7 +54,6 @@ struct SettingsView: View {
         var icon: String {
             switch self {
             case .general: "paintpalette"
-            case .project: "folder"
             case .connections: "externaldrive"
             case .updates: "arrow.triangle.2.circlepath"
             }
@@ -63,7 +61,6 @@ struct SettingsView: View {
         var searchTerms: String {
             switch self {
             case .general: "apariencia tema grafito fuente código resultados zoom iniciar diagnóstico mysql"
-            case .project: "proyecto identidad ubicación iconos"
             case .connections: "conexiones base datos mysql"
             case .updates: "actualizaciones versión"
             }
@@ -112,13 +109,6 @@ struct SettingsView: View {
             Group {
                 switch page {
                 case .general: general
-                case .project:
-                    if let workspace = controller.workspace, let url = controller.workspaceURL {
-                        ProjectSettingsView(controller: controller, workspace: workspace, url: url).id(url)
-                    } else {
-                        ContentUnavailableView("No hay un proyecto abierto", systemImage: "folder",
-                                               description: Text("Abrí un proyecto para editar su configuración."))
-                    }
                 case .connections: ConnectionsSettingsView(controller: controller)
                 case .updates: UpdatesSettingsView()
                 }

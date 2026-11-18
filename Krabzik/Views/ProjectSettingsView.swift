@@ -1,6 +1,34 @@
 import AppKit
 import SwiftUI
 
+struct ProjectSettingsModal: View {
+    let controller: WorkspaceController
+    let workspace: Workspace
+    let url: URL
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Configuración del proyecto").font(.headline)
+                Spacer()
+                Text(workspace.name).foregroundStyle(.secondary).lineLimit(1)
+            }.padding(20)
+            Divider()
+            ProjectSettingsView(controller: controller, workspace: workspace, url: url)
+            Divider()
+            HStack {
+                Spacer()
+                Button("Cerrar") { dismiss() }.keyboardShortcut(.cancelAction)
+            }.padding(16).background(Theme.bar)
+        }
+        .frame(width: 700, height: 700)
+        .background(Theme.background)
+        .tint(Theme.accent)
+        .preferredColorScheme(Theme.colorScheme)
+    }
+}
+
 struct ProjectSettingsView: View {
     let controller: WorkspaceController
     let url: URL

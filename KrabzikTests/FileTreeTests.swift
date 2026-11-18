@@ -125,8 +125,8 @@ final class FileTreeTests: XCTestCase {
         let source = try XCTUnwrap((root.children ?? []).first { $0.name == "src" })
         XCTAssertNil(source.children, "la carga es perezosa: sin expandir no se lee")
 
-        let outline = NSOutlineView()
-        XCTAssertTrue(coordinator.outlineView(outline, shouldExpandItem: source))
+        coordinator.outlineViewItemDidExpand(Notification(name: NSOutlineView.itemDidExpandNotification,
+                                                        userInfo: ["NSObject": source]))
         try await until({ source.children != nil }, 5, "la carga de src")
         XCTAssertEqual((source.children ?? []).map(\.name), ["app.ts"])
     }
@@ -147,7 +147,8 @@ final class FileTreeTests: XCTestCase {
         try await until({ root.children != nil }, 5, "la carga del nodo raíz")
 
         let node = try XCTUnwrap((root.children ?? []).first { $0.name == "sin-permiso" })
-        _ = coordinator.outlineView(NSOutlineView(), shouldExpandItem: node)
+        coordinator.outlineViewItemDidExpand(Notification(name: NSOutlineView.itemDidExpandNotification,
+                                                        userInfo: ["NSObject": node]))
         try await until({ node.children != nil }, 5, "el intento de carga")
         XCTAssertEqual(node.children?.count, 0)
         XCTAssertNotNil(host.errors.current, "el error tiene que llegar a la interfaz")
@@ -191,7 +192,7 @@ final class FileTreeTests: XCTestCase {
         XCTAssertFalse(outline.isItemExpanded(root))
         XCTAssertFalse(root.expanded)
         let collapsedFrame = try XCTUnwrap(outline.groupFrame(for: root))
-        XCTAssertEqual(collapsedFrame.height, outline.rect(ofRow: 0).height - 4, accuracy: 0.01)
+        XCTAssertEqual(collapsedFrame.height, outline.rect(ofRow: 0).height, accuracy: 0.01)
         coordinator.update(try XCTUnwrap(coordinator.controller.workspace),
                            at: try XCTUnwrap(coordinator.controller.workspaceURL), revision: 2)
         XCTAssertFalse(outline.isItemExpanded(root))
@@ -213,7 +214,8 @@ final class FileTreeTests: XCTestCase {
 
         let source = try XCTUnwrap((root.children ?? []).first { $0.name == "src" })
         XCTAssertNil(source.watcher, "sin cargar, no se observa")
-        _ = coordinator.outlineView(NSOutlineView(), shouldExpandItem: source)
+        coordinator.outlineViewItemDidExpand(Notification(name: NSOutlineView.itemDidExpandNotification,
+                                                        userInfo: ["NSObject": source]))
         try await until({ source.children != nil }, 5, "la carga de src")
         XCTAssertNotNil(source.watcher, "al cargarla, también")
     }

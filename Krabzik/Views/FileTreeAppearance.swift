@@ -39,9 +39,9 @@ final class FileTreeOutlineView: NSOutlineView {
         let lastRow = row(forItem: last)
         guard lastRow >= firstRow else { return nil }
         var frame = rect(ofRow: firstRow).union(rect(ofRow: lastRow))
-        frame.origin.x = 24
-        frame.size.width = max(0, bounds.width - 32)
-        return frame.insetBy(dx: 0, dy: 2)
+        frame.origin.x = 0
+        frame.size.width = bounds.width
+        return frame
     }
 
 }
@@ -160,7 +160,7 @@ final class FileTreeRow: NSTableRowView {
         NSGraphicsContext.saveGraphicsState()
         bounds.clip()
         tint.setFill()
-        NSBezierPath(roundedRect: frame, xRadius: 7, yRadius: 7).fill()
+        NSBezierPath(rect: frame).fill()
         NSGraphicsContext.restoreGraphicsState()
     }
 

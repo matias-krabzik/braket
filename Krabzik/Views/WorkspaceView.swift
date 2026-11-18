@@ -89,6 +89,11 @@ struct WorkspaceView: View {
                                     set: { if !$0 { controller.closingProjectURL = nil } })) {
             if let url = controller.closingProjectURL { ProjectCloseSheet(controller: controller, url: url) }
         }
+        .sheet(isPresented: $controller.showingProjectSettings) {
+            if let workspace = controller.workspace, let url = controller.workspaceURL {
+                ProjectSettingsModal(controller: controller, workspace: workspace, url: url).id(url)
+            }
+        }
         .sheet(isPresented: $controller.showingSettings) {
             SettingsView(settings: controller.settings, controller: controller, showsDone: true)
         }

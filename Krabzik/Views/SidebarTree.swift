@@ -94,6 +94,19 @@ struct SidebarTree<Value, Content: View>: View {
     @ViewBuilder let content: (Value) -> Content
     @State private var expanded: Set<String> = []
     @State private var selected: String?
+    private let persistenceKey: String
+
+    init(nodes: [SidebarTreeNode<Value>], name: @escaping (Value) -> String,
+         menu: @escaping (Value) -> AnyView = { _ in AnyView(EmptyView()) },
+         persistenceKey: String, @ViewBuilder content: @escaping (Value) -> Content) {
+        self.nodes = nodes
+        self.name = name
+        self.menu = menu
+        self.persistenceKey = persistenceKey
+        self.content = content
+        let saved = UserDefaults.standard.stringArray(forKey: persistenceKey)
+        _expanded = State(initialValue: Set(saved ?? nodes.filter { $0.expandable }.map(\.id)))
+    }
 
     private struct Row: Identifiable {
         let node: SidebarTreeNode<Value>
@@ -124,6 +137,7 @@ struct SidebarTree<Value, Content: View>: View {
         selected = row.id
         guard row.node.expandable || !row.node.children.isEmpty else { return }
         if expanded.contains(row.id) { expanded.remove(row.id) } else { expanded.insert(row.id) }
+        UserDefaults.standard.set(expanded.sorted(), forKey: persistenceKey)
     }
 
     private func rowView(_ row: Row) -> some View {

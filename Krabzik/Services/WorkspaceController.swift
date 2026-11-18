@@ -41,6 +41,7 @@ final class WorkspaceController {
     var closingProjectURL: URL?
     var showingProjectWizard = false
     var showingSettings = false
+    var showingProjectSettings = false
     let runner = ProcessRunner()
     let workflows = WorkflowController()
     var outputVisible = false {

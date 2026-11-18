@@ -20,6 +20,7 @@ struct DatabaseExplorer: View {
                             Divider().padding(.leading, 8)
                         }
                         connectionTree(connection, widestCount: widestCount)
+                            .id((controller.workspaceURL?.standardizedFileURL.path ?? "") + connection.id.uuidString)
                     }
                     if controller.connections.profiles.isEmpty {
                         Text("Agregá una conexión global con +.").foregroundStyle(.secondary).padding()
@@ -55,7 +56,9 @@ struct DatabaseExplorer: View {
 
     private func connectionTree(_ connection: DatabaseConnection, widestCount: String) -> some View {
         SidebarTree(nodes: nodes(connection), name: { $0.name },
-                    menu: { AnyView(contextMenu($0, connection: connection)) }) { item in
+                    menu: { AnyView(contextMenu($0, connection: connection)) },
+                    persistenceKey: "explorer.databases.expansion.v1."
+                        + (controller.workspaceURL?.standardizedFileURL.path ?? "") + "." + connection.id.uuidString) { item in
             treeLabel(item, connection: connection, widestCount: widestCount)
         }
         .padding(.trailing, 10)

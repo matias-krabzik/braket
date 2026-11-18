@@ -101,6 +101,18 @@ struct FileTree: NSViewRepresentable {
         var lastRevision = -1
         var lastURL: URL?
         var generation = UUID()
+        private var expansion: [String: Bool] = [:]
+        private var restoringExpansion = false
+        private var expansionKey: String? {
+            lastURL.map { "explorer.files.expansion.v1." + $0.standardizedFileURL.path }
+        }
+
+        private func rememberExpansion(_ node: FileNode) {
+            guard !restoringExpansion, let key = expansionKey else { return }
+            expansion[node.url.standardizedFileURL.path] = node.expanded
+            UserDefaults.standard.set(expansion, forKey: key)
+        }
+
         private var editingNode: FileNode?
         private var deferredReloads: Set<URL> = []
         private var hoveredDropURL: URL?
@@ -129,17 +141,24 @@ struct FileTree: NSViewRepresentable {
             let sameWorkspace = lastURL == url
             lastRevision = revision
             lastURL = url
-            if !sameWorkspace { generation = UUID() }
+            if !sameWorkspace {
+                generation = UUID()
+                expansion = expansionKey.flatMap { UserDefaults.standard.dictionary(forKey: $0) as? [String: Bool] } ?? [:]
+            }
             let previous = sameWorkspace ? Dictionary(uniqueKeysWithValues: roots.map { ($0.url, $0) }) : [:]
             // En solo lectura las carpetas externas no se montan (S1).
             roots = controller.mountedProjects.map { project in
                 let directory = project.directory(relativeTo: url)
                 if let node = previous[directory], node.project == project { return node }
-                return FileNode(url: directory, isDirectory: true, project: project)
+                let node = FileNode(url: directory, isDirectory: true, project: project)
+                node.expanded = expansion[directory.standardizedFileURL.path] ?? true
+                return node
             }
             roots += controller.files.standaloneScripts.map { file in
                 previous[file] ?? FileNode(url: file, isDirectory: false)
             }
+            restoringExpansion = true
+            defer { restoringExpansion = false }
             outline?.reloadData()
             for root in roots where root.isDirectory {
                 if root.children == nil { load(root) }
@@ -158,14 +177,6 @@ struct FileTree: NSViewRepresentable {
 
         func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
             (item as? FileNode)?.isDirectory ?? false
-        }
-
-        func outlineView(_ outlineView: NSOutlineView, shouldExpandItem item: Any) -> Bool {
-            if let node = item as? FileNode {
-                node.expanded = true
-                if node.children == nil { load(node) }
-            }
-            return true
         }
 
         func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
@@ -187,10 +198,20 @@ struct FileTree: NSViewRepresentable {
             return row
         }
 
-        func outlineViewItemDidExpand(_ notification: Notification) { refreshDisclosure() }
+        func outlineViewItemDidExpand(_ notification: Notification) {
+            if let node = notification.userInfo?["NSObject"] as? FileNode {
+                node.expanded = true
+                rememberExpansion(node)
+                if node.children == nil { load(node) }
+            }
+            refreshDisclosure()
+        }
 
         func outlineViewItemDidCollapse(_ notification: Notification) {
-            if let node = notification.userInfo?["NSObject"] as? FileNode { node.expanded = false }
+            if !restoringExpansion, let node = notification.userInfo?["NSObject"] as? FileNode {
+                node.expanded = false
+                rememberExpansion(node)
+            }
             refreshDisclosure()
         }
 
@@ -275,11 +296,16 @@ struct FileTree: NSViewRepresentable {
                         node.flutterProject = inheritedFlutterProject || entries.contains { $0.0.lastPathComponent == "pubspec.yaml" }
                         node.children = entries.map { entry in
                             let child = old[entry.0] ?? FileNode(url: entry.0, isDirectory: entry.1)
+                            if old[entry.0] == nil {
+                                child.expanded = self.expansion[entry.0.standardizedFileURL.path] ?? false
+                            }
                             child.flutterProject = node.flutterProject
                             return child
                         }
+                        self.restoringExpansion = true
                         self.outline?.reloadItem(node, reloadChildren: true)
                         self.restoreExpansion(node)
+                        self.restoringExpansion = false
                         if let selected = self.pendingSelectionURL,
                            let child = node.children?
                            .first(where: {
