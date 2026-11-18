@@ -44,7 +44,8 @@ struct SQLResultsPanel: View {
                                         Text("Consulta \(index + 1)" + (draft.hasChanges ? " •" : ""))
                                     }.padding(.vertical, 8).padding(.leading, 10)
                                 }.buttonStyle(.plain)
-                                    .help("Consulta \(index + 1) · \(result.connection?.name ?? "Sin conexión") · \(result.database)\n\(result.sql)")
+                                    .help("Consulta \(index + 1) · \(result.connection?.name ?? "Sin conexión") · "
+                                          + "\(result.database)\n\(result.sql)")
                                 Button {
                                     if execution.pinned.contains(result.id) { execution.pinned.remove(result.id) }
                                     else { execution.pinned.insert(result.id) }
@@ -195,7 +196,8 @@ struct SQLTimeoutControl: View {
         .accessibilityLabel("Tiempo máximo por sentencia: \(execution.timeoutSeconds) segundos")
         .popover(isPresented: $showingEditor, arrowEdge: .bottom) {
             SQLTimeoutEditor(initialSeconds: execution.timeoutSeconds,
-                             onSave: { execution.timeoutSeconds = $0; showingEditor = false },
+                             onSave: { execution.timeoutSeconds = $0
+                             showingEditor = false },
                              onCancel: { showingEditor = false })
                 .id(editorIdentity)
         }

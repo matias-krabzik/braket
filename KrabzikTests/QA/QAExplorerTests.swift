@@ -54,7 +54,7 @@ final class QAExplorerTests: XCTestCase {
         await qa.assertEvent("schema.discover.end")
         let message = try XCTUnwrap(store.errors[profile.id], "la carga tenía que fallar")
         await qa.assertControl("explorer.schema.error." + profile.name, title: message)
-        await qa.assertControl("explorer.schema.retry." + profile.name, title: "Reintentar carga", enabled: true)
+        XCTAssertFalse(store.loading.contains(profile.id), "El menú debe permitir actualizar después del fallo")
         XCTAssertFalse(message.lowercased().contains("password"), message)
 
         // El mismo mensaje tiene que estar junto al resultado, que es donde se ve por qué

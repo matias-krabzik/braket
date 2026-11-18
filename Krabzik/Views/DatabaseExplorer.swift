@@ -31,7 +31,8 @@ struct DatabaseExplorer: View {
         .font(Theme.interfaceFont(13)).background(Theme.background)
         .qaScreen("explorer.databases")
         .confirmationDialog("¿Eliminar la conexión guardada?", isPresented: Binding(get: { removing != nil },
-                              set: { if !$0 { removing = nil } }), titleVisibility: .visible) {
+                                                                                    set: { if !$0 { removing = nil } }),
+                            titleVisibility: .visible) {
             if let removing {
                 Button("Eliminar " + removing.name, role: .destructive) {
                     controller.connections.remove(removing)

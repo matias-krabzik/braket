@@ -148,7 +148,8 @@ private struct ProjectPickerMenu: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
         .contextMenu {
             if controller.openWorkspaceURLs.contains(url) {
-                Button("Cerrar proyecto") { dismiss(); controller.requestCloseWorkspace(url) }
+                Button("Cerrar proyecto") { dismiss()
+                controller.requestCloseWorkspace(url) }
             }
         }
     }

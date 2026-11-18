@@ -159,7 +159,7 @@ private final class ObserverToken: @unchecked Sendable {
     deinit { NotificationCenter.default.removeObserver(token) }
 }
 
-@MainActor final class EditorSurface: NSView, NSTextViewDelegate, @preconcurrency NSTextStorageDelegate {
+@MainActor final class EditorSurface: NSView, NSTextViewDelegate, NSTextStorageDelegate {
     let scrollView = NSScrollView()
     let textView = CodeTextView(usingTextLayoutManager: true)
     weak var document: EditorDocument?
@@ -318,10 +318,8 @@ private final class ObserverToken: @unchecked Sendable {
         textView.isHorizontallyResizable = !wraps
         textView.autoresizingMask = wraps ? [.width] : []
         textView.textContainer?.widthTracksTextView = wraps
-        textView.textContainer?.containerSize = NSSize(
-            width: wraps ? max(1, scrollView.contentSize.width) : 10_000_000,
-            height: 10_000_000
-        )
+        textView.textContainer?.containerSize = NSSize(width: wraps ? max(1, scrollView.contentSize.width) : 10_000_000,
+                                                       height: 10_000_000)
         if wraps {
             textView.setFrameSize(NSSize(width: max(1, scrollView.contentSize.width), height: textView.frame.height))
         } else {
@@ -395,19 +393,22 @@ private final class ObserverToken: @unchecked Sendable {
         scheduleHighlight()
     }
 
-    func textStorage(_ textStorage: NSTextStorage, didProcessEditing editedMask: NSTextStorageEditActions,
-                     range editedRange: NSRange, changeInLength delta: Int) {
+    nonisolated func textStorage(_ textStorage: NSTextStorage, didProcessEditing editedMask: NSTextStorageEditActions,
+                                 range editedRange: NSRange, changeInLength delta: Int) {
+        // AppKit edits this text storage synchronously on the UI thread.
         guard editedMask.contains(.editedCharacters) else { return }
         let originalRange = NSRange(location: editedRange.location, length: editedRange.length - delta)
         let replacement = textStorage.mutableString.substring(with: editedRange)
-        syntax.replace(originalRange, with: replacement)
-        lines.replace(originalRange, with: replacement)
-        editRevision += 1
-        document?.markTextStale()
-        if document?.isDirty == false { document?.isDirty = true }
-        gutter.updateThickness()
-        gutter.needsDisplay = true
-        scheduleHighlight()
+        MainActor.assumeIsolated {
+            syntax.replace(originalRange, with: replacement)
+            lines.replace(originalRange, with: replacement)
+            editRevision += 1
+            document?.markTextStale()
+            if document?.isDirty == false { document?.isDirty = true }
+            gutter.updateThickness()
+            gutter.needsDisplay = true
+            scheduleHighlight()
+        }
     }
 
     func textDidChange(_ notification: Notification) {
@@ -573,7 +574,7 @@ private final class ObserverToken: @unchecked Sendable {
                 return
             }
             let ring = NSBezierPath(ovalIn: NSRect(x: center.x - radius, y: center.y - radius,
-                                                  width: radius * 2, height: radius * 2))
+                                                   width: radius * 2, height: radius * 2))
             ring.lineWidth = size * 4 / 64
             ring.stroke()
             func point(_ x: CGFloat, _ y: CGFloat) -> NSPoint {

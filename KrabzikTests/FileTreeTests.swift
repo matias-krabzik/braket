@@ -126,7 +126,7 @@ final class FileTreeTests: XCTestCase {
         XCTAssertNil(source.children, "la carga es perezosa: sin expandir no se lee")
 
         coordinator.outlineViewItemDidExpand(Notification(name: NSOutlineView.itemDidExpandNotification,
-                                                        userInfo: ["NSObject": source]))
+                                                          userInfo: ["NSObject": source]))
         try await until({ source.children != nil }, 5, "la carga de src")
         XCTAssertEqual((source.children ?? []).map(\.name), ["app.ts"])
     }
@@ -148,7 +148,7 @@ final class FileTreeTests: XCTestCase {
 
         let node = try XCTUnwrap((root.children ?? []).first { $0.name == "sin-permiso" })
         coordinator.outlineViewItemDidExpand(Notification(name: NSOutlineView.itemDidExpandNotification,
-                                                        userInfo: ["NSObject": node]))
+                                                          userInfo: ["NSObject": node]))
         try await until({ node.children != nil }, 5, "el intento de carga")
         XCTAssertEqual(node.children?.count, 0)
         XCTAssertNotNil(host.errors.current, "el error tiene que llegar a la interfaz")
@@ -215,7 +215,7 @@ final class FileTreeTests: XCTestCase {
         let source = try XCTUnwrap((root.children ?? []).first { $0.name == "src" })
         XCTAssertNil(source.watcher, "sin cargar, no se observa")
         coordinator.outlineViewItemDidExpand(Notification(name: NSOutlineView.itemDidExpandNotification,
-                                                        userInfo: ["NSObject": source]))
+                                                          userInfo: ["NSObject": source]))
         try await until({ source.children != nil }, 5, "la carga de src")
         XCTAssertNotNil(source.watcher, "al cargarla, también")
     }

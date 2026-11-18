@@ -331,10 +331,13 @@ final class CoreTests: XCTestCase {
         document.editorStorage = surface
         let other = try EditorDocument(url: directory.appendingPathComponent("other.sql"), data: Data())
         let otherSurface = EditorSurface(document: other)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 400), styleMask: [.titled], backing: .buffered,
+                              defer: false)
         window.contentView = surface
         window.makeKeyAndOrderFront(nil)
-        defer { surface.teardown(); otherSurface.teardown(); window.orderOut(nil) }
+        defer { surface.teardown()
+        otherSurface.teardown()
+        window.orderOut(nil) }
         let history = try XCTUnwrap(surface.textView.undoManager)
         history.groupsByEvent = false
         func edit(_ action: () -> Void) {
@@ -372,10 +375,12 @@ final class CoreTests: XCTestCase {
     @MainActor func testEditorTrailingNewlinesKeepContinuousGutter() async throws {
         let document = try EditorDocument(url: temporaryDirectory().appendingPathComponent("lines.sql"), data: Data())
         let surface = EditorSurface(document: document)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 400), styleMask: [.titled], backing: .buffered,
+                              defer: false)
         window.contentView = surface
         window.makeKeyAndOrderFront(nil)
-        defer { surface.teardown(); window.orderOut(nil) }
+        defer { surface.teardown()
+        window.orderOut(nil) }
         for _ in 0..<6 {
             surface.layoutSubtreeIfNeeded()
             try await Task.sleep(nanoseconds: 50_000_000)

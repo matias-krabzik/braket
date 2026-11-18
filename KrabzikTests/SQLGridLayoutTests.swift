@@ -1,6 +1,6 @@
 import AppKit
-import SwiftUI
 @testable import Krabzik
+import SwiftUI
 import XCTest
 
 @MainActor
