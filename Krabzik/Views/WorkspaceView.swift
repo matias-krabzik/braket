@@ -295,7 +295,12 @@ struct WorkspaceView: View {
                     } else {
                         CodeEditor(document: document, theme: Theme.settings.theme, uiScale: controller.settings.codeFontScale,
                                    wrapsLines: controller.settings.wrapLines, readOnly: controller.isReadOnly,
-                                   options: controller.settings.editorOptions, completion: { text, position in
+                                   options: controller.settings.editorOptions,
+                                   canExecuteSelection: canExecuteSelection(document),
+                                   executeSelection: {
+                                       guard controller.selectedDocument?.id == document.id else { return }
+                                       controller.executeSQL()
+                                   }, completion: { text, position in
                                        let connection = controller.connections.selected(for: document)
                                        let database = connection.map { controller.database.state($0.id).currentDatabase } ?? ""
                                        return controller.database.schema.completions(connection: connection, database: database,
@@ -318,6 +323,12 @@ struct WorkspaceView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+    }
+
+    private func canExecuteSelection(_ document: EditorDocument) -> Bool {
+        guard document.language == "SQL", !controller.isReadOnly, !document.sqlExecution.isRunning,
+              let connection = controller.connections.selected(for: document) else { return false }
+        return !controller.database.state(connection.id).busy
     }
 
     private func isMarkdown(_ document: EditorDocument) -> Bool {

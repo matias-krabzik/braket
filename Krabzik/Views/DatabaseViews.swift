@@ -480,7 +480,10 @@ struct SQLToolbar: View {
                             controller.database.cancel(document.sqlExecution)
                         }
                 } else {
-                    Button(action: controller.executeSQL) { Image(systemName: "play.fill") }
+                    Button(action: controller.executeSQL) {
+                        Image(systemName: "play.fill")
+                            .foregroundStyle(canExecute ? Color(nsColor: .systemGreen) : Color.secondary)
+                    }
                         .disabled(!canExecute)
                         .help(document.selectedRange.length > 0 ? "Ejecutar selección (⌘↩)"
                             : "Ejecutar sentencia actual (⌘↩)")
@@ -491,6 +494,7 @@ struct SQLToolbar: View {
                         Image(systemName: "doc.text")
                             .overlay(alignment: .bottomTrailing) {
                                 Image(systemName: "play.fill")
+                                    .foregroundStyle(canExecute ? Color(nsColor: .systemGreen) : Color.secondary)
                                     .font(.system(size: Theme.zoom(7)))
                                     .padding(Theme.zoom(1))
                                     .background(Theme.bar, in: RoundedRectangle(cornerRadius: 2))

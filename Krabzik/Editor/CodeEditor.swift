@@ -33,6 +33,8 @@ struct CodeEditor: NSViewRepresentable {
     let wrapsLines: Bool
     var readOnly = false
     var options = EditorOptions()
+    var canExecuteSelection = false
+    var executeSelection: (() -> Void)?
     var completion: ((String, Int) -> [String])?
 
     func makeNSView(context: Context) -> EditorSurface {
@@ -43,6 +45,10 @@ struct CodeEditor: NSViewRepresentable {
     }
 
     func updateNSView(_ view: EditorSurface, context: Context) {
+        view.selectionActions.execute = executeSelection
+        view.selectionActions.canExecute = canExecuteSelection
+        view.selectionActions.readOnly = readOnly
+        view.selectionActions.schedule()
         view.textView.isEditable = !readOnly
         view.completion = document.language == "SQL" ? completion : nil
         view.textView.sqlCompletionEnabled = view.completion != nil
@@ -215,7 +221,17 @@ final class CodeTextView: NSTextView {
         return NSRange(location: position - word.utf16.count, length: word.utf16.count)
     }
 
+    override func mouseDown(with event: NSEvent) {
+        editorSurface?.selectionActions.hide()
+        super.mouseDown(with: event)
+        editorSurface?.selectionActions.schedule()
+    }
+
     override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53, editorSurface?.selectionActions.visible == true {
+            editorSurface?.selectionActions.hide()
+            return
+        }
         if completionKey?(event) == true { return }
         if event.keyCode == 53, editorSurface?.document?.search.visible == true {
             editorSurface?.document?.search.hide()
@@ -323,6 +339,7 @@ private final class ObserverToken: @unchecked Sendable {
     weak var document: EditorDocument?
     var completion: ((String, Int) -> [String])?
     var lines: LineIndex
+    let selectionActions = SQLSelectionActions()
     private let suggestions = SQLCompletionList()
     private var completionWork: DispatchWorkItem?
     private var highlighter: DispatchWorkItem?
@@ -367,6 +384,7 @@ private final class ObserverToken: @unchecked Sendable {
         ])
 
         textView.editorSurface = self
+        selectionActions.surface = self
         textView.frame = NSRect(x: 0, y: 0, width: 900, height: 0)
         textView.minSize = NSSize(width: 0, height: 0)
         textView.maxSize = NSSize(width: 10_000_000, height: 10_000_000)
@@ -399,6 +417,7 @@ private final class ObserverToken: @unchecked Sendable {
         textView.textStorage?.delegate = self
         textView.requestCompletion = { [weak self] in
             guard let self, let completion = self.completion else { return }
+            self.selectionActions.hide()
             let values = completion(self.textView.string, self.textView.selectedRange().location)
             QAProbe.action("editor.completion.show", ["count": QAField.count(values.count),
                                                       "first": QAField.text(values.first ?? "")])
@@ -428,6 +447,7 @@ private final class ObserverToken: @unchecked Sendable {
                 MainActor.assumeIsolated {
                     self?.gutter.needsDisplay = true
                     self?.scheduleHighlight()
+                    self?.selectionActions.reposition()
                 }
             })
     }
@@ -523,6 +543,7 @@ private final class ObserverToken: @unchecked Sendable {
     /// Si nadie la llama, `ObserverToken` quita el observador al liberarse y el resaltado
     /// pendiente no hace nada, porque captura `self` de forma débil.
     func teardown() {
+        selectionActions.invalidate()
         gutter.stopLoadingAnimation()
         completionWork?.cancel()
         suggestions.hide()
@@ -539,6 +560,7 @@ private final class ObserverToken: @unchecked Sendable {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        selectionActions.hide()
         if window != nil {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
@@ -546,12 +568,14 @@ private final class ObserverToken: @unchecked Sendable {
                     self.window?.makeFirstResponder(self.textView)
                 }
                 self.scheduleHighlight()
+                self.selectionActions.schedule()
             }
         }
     }
 
     override func layout() {
         super.layout()
+        selectionActions.reposition()
         textView.minSize.width = max(0, scrollView.contentSize.width)
         gutter.needsDisplay = true
         scheduleHighlight()
@@ -578,6 +602,7 @@ private final class ObserverToken: @unchecked Sendable {
     }
 
     func textDidChange(_ notification: Notification) {
+        selectionActions.hide()
         completionWork?.cancel()
         if completion != nil, !textView.hasMarkedText(), textView.selectedRange().length == 0 {
             let prefix = (textView.string as NSString).substring(to: textView.selectedRange().location)
@@ -600,6 +625,7 @@ private final class ObserverToken: @unchecked Sendable {
 
     func textViewDidChangeSelection(_ notification: Notification) {
         suggestions.hide()
+        selectionActions.schedule()
         textView.needsDisplay = true
         updatePosition()
     }
