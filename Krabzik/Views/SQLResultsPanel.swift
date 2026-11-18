@@ -119,7 +119,11 @@ private struct SQLResultContent: View {
                 Text(draft.result.error ?? draft.result.summary).textSelection(.enabled)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(16)
             } else {
-                SQLResultGrid(draft: draft, scale: controller.settings.resultFontScale, theme: controller.settings.theme)
+                SQLResultGrid(draft: draft, scale: controller.settings.resultFontScale, theme: controller.settings.theme,
+                              serverNow: { column in
+                                  guard let connection = draft.result.connection else { throw DatabaseFailure("Sin conexión MySQL.") }
+                                  return try await controller.database.serverNow(column: column, connection: connection)
+                              })
             }
             if let connection = draft.result.connection, let error = controller.database.schema.errors[connection.id] {
                 Text("Estructura: " + error).font(Theme.interfaceFont(12)).foregroundStyle(.orange).textSelection(.enabled)
@@ -139,9 +143,19 @@ private struct SQLResultContent: View {
                 Text((draft.result.connection?.destination ?? "") + " · " + (draft.table?.qualified ?? ""))
                     .foregroundStyle(.secondary)
                 Text("Se enviarán juntos en una transacción. Si una fila cambió o un valor falla, se revierten todos.")
-                ScrollView([.horizontal, .vertical]) {
-                    Text(preview).font(Theme.codeFont()).textSelection(.enabled).padding(12)
-                }.background(Theme.bar)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        SQLChangesReview(rows: draft.reviewChanges)
+                        DisclosureGroup("Ver SQL que se ejecutará") {
+                            Text("La lectura FOR UPDATE bloquea la fila por su clave. Braket compara todos los valores "
+                                 + "originales de la grilla antes de ejecutar cada cambio.")
+                                .font(Theme.interfaceFont(12)).foregroundStyle(.secondary)
+                            ScrollView(.horizontal) {
+                                Text(preview).font(Theme.codeFont()).textSelection(.enabled).padding(12)
+                            }.background(Theme.bar)
+                        }
+                    }
+                }
                 if let error = draft.error { Text(error).foregroundStyle(.orange).textSelection(.enabled) }
                 HStack {
                     if draft.sending { ProgressView().controlSize(.small) }
@@ -155,7 +169,7 @@ private struct SQLResultContent: View {
                         .disabled(!canSubmit)
                         .qaControl("grid.review.submit", title: "Enviar cambios", enabled: canSubmit, action: submit)
                 }
-            }.padding(24).frame(width: 820, height: 540).interactiveDismissDisabled(draft.sending)
+            }.padding(24).frame(width: 900, height: 620).interactiveDismissDisabled(draft.sending)
                 .qaScreen("grid.review")
         }
     }

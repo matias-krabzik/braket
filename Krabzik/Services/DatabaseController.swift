@@ -54,6 +54,15 @@ final class DatabaseController {
 
     @ObservationIgnored private var connectionTasks: [UUID: Task<Void, Never>] = [:]
 
+    func serverNow(column: SQLSchemaColumn, connection: DatabaseConnection) async throws -> String {
+        let state = state(connection.id)
+        guard state.status == .connected else { throw DatabaseFailure("Conectá la sesión para consultar la hora de MySQL.") }
+        guard !state.busy else { throw DatabaseFailure("La conexión está ocupada.") }
+        state.busy = true
+        defer { state.busy = false }
+        return try await client.serverNow(column: column, configuration: connection)
+    }
+
     func state(_ id: UUID) -> DatabaseState {
         if let state = states[id] { return state }
         let state = DatabaseState()

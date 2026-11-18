@@ -267,7 +267,9 @@ final class SQLWorkspaceTests: XCTestCase {
         let mutations = try draft.mutations()
         XCTAssertEqual(mutations.count, 1)
         XCTAssertFalse(mutations[0].sql.contains("DROP TABLE"))
-        XCTAssertTrue(mutations[0].sql.contains("CAST(`id` AS BINARY) <=>"))
+        XCTAssertTrue(mutations[0].sql.contains("WHERE `id` = 1 LIMIT 1"))
+        XCTAssertFalse(mutations[0].sql.contains("CAST("))
+        XCTAssertEqual(mutations[0].originalRow, result.rows[0])
         XCTAssertTrue(mutations[0].sql.hasSuffix("LIMIT 1"))
         draft.set(.null, row: 0, column: 0)
         XCTAssertEqual(draft.changes.count, 1)
@@ -391,6 +393,107 @@ final class SQLWorkspaceTests: XCTestCase {
             XCTAssertEqual(retained[0].rows, [[nil], ["external"], ["three"]])
             XCTAssertTrue(conflicting.hasChanges)
             _ = try await Self.run("DROP TABLE braket_edit_qa", client: client, config: config)
+        } catch { await client.shutdown()
+        throw error }
+        await client.shutdown()
+    }
+
+    @MainActor func testRealPrimaryKeyIndexAndUntouchedFieldConflict() async throws {
+        let marker = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent(".build/mysql-test-port")
+        guard let value = try? String(contentsOf: marker, encoding: .utf8),
+              let port = Int(value.trimmingCharacters(in: .whitespacesAndNewlines)) else { throw XCTSkip("MySQL local requerido") }
+        var config = DatabaseConnection()
+        config.port = port
+        config.database = "krabzik_qa"
+        config.tls = .disabled
+        let client = MySQLClient()
+        do {
+            _ = try await Self.run("""
+            CREATE TABLE braket_pk_qa (
+                id BIGINT UNSIGNED PRIMARY KEY,
+                email VARCHAR(80) NOT NULL,
+                name VARCHAR(60), status INT NOT NULL DEFAULT 0,
+                amount DECIMAL(18,4) DEFAULT 12.3400,
+                a_date DATETIME DEFAULT '2020-01-02 03:04:05',
+                UNIQUE KEY A_EMAIL (email)
+            ) ENGINE=InnoDB;
+            INSERT INTO braket_pk_qa(id,email,name) VALUES
+                (9007199254740993,'one@example.test','one'),(9007199254740994,'two@example.test','two');
+            """, client: client, config: config)
+            let snapshot = try await client.schema(config, password: "", databases: ["krabzik_qa"])
+            let table = try XCTUnwrap(snapshot.tables.first { $0.name == "braket_pk_qa" })
+            XCTAssertEqual(table.primaryKey, ["id"])
+            XCTAssertEqual(table.uniqueKeys.first, ["email"], "La PK debe ganar aunque otra clave aparezca primero")
+            let fetched = try await Self.run("SELECT * FROM braket_pk_qa ORDER BY id", client: client, config: config)
+            let draft = SQLResultDraft(result: try XCTUnwrap(fetched.first))
+            draft.configure(table)
+            draft.set(.text("pending one"), row: 0, column: 2)
+            draft.set(.text("pending two"), row: 1, column: 2)
+            let mutations = try draft.mutations()
+            let verification = try XCTUnwrap(mutations.first?.verificationSQL)
+            XCTAssertTrue(verification.contains("WHERE `id` = 9007199254740993"))
+            let explained = try await Self.run("EXPLAIN " + verification, client: client, config: config)
+            let explain = try XCTUnwrap(explained.first)
+            let key = try XCTUnwrap(explain.columns.firstIndex(of: "key"))
+            XCTAssertEqual(explain.rows.first?[key], "PRIMARY")
+            _ = try await Self.run("UPDATE braket_pk_qa SET status=1 WHERE id=9007199254740994", client: client, config: config)
+            do {
+                try await client.apply(mutations, table: table, configuration: config, password: "")
+                XCTFail("Un campo que no editamos cambió: debe revertirse todo")
+            } catch { XCTAssertTrue(MySQLClient.message(error).contains("fila cambió")) }
+            let retained = try await Self.run("SELECT name,status FROM braket_pk_qa ORDER BY id", client: client, config: config)
+            XCTAssertEqual(retained.first?.rows, [["one", "0"], ["two", "1"]])
+            let refreshed = try await Self.run("SELECT * FROM braket_pk_qa ORDER BY id", client: client, config: config)
+            let latest = SQLResultDraft(result: try XCTUnwrap(refreshed.first))
+            latest.configure(table)
+            latest.set(.text("10"), row: 0, column: 0)
+            latest.set(.null, row: 0, column: 2)
+            latest.deleteRow(1)
+            try await client.apply(latest.mutations(), table: table, configuration: config, password: "")
+            let saved = try await Self.run("SELECT id,name,status,amount,a_date FROM braket_pk_qa", client: client, config: config)
+            XCTAssertEqual(saved.first?.rows, [["10", nil, "0", "12.3400", "2020-01-02 03:04:05"]])
+            _ = try await Self.run("DROP TABLE braket_pk_qa", client: client, config: config)
+        } catch { await client.shutdown()
+        throw error }
+        await client.shutdown()
+    }
+
+    @MainActor func testServerNowUsesExistingSessionTimeZoneAndColumnType() async throws {
+        let marker = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent(".build/mysql-test-port")
+        guard let text = try? String(contentsOf: marker, encoding: .utf8),
+              let port = Int(text.trimmingCharacters(in: .whitespacesAndNewlines)) else { throw XCTSkip("MySQL local requerido") }
+        var config = DatabaseConnection()
+        config.port = port
+        config.database = "krabzik_qa"
+        config.tls = .disabled
+        let client = MySQLClient()
+        do {
+            _ = try await Self.run("SET time_zone = '+09:00'; SET timestamp = 1234567890; START TRANSACTION; SAVEPOINT braket_clock;",
+                                   client: client, config: config)
+            let examples = ["date": "2009-02-14", "datetime": "2009-02-14 08:31:30",
+                            "datetime(6)": "2009-02-14 08:31:30.000000", "timestamp(3)": "2009-02-14 08:31:30.000",
+                            "time": "08:31:30", "time(3)": "08:31:30.000", "year": "2009"]
+            for type in examples.keys.sorted() {
+                let column = SQLSchemaColumn(name: "value", type: type, nullable: true, extra: "")
+                let actual = try await client.serverNow(column: column, configuration: config)
+                XCTAssertEqual(actual, examples[type], type)
+            }
+            let session = try await Self.run("SELECT @@session.time_zone, @@timestamp", client: client, config: config)
+            XCTAssertEqual(session.first?.rows.first?[0], "+09:00")
+            _ = try await Self.run("ROLLBACK TO SAVEPOINT braket_clock", client: client, config: config)
+            let info = try await client.connect(config, password: "")
+            XCTAssertTrue(info.inTransaction, "Ahora no debe confirmar ni cerrar la transacción del script")
+            _ = try await Self.run("ROLLBACK; SET time_zone = '-04:00'", client: client, config: config)
+            let column = SQLSchemaColumn(name: "value", type: "datetime", nullable: true, extra: "")
+            let shifted = try await client.serverNow(column: column, configuration: config)
+            XCTAssertEqual(shifted, "2009-02-13 19:31:30")
+            await client.disconnect(config.id)
+            do {
+                _ = try await client.serverNow(column: column, configuration: config)
+                XCTFail("Ahora no debe abrir otra sesión que pierda la zona horaria configurada")
+            } catch { XCTAssertTrue(MySQLClient.message(error).contains("desconectada")) }
         } catch { await client.shutdown()
         throw error }
         await client.shutdown()

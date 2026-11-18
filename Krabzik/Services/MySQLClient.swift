@@ -473,8 +473,39 @@ actor MySQLClient {
             if let column = row[1] { grouped[name, default: []].append(column) }
             else { invalid.insert(name) }
         }
+        table.primaryKey = invalid.contains("PRIMARY") ? [] : (grouped["PRIMARY"] ?? [])
         table.uniqueKeys = grouped.keys.sorted().filter { !invalid.contains($0) }.compactMap { grouped[$0] }
         return table
+    }
+
+    /// Usa la sesión del resultado: una conexión de metadatos perdería su time_zone y timestamp.
+    func serverNow(column: SQLSchemaColumn, configuration: DatabaseConnection) async throws -> String {
+        guard case .temporal(let kind, let precision) = column.cellKind else {
+            throw DatabaseFailure("Este campo no es una fecha ni una hora.")
+        }
+        guard busy.insert(configuration.id).inserted else { throw DatabaseFailure("La conexión está ocupada.") }
+        defer { busy.remove(configuration.id) }
+        let history = await historyProvider()
+        guard let session = sessions[configuration.id], !session.connection.isClosed,
+              session.configuration.configurationWithoutTint == configuration.configurationWithoutTint else {
+            throw DatabaseFailure("La sesión MySQL está desconectada. Volvé a conectarla para consultar su hora.")
+        }
+        let channel = session.connection.channel
+        let deadline = NIODeadline.now() + .seconds(15)
+        let timeout = channel.eventLoop.scheduleTask(deadline: deadline) { channel.close(promise: nil) }
+        defer { timeout.cancel() }
+        do {
+            let result = try await read(kind.currentQuery(precision: precision), on: session.connection,
+                                        configuration: configuration, history: history, source: "Grilla · Ahora", deadline: deadline)
+            guard result.rows.count == 1, let row = result.rows.first, row.count == 1, let value = row[0] else {
+                throw DatabaseFailure("MySQL no devolvió una fecha u hora válida.")
+            }
+            try Task.checkCancellation()
+            return try SQLCellInput.validate(value, column: column)
+        } catch {
+            if NIODeadline.now() >= deadline { throw DatabaseFailure("El servidor no respondió a tiempo al consultar su hora.") }
+            throw error
+        }
     }
 
     func createTable(_ table: SQLSchemaTable, config: DatabaseConnection, password: String) async throws -> String {
@@ -497,7 +528,8 @@ actor MySQLClient {
             throw DatabaseFailure("Finalizá la transacción del script y activá autocommit antes de enviar cambios de la grilla.")
         }
         let fresh = try await describe(table, on: session.connection, configuration: configuration, history: history)
-        guard fresh.columns == table.columns, fresh.uniqueKeys == table.uniqueKeys else {
+        guard fresh.columns == table.columns, fresh.uniqueKeys == table.uniqueKeys,
+              table.primaryKey == nil || fresh.primaryKey == table.primaryKey else {
             throw DatabaseFailure("La estructura cambió. Actualizá la consulta antes de editar.")
         }
         let engine = try await read("SELECT ENGINE FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = "
@@ -511,7 +543,7 @@ actor MySQLClient {
             for mutation in mutations {
                 if let verification = mutation.verificationSQL {
                     let matching = try await read(verification, on: session.connection, configuration: configuration, history: history)
-                    guard matching.rows.count == 1 else {
+                    guard mutation.matchesOriginal(matching.rows) else {
                         throw DatabaseFailure("La fila cambió o ya no existe. Se revirtieron los cambios.")
                     }
                 }

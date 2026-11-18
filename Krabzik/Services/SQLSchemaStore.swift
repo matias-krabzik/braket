@@ -52,7 +52,15 @@ final class SQLSchemaStore {
         if let data = defaults.data(forKey: "mysql.schemaPreferences.v1"),
            let saved = try? JSONDecoder().decode([UUID: Preference].self, from: data) { preferences = saved }
         if let data = defaults.data(forKey: "mysql.schemaCache.v1"),
-           let saved = try? JSONDecoder().decode([UUID: SQLSchemaSnapshot].self, from: data) { snapshots = saved }
+           let saved = try? JSONDecoder().decode([UUID: SQLSchemaSnapshot].self, from: data) {
+            snapshots = saved.mapValues { snapshot in
+                var snapshot = snapshot
+                for index in snapshot.tables.indices where snapshot.tables[index].primaryKey == nil {
+                    snapshot.tables[index].metadataComplete = false
+                }
+                return snapshot
+            }
+        }
     }
 
     func snapshot(_ connection: DatabaseConnection) -> SQLSchemaSnapshot? {

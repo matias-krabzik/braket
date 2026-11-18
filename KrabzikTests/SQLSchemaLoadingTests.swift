@@ -36,6 +36,7 @@ final class SQLSchemaLoadingTests: XCTestCase {
         XCTAssertEqual(snapshot.tables.count, 1201)
         XCTAssertTrue(snapshot.tables.allSatisfy { $0.columns.count == 2 && $0.uniqueKeys == [["id"]] })
         let calls = await pages.calls
+        XCTAssertTrue(snapshot.tables.allSatisfy { $0.primaryKey == ["id"] })
         XCTAssertEqual(calls, 11, "1201 tables must not require 2403 queries")
         let progress = await sink.values
         XCTAssertEqual(progress[1].tables?.count, 1201)

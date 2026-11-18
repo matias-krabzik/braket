@@ -48,6 +48,7 @@ struct SQLSchemaLoader: Sendable {
             for index in tables.indices {
                 let table = tables[index].name
                 let indices = grouped[table] ?? [:]
+                tables[index].primaryKey = invalid[table]?.contains("PRIMARY") == true ? [] : (indices["PRIMARY"] ?? [])
                 tables[index].metadataComplete = true
                 tables[index].uniqueKeys = indices.keys.sorted().filter { invalid[table]?.contains($0) != true }
                     .compactMap { indices[$0] }

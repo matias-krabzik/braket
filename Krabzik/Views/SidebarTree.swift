@@ -79,6 +79,52 @@ private struct SidebarDisclosure: NSViewRepresentable {
     }
 }
 
+/// Distingue los clics antes de cambiar la expansión: el primero no puede ocultar el segundo.
+final class SidebarRowClickView: NSView {
+    var singleClick: (() -> Void)?
+    var doubleClick: (() -> Void)?
+    private var pending: DispatchWorkItem?
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        // El menú contextual (también Control-clic) y las ayudas siguen perteneciendo a SwiftUI.
+        guard let event = NSApp.currentEvent,
+              [.leftMouseDown, .leftMouseUp, .leftMouseDragged].contains(event.type),
+              !event.modifierFlags.contains(.control) else { return nil }
+        return super.hitTest(point)
+    }
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount > 1 { cancelPendingClick() }
+    }
+    override func mouseUp(with event: NSEvent) {
+        guard bounds.contains(convert(event.locationInWindow, from: nil)) else { cancelPendingClick()
+        return }
+        cancelPendingClick()
+        if event.clickCount == 2 { doubleClick?() }
+        else if event.clickCount == 1 {
+            let work = DispatchWorkItem { [weak self] in self?.singleClick?() }
+            pending = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + NSEvent.doubleClickInterval, execute: work)
+        }
+    }
+    func cancelPendingClick() { pending?.cancel()
+    pending = nil }
+}
+
+private struct SidebarRowClicks: NSViewRepresentable {
+    let single: () -> Void
+    let double: () -> Void
+    func makeNSView(context: Context) -> SidebarRowClickView {
+        let view = SidebarRowClickView()
+        view.setAccessibilityElement(false)
+        return view
+    }
+    func updateNSView(_ view: SidebarRowClickView, context: Context) {
+        view.singleClick = single
+        view.doubleClick = double
+    }
+    static func dismantleNSView(_ view: SidebarRowClickView, coordinator: ()) { view.cancelPendingClick() }
+}
+
 struct SidebarTreeNode<Value>: Identifiable {
     let id: String
     let value: Value
@@ -91,6 +137,7 @@ struct SidebarTree<Value, Content: View>: View {
     let nodes: [SidebarTreeNode<Value>]
     let name: (Value) -> String
     var menu: (Value) -> AnyView = { _ in AnyView(EmptyView()) }
+    var activate: (Value) -> Bool = { _ in false }
     @ViewBuilder let content: (Value) -> Content
     @State private var expanded: Set<String> = []
     @State private var selected: String?
@@ -98,11 +145,12 @@ struct SidebarTree<Value, Content: View>: View {
 
     init(nodes: [SidebarTreeNode<Value>], name: @escaping (Value) -> String,
          menu: @escaping (Value) -> AnyView = { _ in AnyView(EmptyView()) },
-         persistenceKey: String, @ViewBuilder content: @escaping (Value) -> Content) {
+         persistenceKey: String, activate: @escaping (Value) -> Bool = { _ in false }, @ViewBuilder content: @escaping (Value) -> Content) {
         self.nodes = nodes
         self.name = name
         self.menu = menu
         self.persistenceKey = persistenceKey
+        self.activate = activate
         self.content = content
         let saved = UserDefaults.standard.stringArray(forKey: persistenceKey)
         _expanded = State(initialValue: Set(saved ?? nodes.filter { $0.expandable }.map(\.id)))
@@ -140,6 +188,11 @@ struct SidebarTree<Value, Content: View>: View {
         UserDefaults.standard.set(expanded.sorted(), forKey: persistenceKey)
     }
 
+    private func activateRow(_ row: Row) {
+        selected = row.id
+        if !activate(row.node.value) { toggle(row) }
+    }
+
     private func rowView(_ row: Row) -> some View {
         let open = expanded.contains(row.id)
         let depth = CGFloat(row.ancestors.count)
@@ -154,9 +207,9 @@ struct SidebarTree<Value, Content: View>: View {
         }
         .frame(height: Theme.zoom(SidebarTreeStyle.rowHeight))
         .contentShape(Rectangle())
-        .onTapGesture { toggle(row) }
+        .overlay { SidebarRowClicks(single: { toggle(row) }, double: { activateRow(row) }) }
         .contextMenu { menu(row.node.value) }
-        .accessibilityAction { toggle(row) }
+        .accessibilityAction { activateRow(row) }
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .background(alignment: .leading) {
             if isSelected {

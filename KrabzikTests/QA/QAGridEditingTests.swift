@@ -30,7 +30,7 @@ final class QAGridEditingTests: XCTestCase {
                                      result: QAFixtures.result(connection, columns: ["nombre", "estado"],
                                                                rows: [["ana", "nuevo"]]))
         XCTAssertFalse(draft.canEdit)
-        XCTAssertEqual(draft.reason, "Solo lectura: incluí una clave primaria o única no nullable en la consulta.")
+        XCTAssertEqual(draft.reason, "Solo lectura: incluí la clave primaria completa o, si no existe, una clave única no nullable.")
     }
 
     /// GRI-03

@@ -59,7 +59,12 @@ struct DatabaseExplorer: View {
         SidebarTree(nodes: nodes(connection), name: { $0.name },
                     menu: { AnyView(contextMenu($0, connection: connection)) },
                     persistenceKey: "explorer.databases.expansion.v1."
-                        + (controller.workspaceURL?.standardizedFileURL.path ?? "") + "." + connection.id.uuidString) { item in
+                        + (controller.workspaceURL?.standardizedFileURL.path ?? "") + "." + connection.id.uuidString,
+                    activate: { item in
+                        guard case .table(let table) = item else { return false }
+                        controller.openTableQuery(table, connection: connection)
+                        return true
+                    }) { item in
             treeLabel(item, connection: connection, widestCount: widestCount)
         }
         .padding(.trailing, 10)
@@ -170,6 +175,7 @@ struct DatabaseExplorer: View {
             Text(item.name).lineLimit(1).truncationMode(.middle)
                 .help({
                     if case .column(let column, _) = item { return column.type + (column.nullable ? " · NULL" : " · NOT NULL") }
+                    if case .table = item { return item.name + "\nDoble clic: abrir consulta · Un clic: expandir o contraer" }
                     return item.name
                 }())
             if case .database(_, let preferred) = item, preferred { Text("★").foregroundStyle(.secondary) }

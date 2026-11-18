@@ -21,6 +21,19 @@ struct SQLMutation: Sendable {
     var sql: String
     var verificationSQL: String?
     var allowsUnchanged = false
+    var originalRow: [String?]?
+
+    /// String == normaliza Unicode. La comprobación de conflictos debe comparar bytes exactos.
+    func matchesOriginal(_ rows: [[String?]]) -> Bool {
+        guard let originalRow, rows.count == 1, let row = rows.first, row.count == originalRow.count else { return false }
+        return zip(row, originalRow).allSatisfy { current, original in
+            switch (current, original) {
+            case (nil, nil): return true
+            case let (current?, original?): return current.utf8.elementsEqual(original.utf8)
+            default: return false
+            }
+        }
+    }
 }
 
 @MainActor @Observable
@@ -56,7 +69,7 @@ final class SQLResultDraft {
     /// Si esta celda se puede poner en modo edición. Es la condición que la grilla
     /// consulta antes de abrir el campo, y la que una prueba afirma antes de escribir.
     func canEditCell(row: Int, column: Int) -> Bool {
-        canEdit && row >= 0 && column >= 0 && row < rowCount && !deleted.contains(row)
+        canEdit && row >= 0 && column >= 0 && column < result.columns.count && row < rowCount && !deleted.contains(row)
             && self.column(column)?.generated != true
     }
 
@@ -142,9 +155,9 @@ final class SQLResultDraft {
             return "Solo lectura: usá un SELECT directo de una sola tabla."
         }
         let names = result.origins.map(\.column)
-        guard let key = table.uniqueKeys.first(where: { key in
-            !key.isEmpty && key.allSatisfy { name in names.contains(name) && table.columns.contains { $0.name == name && !$0.nullable } }
-        }) else { return "Solo lectura: incluí una clave primaria o única no nullable en la consulta." }
+        guard let key = table.editingKey(in: Set(names)) else {
+            return "Solo lectura: incluí la clave primaria completa o, si no existe, una clave única no nullable."
+        }
         let indices = key.compactMap { names.firstIndex(of: $0) }
         var seen = Set<[String]>()
         for row in result.rows {
@@ -238,27 +251,27 @@ final class SQLResultDraft {
     func mutations() throws -> [SQLMutation] {
         guard canEdit, let table else { throw DatabaseFailure(reason.isEmpty ? "El resultado necesita actualizarse." : reason) }
         var output: [SQLMutation] = []
+        guard let key = table.editingKey(in: Set(result.origins.map(\.column))) else {
+            throw DatabaseFailure("No hay una clave completa para identificar la fila.")
+        }
+        let columns = result.origins.map { SQLValue.identifier($0.column) }.joined(separator: ", ")
         for row in result.rows.indices {
-            let predicate = result.origins.enumerated().map { index, origin in
-                "CAST(" + SQLValue.identifier(origin.column) + " AS BINARY) <=> CAST("
-                    + SQLValue.literal(result.rows[row][index]) + " AS BINARY)"
-            }.joined(separator: " AND ")
-            if deleted.contains(row) {
-                output.append(SQLMutation(sql: "DELETE FROM " + table.qualified + " WHERE " + predicate + " LIMIT 1",
-                                          verificationSQL: "SELECT 1 FROM " + table.qualified + " WHERE " + predicate
-                                                  + " LIMIT 1 FOR UPDATE"))
-            } else {
-                let assignments = result.columns.indices.compactMap { index -> String? in
-                    guard let value = changes[SQLCell(row: row, column: index)] else { return nil }
-                    return SQLValue.identifier(result.origins[index].column) + " = " + value.sql
-                }
-                if !assignments.isEmpty {
-                    output.append(SQLMutation(sql: "UPDATE " + table.qualified + " SET " + assignments.joined(separator: ", ")
-                                              + " WHERE " + predicate + " LIMIT 1",
-                                              verificationSQL: "SELECT 1 FROM " + table.qualified + " WHERE " + predicate
-                                                  + " LIMIT 1 FOR UPDATE", allowsUnchanged: true))
-                }
+            let assignments = result.columns.indices.compactMap { index -> String? in
+                guard let value = changes[SQLCell(row: row, column: index)] else { return nil }
+                return SQLValue.identifier(result.origins[index].column) + " = " + value.sql
             }
+            guard deleted.contains(row) || !assignments.isEmpty else { continue }
+            let predicate = try key.map { name -> String in
+                guard let index = result.origins.firstIndex(where: { $0.column == name }),
+                      let value = result.rows[row][index] else { throw DatabaseFailure("La clave de la fila está incompleta.") }
+                let metadata = table.columns.first { $0.name == name }
+                return SQLValue.identifier(name) + " = " + SQLValue.keyLiteral(value, column: metadata)
+            }.joined(separator: " AND ")
+            let verification = "SELECT " + columns + " FROM " + table.qualified + " WHERE " + predicate + " LIMIT 2 FOR UPDATE"
+            let sql = deleted.contains(row) ? "DELETE FROM " + table.qualified + " WHERE " + predicate + " LIMIT 1"
+                : "UPDATE " + table.qualified + " SET " + assignments.joined(separator: ", ") + " WHERE " + predicate + " LIMIT 1"
+            output.append(SQLMutation(sql: sql, verificationSQL: verification, allowsUnchanged: !deleted.contains(row),
+                                      originalRow: result.rows[row]))
         }
         for row in inserted {
             let indices = result.columns.indices.filter { column($0)?.generated != true }

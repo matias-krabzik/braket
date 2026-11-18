@@ -13,7 +13,8 @@ final class SQLGridTable: NSTableView {
         NSGraphicsContext.restoreGraphicsState()
     }
 
-    static weak var editingField: SQLGridField?
+    var navigate: ((UInt16, Bool) -> Void)?
+    var editSelected: (() -> Void)?
     var review: (() -> Void)?
     var contextualMenu: ((Int, Int) -> NSMenu)?
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -23,14 +24,37 @@ final class SQLGridTable: NSTableView {
         selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
         return contextualMenu?(row, column)
     }
+    override func mouseDown(with event: NSEvent) {
+        if let editor = SQLCellEditorController.active, editor.isEditing, editor.view.isDescendant(of: self) {
+            let point = convert(event.locationInWindow, from: nil)
+            let frame = editor.view.convert(editor.view.bounds, to: self)
+            if !frame.contains(point), !editor.confirmValue() { return }
+        }
+        super.mouseDown(with: event)
+    }
+    override func keyDown(with event: NSEvent) {
+        if [123, 124, 125, 126, 48].contains(event.keyCode),
+           event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
+            navigate?(event.keyCode, event.modifierFlags.contains(.shift))
+            return
+        }
+        if [36, 76].contains(event.keyCode), !event.modifierFlags.contains(.command) {
+            editSelected?()
+            return
+        }
+        super.keyDown(with: event)
+    }
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if event.modifierFlags.contains(.command), event.keyCode == 36, Self.reviewFocusedGrid() { return true }
         return super.performKeyEquivalent(with: event)
     }
     static func reviewFocusedGrid() -> Bool {
+        if let editor = SQLCellEditorController.active, editor.isEditing {
+            editor.commandEnter()
+            return true
+        }
         let responder = NSApp.keyWindow?.firstResponder
         var view = responder as? NSView
-        if let field = editingField, field.currentEditor() === responder { view = field }
         while let current = view {
             if let table = current as? SQLGridTable {
                 table.window?.makeFirstResponder(table)
@@ -53,6 +77,19 @@ final class SQLGridField: NSTextField {
         bounds.fill()
         super.draw(dirtyRect)
     }
+}
+
+private final class SQLGridCellView: NSTableCellView {
+    let valueLabel = SQLGridField()
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        valueLabel.cell = SQLGridTextCell(textCell: "")
+        valueLabel.frame = bounds
+        valueLabel.autoresizingMask = [.width, .height]
+        addSubview(valueLabel)
+        textField = valueLabel
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }
 
 /// AppKit keeps legacy scrollers in the layout for subclasses that do not opt in to overlay scrollers.
@@ -93,8 +130,10 @@ struct SQLResultGrid: NSViewRepresentable {
     let draft: SQLResultDraft
     let scale: Double
     let theme: AppTheme
+    var serverNow: (@MainActor (SQLSchemaColumn) async throws -> String)?
     func makeCoordinator() -> Coordinator { Coordinator(draft: draft) }
     static func dismantleNSView(_ scroll: NSScrollView, coordinator: Coordinator) {
+        coordinator.cellEditor?.cancelEditing()
         coordinator.draft.scrollOrigin = scrollOffset(in: scroll)
     }
     static func scrollOffset(in scroll: NSScrollView) -> NSPoint {
@@ -123,6 +162,10 @@ struct SQLResultGrid: NSViewRepresentable {
         scroll.autohidesScrollers = false
         let table = SQLGridTable()
         table.style = .plain
+        table.selectionHighlightStyle = .none
+        table.allowsMultipleSelection = false
+        table.navigate = { [weak coordinator = context.coordinator] key, shift in coordinator?.navigate(key: key, shift: shift) }
+        table.editSelected = { [weak coordinator = context.coordinator] in coordinator?.editSelectedCell() }
         table.columnAutoresizingStyle = .noColumnAutoresizing
         table.intercellSpacing = .zero
         table.gridStyleMask = [.solidVerticalGridLineMask, .solidHorizontalGridLineMask]
@@ -148,12 +191,14 @@ struct SQLResultGrid: NSViewRepresentable {
         let coordinator = context.coordinator
         let changedResult = coordinator.draft.result.id != draft.result.id || table.tableColumns.isEmpty
         if coordinator.draft !== draft {
+            coordinator.cellEditor?.cancelEditing()
             coordinator.draft.scrollOrigin = Self.scrollOffset(in: scroll)
             coordinator.restoredScroll = false
         }
         coordinator.draft = draft
         coordinator.scale = scale
         coordinator.theme = theme
+        coordinator.serverNow = serverNow
         // Observe the pending values even while the table owns its field editor.
         _ = draft.changes
         _ = draft.inserted
@@ -178,9 +223,9 @@ struct SQLResultGrid: NSViewRepresentable {
             let font = Theme.nativeCodeFont(scale: scale, weight: .bold)
             column.headerCell.font = font
             (column.headerCell as? SQLGridHeaderCell)?.leadingInset = 8 * scale
+            if coordinator.editing && coordinator.editingColumn == index { continue }
             let width = draft.widths[index].map { $0 * scale }
                 ?? Self.preferredWidth(for: index, in: draft, font: font, scale: scale)
-            if coordinator.editing && coordinator.editingColumn == index { continue }
             if abs(column.width - width) > 0.5 { coordinator.settingWidth = true
             column.width = width
             coordinator.settingWidth = false }
@@ -219,10 +264,10 @@ struct SQLResultGrid: NSViewRepresentable {
         var theme: AppTheme = .graphite
         weak var table: SQLGridTable?
         var editing = false
+        var cellEditor: SQLCellEditorController?
+        var serverNow: (@MainActor (SQLSchemaColumn) async throws -> String)?
         var editingColumn: Int?
         var editingOriginalWidth: CGFloat?
-        weak var editingTextView: NSTextView?
-        var originalEditorInset: NSSize?
         var settingWidth = false
         var restoredScroll = false
         var insertedCount = 0
@@ -235,15 +280,21 @@ struct SQLResultGrid: NSViewRepresentable {
         private var menuRow = 0, menuColumn = 0
         init(draft: SQLResultDraft) { self.draft = draft }
         func numberOfRows(in tableView: NSTableView) -> Int { draft.rowCount }
+        func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+            if editing, let cell = draft.selectedCell, cell.row == modelRow(row), let editor = cellEditor {
+                return max(27 * scale, editor.desiredHeight)
+            }
+            return 27 * scale
+        }
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
             guard let column = Int(tableColumn?.identifier.rawValue ?? ""), row < draft.rowCount else { return nil }
             let row = modelRow(row)
             let identifier = NSUserInterfaceItemIdentifier("value")
-            let field = (tableView.makeView(withIdentifier: identifier, owner: nil) as? SQLGridField) ?? {
-                let field = SQLGridField()
-                field.cell = SQLGridTextCell(textCell: "")
-                return field
-            }()
+            let cell = (tableView.makeView(withIdentifier: identifier, owner: nil) as? SQLGridCellView)
+                ?? SQLGridCellView(frame: .zero)
+            cell.identifier = identifier
+            let field = cell.valueLabel
+            field.isHidden = false
             let value = draft.value(row: row, column: column)
             field.identifier = identifier
             field.rowIndex = row
@@ -265,8 +316,9 @@ struct SQLResultGrid: NSViewRepresentable {
                 : value == .null || value == .serverDefault ? .tertiaryLabelColor : EditorPalette.text
             field.lineBreakMode = .byTruncatingTail
             field.usesSingleLineMode = true
-            field.toolTip = value.display
-            return field
+            field.toolTip = value.display + "\nFlechas: navegar · Enter: editar · ⌘Enter: revisar cambios"
+            field.setAccessibilityLabel(draft.result.columns[column] + ", fila \(visibleRow(row) + 1)")
+            return cell
         }
         func tableViewColumnDidResize(_ notification: Notification) {
             guard !settingWidth, let column = notification.userInfo?["NSTableColumn"] as? NSTableColumn,
@@ -278,89 +330,96 @@ struct SQLResultGrid: NSViewRepresentable {
         }
         @objc func selectCell(_ sender: NSTableView) {
             guard sender.clickedRow >= 0, sender.clickedColumn >= 0 else { return }
-            draft.selectedCell = SQLCell(row: modelRow(sender.clickedRow), column: sender.clickedColumn)
+            select(row: modelRow(sender.clickedRow), column: sender.clickedColumn)
         }
         @objc func editCell(_ sender: NSTableView) {
             guard sender.clickedRow >= 0 else { return }
             beginEditing(row: modelRow(sender.clickedRow), column: sender.clickedColumn)
         }
-        private func beginEditing(row: Int, column: Int) {
-            guard let sender = table, draft.canEditCell(row: row, column: column),
-                  let field = sender.view(atColumn: column, row: visibleRow(row), makeIfNecessary: true) as? SQLGridField else { return }
-            field.isEditable = true
-            field.isSelectable = true
-            if sender.tableColumns.indices.contains(column) {
-                let tableColumn = sender.tableColumns[column]
-                let fullWidth = (field.stringValue as NSString).size(withAttributes: [
-                    .font: field.font ?? Theme.nativeCodeFont(scale: scale)
-                ]).width + 32 * scale
-                if fullWidth > tableColumn.width {
-                    editingOriginalWidth = tableColumn.width
-                    editingColumn = column
-                    settingWidth = true
-                    tableColumn.width = min(tableColumn.maxWidth, fullWidth)
-                    settingWidth = false
-                }
+        func select(row: Int, column: Int) {
+            guard let table, (0..<draft.rowCount).contains(row), table.tableColumns.indices.contains(column) else { return }
+            draft.selectedCell = SQLCell(row: row, column: column)
+            table.selectRowIndexes(IndexSet(integer: visibleRow(row)), byExtendingSelection: false)
+            table.scrollRowToVisible(visibleRow(row))
+            table.scrollColumnToVisible(column)
+            table.reloadData()
+            table.window?.makeFirstResponder(table)
+        }
+        func navigate(key: UInt16, shift: Bool = false) {
+            guard !editing, let table, draft.rowCount > 0, !table.tableColumns.isEmpty else { return }
+            guard let cell = draft.selectedCell, (0..<draft.rowCount).contains(cell.row) else { select(row: modelRow(0), column: 0)
+            return }
+            var row = visibleRow(cell.row), column = cell.column
+            switch key {
+            case 123: column = max(0, column - 1)
+            case 124: column = min(table.tableColumns.count - 1, column + 1)
+            case 125: row = min(draft.rowCount - 1, row + 1)
+            case 126: row = max(0, row - 1)
+            case 48:
+                let current = row * table.tableColumns.count + column
+                let next = max(0, min(draft.rowCount * table.tableColumns.count - 1, current + (shift ? -1 : 1)))
+                row = next / table.tableColumns.count
+                column = next % table.tableColumns.count
+            default: return
             }
-            if draft.value(row: row, column: column) == .null || draft.value(row: row, column: column) == .serverDefault {
-                field.stringValue = ""
-            }
-            draft.beginEditing(row: row, column: column)
+            select(row: modelRow(row), column: column)
+        }
+        func editSelectedCell() {
+            guard let cell = draft.selectedCell else { select(row: modelRow(0), column: 0)
+            if let cell = draft.selectedCell { beginEditing(row: cell.row, column: cell.column) }
+            return }
+            beginEditing(row: cell.row, column: cell.column)
+        }
+        func beginEditing(row: Int, column: Int) {
+            guard !editing, let table, let metadata = draft.column(column), draft.canEditCell(row: row, column: column) else { return }
+            select(row: row, column: column)
+            guard let field = table.view(atColumn: column, row: visibleRow(row), makeIfNecessary: true),
+                  draft.beginEditing(row: row, column: column) else { return }
             editing = true
-            SQLGridTable.editingField = field
-            field.selectText(nil)
-            if let editor = field.currentEditor() as? NSTextView {
-                editingTextView = editor
-                originalEditorInset = editor.textContainerInset
-                let font = field.font ?? Theme.nativeCodeFont(scale: scale)
-                let lineHeight = ceil(font.ascender - font.descender + font.leading)
-                editor.textContainerInset = NSSize(width: editor.textContainerInset.width,
-                                                   height: max(0, (field.bounds.height - lineHeight) / 2))
+            let editor = SQLCellEditorController(column: metadata, value: draft.value(row: row, column: column))
+            editor.scale = scale
+            editor.serverNow = serverNow
+            cellEditor = editor
+            let tableColumn = table.tableColumns[column]
+            editingColumn = column
+            editingOriginalWidth = tableColumn.width
+            let valueWidth = (draft.value(row: row, column: column).display as NSString)
+                .size(withAttributes: [.font: Theme.nativeCodeFont(scale: scale)]).width + 24 * scale
+            let required: CGFloat
+            if case .temporal = metadata.cellKind { required = max(270 * scale, valueWidth + 80 * scale) }
+            else { required = min(700 * scale, valueWidth) }
+            if required > tableColumn.width {
+                settingWidth = true
+                tableColumn.width = min(tableColumn.maxWidth, required)
+                settingWidth = false
             }
-            sender.scrollColumnToVisible(column)
-        }
-        func controlTextDidEndEditing(_ notification: Notification) {
-            guard let field = notification.object as? SQLGridField, editing else { return }
-            draft.selectedCell = SQLCell(row: field.rowIndex, column: field.columnIndex)
-            draft.endEditing(commit: .text(field.stringValue))
-            editing = false
-            SQLGridTable.editingField = nil
-            restoreEditorInset()
-            field.isEditable = false
-            restoreEditingWidth()
-            table?.reloadData()
-        }
-        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
-                table?.window?.makeFirstResponder(table)
-                return true
+            table.scrollColumnToVisible(column)
+            (field as? SQLGridCellView)?.valueLabel.isHidden = true
+            editor.onResize = { [weak self, weak table] in
+                guard let self, self.editing else { return }
+                table?.noteHeightOfRows(withIndexesChanged: IndexSet(integer: self.visibleRow(row)))
             }
-            if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
-                editing = false
-                draft.endEditing()
-                SQLGridTable.editingField = nil
-                restoreEditorInset()
-                restoreEditingWidth()
-                table?.window?.makeFirstResponder(table)
-                table?.reloadData()
-                return true
+            editor.onFinish = { [weak self] value in
+                guard let self else { return }
+                self.draft.selectedCell = SQLCell(row: row, column: column)
+                if self.draft.canEditCell(row: row, column: column) { self.draft.endEditing(commit: value) }
+                else { self.draft.endEditing() }
+                self.editing = false
+                self.cellEditor = nil
+                if let width = self.editingOriginalWidth, let index = self.editingColumn,
+                   let table = self.table, table.tableColumns.indices.contains(index) {
+                    self.settingWidth = true
+                    table.tableColumns[index].width = width
+                    self.settingWidth = false
+                    table.noteHeightOfRows(withIndexesChanged: IndexSet(integer: self.visibleRow(row)))
+                }
+                self.editingColumn = nil
+                self.editingOriginalWidth = nil
+                self.table?.reloadData()
+                self.table?.window?.makeFirstResponder(self.table)
             }
-            return false
-        }
-        private func restoreEditorInset() {
-            if let inset = originalEditorInset { editingTextView?.textContainerInset = inset }
-            editingTextView = nil
-            originalEditorInset = nil
-        }
-        private func restoreEditingWidth() {
-            defer { editingColumn = nil
-            editingOriginalWidth = nil }
-            guard let index = editingColumn, let width = editingOriginalWidth,
-                  let table, table.tableColumns.indices.contains(index) else { return }
-            let column = table.tableColumns[index]
-            settingWidth = true
-            column.width = width
-            settingWidth = false
+            editor.onAdvance = { [weak self] shift in self?.navigate(key: 48, shift: shift) }
+            editor.show(relativeTo: field.bounds, of: field)
         }
         func menu(row: Int, column: Int) -> NSMenu {
             let row = modelRow(row)
@@ -384,6 +443,7 @@ struct SQLResultGrid: NSViewRepresentable {
             if draft.canEdit, metadata?.generated != true, !draft.deleted.contains(row) {
                 if metadata?.nullable == true { add("Poner en NULL", "null") }
                 if metadata?.canDefault == true { add("Usar DEFAULT", "default") }
+                if case .temporal = metadata?.cellKind { add("Fecha/hora actual del servidor", "now") }
                 for value in metadata?.enumValues ?? [] { add(value, "enum:" + value) }
                 add("Deshacer cambio de celda", "undo", enabled: draft.changes[SQLCell(row: row, column: column)] != nil)
             }
@@ -402,6 +462,10 @@ struct SQLResultGrid: NSViewRepresentable {
                 NSPasteboard.general.setString(draft.value(row: menuRow, column: menuColumn).display, forType: .string)
             case "edit":
                 beginEditing(row: menuRow, column: menuColumn)
+                return
+            case "now":
+                beginEditing(row: menuRow, column: menuColumn)
+                cellEditor?.useNow()
                 return
             case "null": draft.set(.null, row: menuRow, column: menuColumn)
             case "default": draft.set(.serverDefault, row: menuRow, column: menuColumn)
