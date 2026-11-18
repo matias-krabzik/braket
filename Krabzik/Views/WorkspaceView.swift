@@ -78,35 +78,10 @@ struct WorkspaceView: View {
                     projectToolbarItem
                     ToolbarItem(placement: .principal) { Spacer() }
                 }
-                ToolbarItem(placement: .primaryAction) {
-                    Button { if let url = controller.workspaceURL {
-                        controller.workflows.configure(url, root: controller.workflowRoot)
-                        controller.workflowTabOpen = true
-                        controller.workflowVisible = true
-                    } } label: {
-                        Image(systemName: "point.3.connected.trianglepath.dotted")
-                    }.help("Abrir automatización").accessibilityLabel("Abrir automatización")
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Button { controller.showingSettings = true } label: { Image(systemName: "gearshape") }
-                        .help("Configuración")
-                        .accessibilityLabel("Configuración")
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Button(action: controller.startAll) { Image(systemName: "play.fill") }
-                        .help("Iniciar proyecto")
-                        .disabled(controller.runnableProjects.isEmpty || controller.runnableProjects
-                            .allSatisfy { controller.runner.runs[$0.id]?.status.active == true })
-                }
-                if !controller.workflowVisible {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button {
-                            controller.database.resultsVisible = false
-                            controller.outputVisible = false
-                            controller.toggleProcessesPanel()
-                        } label: { Image(systemName: "rectangle.bottomthird.inset.filled") }
-                            .help("Mostrar procesos")
-                    }
+                if #available(macOS 26, *) {
+                    settingsToolbarItem.sharedBackgroundVisibility(.hidden)
+                } else {
+                    settingsToolbarItem
                 }
             }
         }
@@ -154,6 +129,17 @@ struct WorkspaceView: View {
                 + (pendientes == 0 ? "" : "\n\n(y \(pendientes) más)"))
         }
         .task { await controller.start() }
+    }
+
+    private var settingsToolbarItem: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Button { controller.showingSettings = true } label: {
+                Image(systemName: "gearshape").frame(width: 28, height: 28).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Configuración")
+            .accessibilityLabel("Configuración")
+        }
     }
 
     private var projectToolbarItem: some ToolbarContent {
