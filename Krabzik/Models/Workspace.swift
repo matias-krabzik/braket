@@ -137,6 +137,7 @@ struct Workspace: Codable, Equatable {
     var scripts: [String] = []
     var iconStyle = ProjectIconStyle()
     var codeIconMonochrome = true
+    var sqlTimeoutSeconds: Int?
 
     init(name: String, projects: [CodeProject] = [], connections: [DatabaseConnection] = []) {
         self.name = name
@@ -145,7 +146,8 @@ struct Workspace: Codable, Equatable {
     }
 
     /// Explícitas para que agregar una propiedad no cambie el formato sin querer.
-    private enum CodingKeys: String, CodingKey { case version, name, projects, connections, scripts, iconStyle, codeIconMonochrome }
+    private enum CodingKeys: String,
+        CodingKey { case version, name, projects, connections, scripts, iconStyle, codeIconMonochrome, sqlTimeoutSeconds }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -155,6 +157,8 @@ struct Workspace: Codable, Equatable {
         connections = try values.decodeIfPresent([DatabaseConnection].self, forKey: .connections) ?? []
         iconStyle = try values.decodeIfPresent(ProjectIconStyle.self, forKey: .iconStyle) ?? ProjectIconStyle()
         codeIconMonochrome = try values.decodeIfPresent(Bool.self, forKey: .codeIconMonochrome) ?? true
+        let timeout = try values.decodeIfPresent(Int.self, forKey: .sqlTimeoutSeconds)
+        sqlTimeoutSeconds = timeout.flatMap { (1...3600).contains($0) ? $0 : nil }
         scripts = try values.decodeIfPresent([String].self, forKey: .scripts) ?? []
         scripts = Array(NSOrderedSet(array: scripts)) as? [String] ?? []
     }

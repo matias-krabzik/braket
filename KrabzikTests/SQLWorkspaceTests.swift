@@ -75,7 +75,7 @@ final class SQLWorkspaceTests: XCTestCase {
 
     @MainActor func testFailedQueryLeavesRetryableTabWithoutSpinner() {
         let execution = SQLExecution()
-        XCTAssertEqual(execution.timeoutSeconds, 15)
+        XCTAssertEqual(execution.timeoutSeconds, 60)
         var result = SQLResult(statement: 1, line: 1)
         result.sql = "SELECT SLEEP(20)"
         XCTAssertTrue(execution.begin(result))

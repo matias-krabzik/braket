@@ -29,6 +29,9 @@ final class AppSettings {
     static let uiScaleRange = 0.8...1.5
     static let fontSizeRange = 10.0...24.0
 
+    var defaultSQLTimeoutSeconds: Int {
+        didSet { defaults.set(min(3600, max(1, defaultSQLTimeoutSeconds)), forKey: "defaultSQLTimeoutSeconds") }
+    }
     var theme: AppTheme {
         didSet { defaults.set(theme.rawValue, forKey: "appearanceTheme") }
     }
@@ -64,6 +67,8 @@ final class AppSettings {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        let timeout = defaults.object(forKey: "defaultSQLTimeoutSeconds") as? Int ?? 60
+        defaultSQLTimeoutSeconds = (1...3600).contains(timeout) ? timeout : 60
         var savedEditorOptions = defaults.data(forKey: "editorOptions")
             .flatMap { try? JSONDecoder().decode(EditorOptions.self, from: $0) } ?? EditorOptions()
         if ![2, 4].contains(savedEditorOptions.indentWidth) { savedEditorOptions.indentWidth = 4 }

@@ -12,12 +12,23 @@ struct SQLResultsPanel: View {
     }
 
     private func closeResult(_ result: SQLResult) {
-        let draft = execution.draft(for: result)
-        guard !draft.sending, draft.confirmDiscard() else { return }
-        execution.results.removeAll { $0.id == result.id }
-        execution.drafts.removeValue(forKey: result.id)
-        execution.pinned.remove(result.id)
-        if execution.selectedResultID == result.id { execution.selectedResultID = execution.results.last?.id }
+        execution.closeTabs(.current, relativeTo: result.id)
+    }
+
+    @ViewBuilder private func tabMenu(_ result: SQLResult) -> some View {
+        Button(execution.pinned.contains(result.id) ? "Desfijar pestaña" : "Fijar pestaña") {
+            togglePin(result)
+        }.disabled(result.isLoading)
+        Divider()
+        ForEach(SQLResultTabAction.allCases, id: \.self) { action in
+            Button(action.rawValue) { execution.closeTabs(action, relativeTo: result.id) }
+                .disabled(!execution.canCloseTabs(action, relativeTo: result.id))
+        }
+    }
+
+    private func togglePin(_ result: SQLResult) {
+        if execution.pinned.contains(result.id) { execution.pinned.remove(result.id) }
+        else { execution.pinned.insert(result.id) }
     }
     var body: some View {
         VStack(spacing: 0) {
@@ -26,7 +37,7 @@ struct SQLResultsPanel: View {
                     HStack(spacing: 4) {
                         Button(action: controller.showOutput) {
                             Label("Logs", systemImage: "text.alignleft")
-                                .padding(.vertical, 8).padding(.horizontal, 10)
+                                .padding(.vertical, 5).padding(.horizontal, 10)
                         }
                         .buttonStyle(.plain)
                         .background(Theme.surfaceInk.opacity(showingLogs ? 0.1 : 0.025),
@@ -36,46 +47,45 @@ struct SQLResultsPanel: View {
                         .qaControl("sql.logs.tab", title: "Logs", action: controller.showOutput)
                         ForEach(Array(execution.results.enumerated()), id: \.element.id) { index, result in
                             let draft = execution.draft(for: result)
-                            HStack(spacing: 6) {
+                            HStack(spacing: 3) {
                                 Button { selectResult(result) } label: {
                                     HStack(spacing: 6) {
                                         if result.isLoading { ProgressView().controlSize(.mini) }
                                         else { Image(systemName: "tablecells") }
                                         Text("Consulta \(index + 1)" + (draft.hasChanges ? " •" : ""))
-                                    }.padding(.vertical, 8).padding(.leading, 10)
+                                    }.padding(.vertical, 5).padding(.leading, 9)
                                 }.buttonStyle(.plain)
                                     .help("Consulta \(index + 1) · \(result.connection?.name ?? "Sin conexión") · "
                                           + "\(result.database)\n\(result.sql)")
-                                Button {
-                                    if execution.pinned.contains(result.id) { execution.pinned.remove(result.id) }
-                                    else { execution.pinned.insert(result.id) }
-                                } label: {
-                                    Image(systemName: execution.pinned.contains(result.id) ? "pin.fill" : "pin")
-                                        .foregroundStyle(execution.pinned.contains(result.id) ? Theme.accent : .secondary)
-                                        .frame(width: Theme.zoom(28), height: Theme.zoom(28))
-                                }.buttonStyle(.plain).disabled(result.isLoading)
+                                SQLResultTabIcon(symbol: execution.pinned.contains(result.id) ? "pin.fill" : "pin",
+                                                 selected: execution.pinned.contains(result.id)) { togglePin(result) }
+                                    .disabled(result.isLoading)
                                     .help(execution.pinned
                                         .contains(result.id) ? "Desfijar pestaña" : "Fijar pestaña: conservar este resultado")
                                     .accessibilityLabel(execution.pinned.contains(result.id) ? "Desfijar pestaña" : "Fijar pestaña")
-                                Button {
-                                    closeResult(result)
-                                } label: {
-                                    Image(systemName: "xmark").font(.system(size: Theme.zoom(9)))
-                                        .frame(width: Theme.zoom(28), height: Theme.zoom(28))
-                                        .contentShape(Rectangle())
-                                }
-                                    .buttonStyle(.plain).help("Cerrar resultado: Consulta \(index + 1)")
-                                    .disabled(result.isLoading)
+                                    .qaControl("sql.result.pin.\(index)", title: "Fijar o desfijar resultado",
+                                               enabled: !result.isLoading) { togglePin(result) }
+                                SQLResultTabIcon(symbol: "xmark") { closeResult(result) }
+                                    .help("Cerrar resultado: Consulta \(index + 1)")
+                                    .disabled(!execution.canCloseTabs(.current, relativeTo: result.id))
                                     .qaControl("sql.result.close.\(index)", title: "Cerrar resultado",
-                                               enabled: !result.isLoading) { closeResult(result) }
+                                               enabled: execution.canCloseTabs(.current, relativeTo: result.id)) { closeResult(result) }
                             }
                             .background(Theme.surfaceInk.opacity(!showingLogs && execution.selectedResult?.id == result.id ? 0.1 : 0.025),
                                         in: RoundedRectangle(cornerRadius: 5))
+                            .contextMenu { tabMenu(result) }
                             .qaControl("sql.result.tab.\(index)", title: "Consulta \(index + 1)",
                                        enabled: !result.isLoading) { selectResult(result) }
                         }
-                    }.padding(5)
+                    }.padding(.horizontal, 5).padding(.vertical, 3)
                 }.scrollIndicators(.hidden)
+                Menu {
+                    ForEach(SQLResultTabAction.allCases, id: \.self) { action in
+                        Button(action.rawValue) { execution.closeTabs(action, relativeTo: execution.selectedResult?.id) }
+                            .disabled(!execution.canCloseTabs(action, relativeTo: execution.selectedResult?.id))
+                    }
+                } label: { Image(systemName: "ellipsis") }
+                    .menuStyle(.borderlessButton).fixedSize().help("Acciones de las pestañas de resultados")
                 if !showingLogs { SQLTimeoutControl(execution: execution) }
                 Button(action: hide) { Image(systemName: "chevron.down") }.buttonStyle(.plain)
                     .padding(.horizontal, 12).help("Ocultar resultados").accessibilityLabel("Ocultar resultados")
@@ -103,6 +113,24 @@ struct SQLResultsPanel: View {
                     .frame(maxWidth: .infinity, alignment: .leading).padding(8)
             }
         }.background(Theme.background)
+    }
+}
+
+private struct SQLResultTabIcon: View {
+    let symbol: String
+    var selected = false
+    let action: () -> Void
+    @State private var hovering = false
+    @Environment(\.isEnabled) private var enabled
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: Theme.zoom(10), weight: .medium))
+                .foregroundStyle(selected ? Theme.accent : .secondary)
+                .frame(width: Theme.zoom(22), height: Theme.zoom(22))
+                .contentShape(Rectangle())
+                .background(Theme.surfaceInk.opacity(hovering && enabled ? 0.1 : 0), in: RoundedRectangle(cornerRadius: 4))
+        }.buttonStyle(.plain).onHover { hovering = $0 }
     }
 }
 
@@ -206,10 +234,14 @@ struct SQLTimeoutControl: View {
         .buttonStyle(.plain)
         .font(Theme.interfaceFont(12))
         .disabled(execution.isRunning)
-        .help("Ajustar tiempo máximo por sentencia (1–3600 segundos)")
+        .help("Timeout por sentencia · \(execution.timeoutSource). El ajuste de este archivo se recuerda.")
         .accessibilityLabel("Tiempo máximo por sentencia: \(execution.timeoutSeconds) segundos")
         .popover(isPresented: $showingEditor, arrowEdge: .bottom) {
             SQLTimeoutEditor(initialSeconds: execution.timeoutSeconds,
+                             inheritedSeconds: execution.inheritedTimeoutSeconds,
+                             inheritedSource: execution.inheritedTimeoutSource(),
+                             onReset: { execution.resetTimeout()
+                             showingEditor = false },
                              onSave: { execution.timeoutSeconds = $0
                              showingEditor = false },
                              onCancel: { showingEditor = false })
@@ -221,9 +253,16 @@ struct SQLTimeoutControl: View {
 private struct SQLTimeoutEditor: View {
     let onSave: (Int) -> Void
     let onCancel: () -> Void
+    let onReset: () -> Void
+    let inheritedSeconds: Int
+    let inheritedSource: String
     @State private var proposedSeconds: String
 
-    init(initialSeconds: Int, onSave: @escaping (Int) -> Void, onCancel: @escaping () -> Void) {
+    init(initialSeconds: Int, inheritedSeconds: Int, inheritedSource: String,
+         onReset: @escaping () -> Void, onSave: @escaping (Int) -> Void, onCancel: @escaping () -> Void) {
+        self.inheritedSeconds = inheritedSeconds
+        self.inheritedSource = inheritedSource
+        self.onReset = onReset
         self.onSave = onSave
         self.onCancel = onCancel
         _proposedSeconds = State(initialValue: String(initialSeconds))
@@ -246,8 +285,10 @@ private struct SQLTimeoutEditor: View {
                     .onSubmit(apply)
                 Text("segundos").foregroundStyle(.secondary)
             }
-            Text("Entre 1 y 3600 segundos.")
+            Text("Se recuerda para este archivo y se aplica a cada sentencia por separado. Entre 1 y 3600 segundos.")
                 .font(Theme.interfaceFont(11)).foregroundStyle(.secondary)
+            Button("Heredar de \(inheritedSource.lowercased()): \(inheritedSeconds) s", action: onReset)
+                .help("Quitar el ajuste del archivo y usar el timeout del proyecto o de la aplicación")
             HStack {
                 Spacer()
                 Button("Cancelar", action: onCancel)

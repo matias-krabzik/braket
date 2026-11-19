@@ -203,7 +203,7 @@ actor MySQLClient {
     }
 
     func execute(_ text: String, startingLine: Int, configuration: DatabaseConnection, password: String,
-                 operation: UUID, timeoutSeconds: Int = 15, pageIndex: Int? = nil, listScope: String = "default",
+                 operation: UUID, timeoutSeconds: Int = 60, pageIndex: Int? = nil, listScope: String = "default",
                  onStatement: @escaping @Sendable (SQLResult) async throws -> Void = { _ in },
                  onResult: @escaping @Sendable (SQLResult) async -> Void) async throws -> DatabaseSessionInfo {
         try Task.checkCancellation()
@@ -354,6 +354,7 @@ actor MySQLClient {
                     var contextual = result
                     contextual.resultIndex = index
                     contextual.sql = statement.text
+                    contextual.noBackslashEscapes = noBackslash
                     contextual.setValues = setValues
                     if let pagination {
                         let hasNext = result.rowCount > SQLPage.size

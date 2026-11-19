@@ -15,6 +15,7 @@ struct SettingsView: View {
     }
 
     @MainActor private struct GeneralDraft: Equatable {
+        var defaultSQLTimeoutSeconds: Int
         var theme: AppTheme
         var uiScale: Double
         var codeFontSize: Double
@@ -23,6 +24,7 @@ struct SettingsView: View {
         var restoreLastState: Bool
 
         init(settings: AppSettings) {
+            defaultSQLTimeoutSeconds = settings.defaultSQLTimeoutSeconds
             editorOptions = settings.editorOptions
             theme = settings.theme
             uiScale = settings.uiScale
@@ -35,6 +37,7 @@ struct SettingsView: View {
     private var hasChanges: Bool { draft != GeneralDraft(settings: settings) }
 
     private func apply() {
+        settings.defaultSQLTimeoutSeconds = min(3600, max(1, draft.defaultSQLTimeoutSeconds))
         settings.editorOptions = draft.editorOptions
         settings.theme = draft.theme
         settings.uiScale = draft.uiScale
@@ -65,7 +68,7 @@ struct SettingsView: View {
             switch self {
             case .general:
                 "apariencia tema grafito fuente código resultados zoom iniciar diagnóstico mysql "
-                    + "editor paréntesis guías formato cierre"
+                    + "editor paréntesis guías formato cierre sql timeout tiempo consultas"
             case .connections: "conexiones base datos mysql"
             case .updates: "actualizaciones versión"
             }
@@ -186,6 +189,18 @@ struct SettingsView: View {
                     Text("\(Int(draft.resultFontSize)) pt").frame(width: 52, alignment: .trailing)
                     Button("Restablecer") { draft.resultFontSize = 14 }.disabled(draft.resultFontSize == 14)
                 }
+            }
+            Section("SQL") {
+                HStack {
+                    Text("Timeout predeterminado por sentencia")
+                    Spacer()
+                    TextField("Segundos", value: $draft.defaultSQLTimeoutSeconds, format: .number.grouping(.never))
+                        .frame(width: 80).accessibilityLabel("Timeout SQL de la aplicación en segundos")
+                    Text("segundos")
+                }
+                Text("1–3600 segundos. Cada sentencia tiene su propio límite, incluso al ejecutar un archivo completo. "
+                     + "Se usa cuando el proyecto y el archivo no tienen un timeout propio.")
+                    .font(.callout).foregroundStyle(.secondary)
             }
             Section("Editor") {
                 Toggle("Resaltar pares y delimitadores sin pareja", isOn: $draft.editorOptions.matchBrackets)

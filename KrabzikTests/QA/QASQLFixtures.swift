@@ -72,9 +72,9 @@ enum QAFixtures {
     /// El puerto del MySQL desechable, si el desarrollador dejó el marcador. Las pruebas
     /// etiquetadas `needs-mysql` se saltan cuando no está: ver docs/qa-automation.md.
     static func mysqlPort(_ file: StaticString = #filePath) throws -> Int {
-        let marker = URL(fileURLWithPath: "\(file)").deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent(".build/mysql-test-port")
+        var directory = URL(fileURLWithPath: "\(file)").deletingLastPathComponent()
+        while directory.lastPathComponent != "KrabzikTests", directory.path != "/" { directory.deleteLastPathComponent() }
+        let marker = directory.deletingLastPathComponent().appendingPathComponent(".build/mysql-test-port")
         guard let text = try? String(contentsOf: marker, encoding: .utf8),
               let port = Int(text.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             throw XCTSkip("necesita el MySQL desechable: creá .build/mysql-test-port (ver docs/qa-automation.md)")

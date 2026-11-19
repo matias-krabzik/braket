@@ -15,7 +15,10 @@ import Observation
 /// Confinado al main actor. Ver docs/specs/C5-dividir-workspacecontroller.md.
 @MainActor @Observable
 final class DocumentStore {
-    private(set) var documents: [EditorDocument] = []
+    @ObservationIgnored var didChange: (() -> Void)?
+    private(set) var documents: [EditorDocument] = [] {
+        didSet { didChange?() }
+    }
     var selectedID: URL?
     /// Archivos que se están leyendo. La interfaz los muestra como en curso, y sirve para
     /// no lanzar dos lecturas del mismo archivo.

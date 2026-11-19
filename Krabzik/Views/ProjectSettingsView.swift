@@ -32,6 +32,8 @@ struct ProjectSettingsModal: View {
 struct ProjectSettingsView: View {
     let controller: WorkspaceController
     let url: URL
+    @State private var timeoutOverride: Bool
+    @State private var timeoutSeconds: Int
     @State private var name: String
     @State private var icon: ProjectIconStyle
     @State private var editing: CodeProject?
@@ -41,6 +43,8 @@ struct ProjectSettingsView: View {
     init(controller: WorkspaceController, workspace: Workspace, url: URL) {
         self.controller = controller
         self.url = url
+        _timeoutOverride = State(initialValue: workspace.sqlTimeoutSeconds != nil)
+        _timeoutSeconds = State(initialValue: workspace.sqlTimeoutSeconds ?? controller.settings.defaultSQLTimeoutSeconds)
         _name = State(initialValue: workspace.name)
         _icon = State(initialValue: workspace.iconStyle)
         _codeIconMonochrome = State(initialValue: workspace.codeIconMonochrome)
@@ -87,6 +91,24 @@ struct ProjectSettingsView: View {
                         }
                             .disabled(!hasChanges || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
+                }
+                Section("SQL") {
+                    Toggle("Usar un timeout propio del proyecto", isOn: $timeoutOverride)
+                    HStack {
+                        Text("Límite por sentencia")
+                        Spacer()
+                        TextField("Segundos", value: $timeoutSeconds, format: .number.grouping(.never))
+                            .frame(width: 80).disabled(!timeoutOverride)
+                            .accessibilityLabel("Timeout SQL del proyecto en segundos")
+                        Text("segundos")
+                    }
+                    Text("Sin un valor propio se hereda el de la aplicación: \(controller.settings.defaultSQLTimeoutSeconds) s. "
+                         + "Cada sentencia del archivo tiene este límite, salvo que el archivo tenga un ajuste propio.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Guardar timeout") {
+                        controller.saveProjectSQLTimeout(timeoutOverride ? timeoutSeconds : nil)
+                    }.disabled((timeoutOverride && !(1...3600).contains(timeoutSeconds))
+                               || (timeoutOverride ? timeoutSeconds : nil) == controller.workspace?.sqlTimeoutSeconds)
                 }
                 Section("Ubicación del proyecto") {
                     Text(url.path).font(.callout).textSelection(.enabled)

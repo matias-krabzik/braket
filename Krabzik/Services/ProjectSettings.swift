@@ -36,6 +36,18 @@ extension WorkspaceController {
     }
 
     @discardableResult
+    func saveProjectSQLTimeout(_ seconds: Int?) -> Bool {
+        guard !isReadOnly, !isSwitchingWorkspace, var updated = workspace, let url = workspaceURL,
+              seconds == nil || (1...3600).contains(seconds ?? 0) else { return false }
+        updated.sqlTimeoutSeconds = seconds
+        do { try session.save(updated)
+            openWorkspaceModels[url] = updated
+            return true
+        } catch { errors.report(error)
+        return false }
+    }
+
+    @discardableResult
     func saveProjectIdentity(name: String, icon: ProjectIconStyle, codeIconMonochrome: Bool? = nil) -> Bool {
         guard !isReadOnly, !isSwitchingWorkspace, var updated = workspace, let url = workspaceURL else { return false }
         updated.name = name.trimmingCharacters(in: .whitespacesAndNewlines)

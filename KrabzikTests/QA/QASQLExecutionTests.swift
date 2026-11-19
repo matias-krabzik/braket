@@ -80,7 +80,7 @@ final class QASQLExecutionTests: XCTestCase {
         let qa = try QAHarness(self)
         let connection = try await qa.addConnection(QAFixtures.connection("Local"))
         let document = try await script(qa, "SELECT 1;\n", connection: connection)
-        XCTAssertEqual(document.sqlExecution.timeoutSeconds, 15, "el valor por defecto")
+        XCTAssertEqual(document.sqlExecution.timeoutSeconds, 60, "el valor por defecto")
         document.sqlExecution.timeoutSeconds = 0
         qa.controller.executeSQL()
         await qa.assertEvent("sql.execute.begin", ["timeout": "1"])

@@ -39,13 +39,12 @@ final class QAGridEditingTests: XCTestCase {
         let connection = QAFixtures.connection()
         for sql in ["SELECT id, nombre FROM personas JOIN pedidos USING (id)",
                     "SELECT id, nombre FROM personas GROUP BY id",
-                    "SELECT id, nombre FROM personas WHERE id IN (SELECT id FROM pedidos)",
                     "SELECT DISTINCT id, nombre FROM personas"] {
             let draft = QAFixtures.draft(connection,
                                          result: QAFixtures.result(connection, columns: ["id", "nombre"],
                                                                    rows: [["1", "ana"]], sql: sql))
             XCTAssertFalse(draft.canEdit, sql)
-            XCTAssertEqual(draft.reason, "Solo lectura: usá un SELECT directo de una sola tabla.", sql)
+            XCTAssertEqual(draft.reason, "Solo lectura: usá un SELECT de una sola tabla, con subconsultas solo en los filtros WHERE.", sql)
         }
     }
 

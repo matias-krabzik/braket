@@ -181,7 +181,8 @@ final class DatabaseController {
 
     func execute(_ document: EditorDocument, connection: DatabaseConnection,
                  queryOverride: String? = nil, databaseOverride: String? = nil,
-                 pageIndex: Int = 0, targetResultID: UUID? = nil, startingLineOverride: Int? = nil) {
+                 pageIndex: Int = 0, targetResultID: UUID? = nil, startingLineOverride: Int? = nil,
+                 replaceUnpinnedResults: Bool = false) {
         let state = state(connection.id), execution = document.sqlExecution
         QAProbe.action("sql.execute.request", ["file": QAField.path(document.url),
                                                "connection": connection.name,
@@ -218,16 +219,17 @@ final class DatabaseController {
             }
             return
         }
-        let retainedBytes = execution.results.reduce(0) { total, result in
+        let retained = replaceUnpinnedResults ? execution.results.filter { execution.pinned.contains($0.id) } : execution.results
+        let retainedBytes = retained.reduce(0) { total, result in
             total + result.rows.reduce(0) { $0 + $1.reduce(0) { $0 + 16 + ($1?.utf8.count ?? 0) } }
         }
-        let reusing = execution.results.contains {
+        let reusing = retained.contains {
             !execution.pinned.contains($0.id) && $0.sql.trimmingCharacters(in: .whitespacesAndNewlines) == query.text
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 && $0.connection?.configurationWithoutTint == connection.configurationWithoutTint
         }
         let beginsWithSet = SQLSetStatement(query.text, noBackslashEscapes: state.noBackslashEscapes) != nil
-        guard beginsWithSet || reusing || (execution.results.count < 200 && retainedBytes < 24_000_000) else {
+        guard beginsWithSet || reusing || (retained.count < 200 && retainedBytes < 24_000_000) else {
             execution.error = "Cerrá algunas pestañas de resultados antes de ejecutar más consultas."
             document.setQueryMarker(.failure, line: query.startingLine, revision: markerRevision,
                                     message: execution.error)
@@ -242,6 +244,11 @@ final class DatabaseController {
         do {
             var script = SQLScript(query.text, startingLine: query.startingLine)
             if let statement = try script.next(noBackslashEscapes: state.noBackslashEscapes) {
+                if replaceUnpinnedResults && !execution.closeTabs(.unpinned) {
+                    execution.targetResultID = nil
+                    QAProbe.sql("sql.execute.cancelledByDraft", ["sql": QAField.sql(statement.text)])
+                    return
+                }
                 var pending = SQLResult(statement: 1, line: statement.line)
                 pending.sql = statement.text
                 pending.connection = connection
@@ -262,13 +269,13 @@ final class DatabaseController {
         QAProbe.failure("sql.execute.rejected", execution.error ?? "", ["stage": "split"])
         return }
         let timeoutSeconds = max(1, min(execution.timeoutSeconds, 3600))
-        execution.timeoutSeconds = timeoutSeconds
         let operation = UUID()
         execution.operationID = operation
         execution.error = nil
         execution.cancelNote = nil
         execution.connectionName = connection.name
         execution.destination = state.destination(for: connection)
+        execution.runningTimeoutSeconds = timeoutSeconds
         execution.isRunning = true
         execution.isCancelling = false
         state.busy = true

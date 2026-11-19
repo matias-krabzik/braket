@@ -196,6 +196,7 @@ struct SQLResult: Identifiable, Sendable {
     var statement: Int
     var line: Int
     var sql = ""
+    var noBackslashEscapes = false
     var connection: DatabaseConnection?
     var database = ""
     var origins: [SQLColumnOrigin] = []
@@ -223,7 +224,24 @@ struct SQLResult: Identifiable, Sendable {
 /// `DatabaseController` al avanzar la ejecución y la lee la vista.
 @MainActor @Observable
 final class SQLExecution {
-    var timeoutSeconds = 15
+    var runningTimeoutSeconds: Int?
+    private var customTimeoutSeconds: Int?
+    @ObservationIgnored var inheritedTimeout: () -> Int = { 60 }
+    @ObservationIgnored var inheritedTimeoutSource: () -> String = { "Aplicación" }
+    @ObservationIgnored var saveTimeout: ((Int?) -> Void)?
+    @ObservationIgnored var timeoutBindingKey: String?
+    @ObservationIgnored var timeoutBindingProject: String?
+    var timeoutSeconds: Int {
+        get { min(3600, max(1, runningTimeoutSeconds ?? customTimeoutSeconds ?? inheritedTimeout())) }
+        set { customTimeoutSeconds = min(3600, max(1, newValue))
+        saveTimeout?(customTimeoutSeconds) }
+    }
+    var hasCustomTimeout: Bool { customTimeoutSeconds != nil }
+    var timeoutSource: String { hasCustomTimeout ? "Archivo" : inheritedTimeoutSource() }
+    var inheritedTimeoutSeconds: Int { min(3600, max(1, inheritedTimeout())) }
+    func loadTimeout(_ seconds: Int?) { customTimeoutSeconds = seconds }
+    func resetTimeout() { customTimeoutSeconds = nil
+    saveTimeout?(nil) }
     private var activeResultID: UUID?
     var pinned: Set<UUID> = []
     var targetResultID: UUID?
@@ -270,6 +288,7 @@ final class SQLExecution {
     }
 
     func finish(error: String?) {
+        runningTimeoutSeconds = nil
         if let index = results.firstIndex(where: { $0.id == activeResultID && $0.isLoading }) {
             results[index].isLoading = false
             results[index].error = error

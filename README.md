@@ -244,3 +244,13 @@ Las versiones de las dependencias están fijadas en `Package.resolved`. Las lice
 Las conexiones nuevas pertenecen al proyecto abierto. En **Administrar conexiones → Compartidas** se pueden buscar y agregar perfiles reutilizables sin volver a ingresar la contraseña. La opción **Compartir con otros proyectos** de la edición habilita esa reutilización; editar un perfil compartido actualiza los proyectos que lo usan. Para una variante privada de un perfil utilizado en otros proyectos, duplicarlo.
 
 Las conexiones de versiones anteriores se conservan como compartidas y se agregan explícitamente a cada proyecto. Las declaradas en un proyecto antiguo confiable se conservan en ese proyecto al importarlo. Quitar una compartida del proyecto no la borra del catálogo ni del llavero; desde Configuración sin proyecto abierto se puede eliminar del catálogo completo. Los perfiles, las asociaciones locales y los recientes se guardan en las preferencias de esta Mac, y las contraseñas permanecen en el llavero. Cada proyecto conserva sus propias selecciones por archivo y sus recientes.
+
+### Pestañas de resultados
+
+Ejecutar el archivo SQL completo reemplaza los resultados anteriores sin fijar y conserva los fijados. La ejecución de una selección o sentencia mantiene los demás resultados. Con clic derecho en una pestaña o desde el menú de tres puntos se puede cerrar la actual, las demás, las de la izquierda o derecha, las sin fijar o todas. Las acciones manuales pueden cerrar pestañas fijadas; las que cargan o envían cambios no se cierran. Si hay ediciones pendientes, se confirman antes de cerrar el grupo y cancelar conserva todas las pestañas.
+
+### Edición con subconsultas y timeout SQL
+
+Los resultados de un SELECT exterior de una sola tabla pueden editarse cuando las subconsultas aparecen en los filtros WHERE y el resultado conserva su clave primaria completa (o una clave única no nullable si la tabla no tiene PK). Se usan los metadatos reales de MySQL y la clave original de cada fila. Las escrituras mantienen la lectura FOR UPDATE, la comparación de valores originales y el rollback si hay conflictos. JOIN, UNION, agrupaciones exteriores, tablas derivadas y proyecciones calculadas siguen siendo de solo lectura.
+
+El timeout inicial de la aplicación es **60 segundos por sentencia**. Se configura en Configuración → Apariencia → SQL; el proyecto puede establecer otro en su configuración. El control del editor guarda un ajuste propio para ese archivo y proyecto, recordándolo al volver a abrirlo. **Heredar** elimina ese ajuste para usar el del proyecto o, si no tiene, el de la aplicación. En un archivo completo cada sentencia tiene su propio límite, y una ejecución en curso conserva el límite con el que comenzó.

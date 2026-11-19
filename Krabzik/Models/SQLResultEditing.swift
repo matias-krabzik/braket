@@ -147,12 +147,8 @@ final class SQLResultDraft {
               Set(result.origins.map(\.column)).count == result.columns.count else {
             return "Solo lectura: hay expresiones, columnas binarias o varias tablas de origen."
         }
-        // Restrict editing to a direct SELECT. Fail closed for joins, subqueries and aggregate/grouped results.
-        let sql = result.sql.uppercased()
-        guard sql.range(of: #"^\s*SELECT\s"#, options: .regularExpression) != nil,
-              sql.range(of: #"\b(JOIN|UNION|GROUP|DISTINCT|HAVING|PROCEDURE|INTO)\b|\(\s*SELECT\b"#,
-                        options: .regularExpression) == nil else {
-            return "Solo lectura: usá un SELECT directo de una sola tabla."
+        guard SQLEditableSelect.matches(result.sql, table: table, noBackslashEscapes: result.noBackslashEscapes) else {
+            return "Solo lectura: usá un SELECT de una sola tabla, con subconsultas solo en los filtros WHERE."
         }
         let names = result.origins.map(\.column)
         guard let key = table.editingKey(in: Set(names)) else {
@@ -161,6 +157,7 @@ final class SQLResultDraft {
         let indices = key.compactMap { names.firstIndex(of: $0) }
         var seen = Set<[String]>()
         for row in result.rows {
+            guard row.count == result.columns.count else { return "Solo lectura: fila incompleta." }
             let identity = indices.compactMap { row[$0] }
             guard identity.count == indices.count, seen.insert(identity).inserted else {
                 return "Solo lectura: las filas no tienen una identidad única."

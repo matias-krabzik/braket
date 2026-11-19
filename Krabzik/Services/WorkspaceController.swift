@@ -21,6 +21,7 @@ import Observation
 @MainActor @Observable
 final class WorkspaceController {
     let settings: AppSettings
+    let sqlTimeouts: SQLTimeoutPreferences
     @ObservationIgnored let restoration: SessionRestoration
     private(set) var isRestoringSession = false
     @ObservationIgnored private(set) var requestedWorkspaceURL: URL?
@@ -129,6 +130,7 @@ final class WorkspaceController {
         agent = AgentController(defaults: defaults)
         recents = RecentProjectsStore(defaults: defaults)
         session = WorkspaceSession(trustStore: trust, errors: errors)
+        sqlTimeouts = SQLTimeoutPreferences(defaults: defaults, settings: self.settings, session: session)
         projects = ProjectLibrary(session: session, runner: runner)
         connections = ConnectionStore(session: session, database: database, defaults: defaults)
         files = FileCommands(session: session, docs: docs, defaults: defaults)
@@ -149,6 +151,10 @@ final class WorkspaceController {
             self.sidebarVisible = true
             self.newPixelArtDirectory = directory
             self.newPixelArtRequest = UUID()
+        }
+        docs.didChange = { [weak self] in
+            guard let self else { return }
+            for document in self.documents { self.sqlTimeouts.bind(document) }
         }
         files.onOpen = { [weak self] in
             self?.workflowVisible = false
@@ -400,12 +406,14 @@ final class WorkspaceController {
     }
 
     func adoptRelocatedWorkspace(_ updated: Workspace, from old: URL, to url: URL) {
+        sqlTimeouts.relocateProject(from: old, to: url)
         connections.relocateProject(from: old, to: url)
         openWorkspaceURLs = openWorkspaceURLs.map { $0 == old ? url : $0 }
         openWorkspaceModels.removeValue(forKey: old)
         openWorkspaceModels[url] = updated
         workspaceStates.removeValue(forKey: old)
         session.open(updated, at: url, trust: .trusted)
+        for document in documents { sqlTimeouts.bind(document) }
         connections.install(updated.connections)
         bridge.reset(for: updated, at: url, trust: .trusted)
         projects.warmUp(updated.projects)
@@ -507,7 +515,7 @@ final class WorkspaceController {
             database.resultsVisible = true
             return
         }
-        database.execute(document, connection: connection, queryOverride: text)
+        database.execute(document, connection: connection, queryOverride: text, replaceUnpinnedResults: true)
     }
 
     /// Cerrar una pestaña es de `FileCommands`; cancelar la consulta que esa pestaña
