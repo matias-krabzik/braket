@@ -43,6 +43,29 @@ final class SQLClientListTests: XCTestCase {
         }
     }
 
+    func testTextListsCombineWithScalarsWithoutReinterpretingTheirContents() throws {
+        let names = try capture(["JJ7QYT", "O'Brien", "001", "@PNR", "{{missing}}", "", "a\\b", "😀"],
+                                type: 253, name: "pnrs")
+        let ids = try capture(["3", "9007199254740993"])
+        let query = "SELECT * FROM requests WHERE pnr IN ({{pnrs}}) AND id IN ({{ids}}) AND mor = @AIRLINE_ID AND pnr <> @PNR"
+        for mode in [false, true] {
+            let lists = try SQLListStatement.expand(query, lists: ["pnrs": names, "ids": ids], noBackslashEscapes: mode)
+            let scalars = try SQLScalarExpansion(lists, noBackslashEscapes: mode)
+            XCTAssertEqual(scalars.names, ["@AIRLINE_ID", "@PNR"])
+            var result = SQLResult(statement: 0, line: 1)
+            result.rows = [["3", "O'Brien"]]
+            result.origins = [.init(database: "", table: "", column: "", mysqlType: 8),
+                              .init(database: "", table: "", column: "", mysqlType: 253)]
+            let expanded = try scalars.expand(result)
+            XCTAssertEqual(expanded, "SELECT * FROM requests WHERE pnr IN "
+                + "('JJ7QYT', 'O''Brien', '001', '@PNR', '{{missing}}', '', CONCAT('a', CHAR(92 USING utf8mb4), 'b'), '😀') "
+                + "AND id IN (3, 9007199254740993) AND mor = 3 AND pnr <> 'O''Brien'")
+            var script = SQLScript(expanded)
+            XCTAssertNotNil(try script.next(noBackslashEscapes: mode))
+            XCTAssertNil(try script.next(noBackslashEscapes: mode))
+        }
+    }
+
     func testCommentsStringsAndIdentifiersAreNeverExpandedAndInvalidReferencesFail() throws {
         let ids = try capture(["1"])
         let sql = "SELECT '{{missing}}', `{{other}}` FROM t WHERE id IN ({{ids}}) /* {{ignored}} */ -- {{comment}}"

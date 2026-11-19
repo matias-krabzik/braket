@@ -232,13 +232,29 @@ actor MySQLClient {
             guard statementNumber <= 200 else { throw DatabaseFailure("Ejecutá como máximo 200 sentencias por vez.") }
             guard resultCount < 200 else { throw DatabaseFailure("Se alcanzó el límite de 200 resultados por ejecución.") }
             let noBackslash = session.flags.contains(.SERVER_STATUS_NO_BACKSLASH_ESCAPES)
+            let timeout = Task {
+                do { try await Task.sleep(for: .seconds(max(1, min(timeoutSeconds, 3600)))) }
+                catch { return }
+                await self.expire(operation)
+            }
+            defer { timeout.cancel() }
             let listStatement: SQLListStatement?
-            let expanded: String
+            var expanded: String
             do {
                 listStatement = try SQLListStatement.parse(statement.text, noBackslashEscapes: noBackslash)
                 if let listStatement { await clientLists.remove(listStatement.name, scope: listScope) }
                 expanded = try SQLListStatement.expand(listStatement?.query ?? statement.text,
                                                        lists: await clientLists.snapshot(listScope), noBackslashEscapes: noBackslash)
+                let scalars = try SQLScalarExpansion(expanded, noBackslashEscapes: noBackslash)
+                if let query = scalars.query {
+                    let values = try await read(query, on: session.connection, configuration: configuration,
+                                                history: history, source: "Variables")
+                    if timedOut.contains(operation) {
+                        throw DatabaseFailure("La consulta superó el límite de \(timeoutSeconds) segundos.")
+                    }
+                    if cancelled.contains(operation) || Task.isCancelled { throw CancellationError() }
+                    expanded = try scalars.expand(values)
+                }
             } catch {
                 var failure = SQLResult(statement: statementNumber, line: statement.line)
                 failure.sql = statement.text
@@ -265,11 +281,6 @@ actor MySQLClient {
             }
             if let pagination { pending.page = SQLPage(index: pagination.index) }
             try await onStatement(pending)
-            let timeout = Task {
-                do { try await Task.sleep(for: .seconds(max(1, min(timeoutSeconds, 3600)))) }
-                catch { return }
-                await self.expire(operation)
-            }
             let command = MySQLTextCommand(sql: pagination?.query ?? expanded, statement: statementNumber, line: statement.line,
                                            byteLimit: min(remainingBytes, 4_000_000), resultLimit: 200 - resultCount,
                                            rowLimit: listStatement == nil ? 1000 : 10_000)

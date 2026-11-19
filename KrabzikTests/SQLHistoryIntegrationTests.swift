@@ -37,6 +37,17 @@ final class SQLHistoryIntegrationTests: XCTestCase {
             XCTAssertTrue(database.resultsVisible)
             XCTAssertEqual(document.sqlExecution.results.count, 1)
             XCTAssertEqual(document.sqlExecution.selectedResult?.rows, [["10"]])
+            let script = "SET @PNR = 'JJ7QYT'; "
+                + "SET @AIRLINE_ID = (select id from Airlines where code = 'F9'); "
+                + "SELECT * FROM ReservationsRequests WHERE pnr = @PNR and mor = @AIRLINE_ID;"
+            database.execute(document, connection: config, queryOverride: script)
+            try await settle()
+            XCTAssertEqual(document.sqlExecution.selectedResult?.rows, [["JJ7QYT", "3"]])
+            let mixed = "SET LIST pnrs = (SELECT pnr FROM ReservationsRequests WHERE mor = @AIRLINE_ID); "
+                + "SELECT * FROM ReservationsRequests WHERE pnr IN ({{pnrs}}) AND pnr <> @PNR AND mor = @AIRLINE_ID;"
+            database.execute(document, connection: config, queryOverride: mixed)
+            try await settle()
+            XCTAssertEqual(document.sqlExecution.selectedResult?.rows, [["mixed query succeeded"]])
             let disconnected = await database.disconnect(config)
             XCTAssertTrue(disconnected)
             XCTAssertTrue(document.setNotes.isEmpty)
@@ -67,6 +78,16 @@ final class SQLHistoryIntegrationTests: XCTestCase {
             config.tls = .disabled
             _ = try await client.execute("SELECT 1; UPDATE test SET a = 2", startingLine: 1, configuration: config,
                                          password: "", operation: UUID()) { _ in }
+            let mixed = "SET @PNR = 'JJ7QYT'; SET @AIRLINE_ID = 3; "
+                + "SET LIST pnrs = (SELECT pnr FROM ReservationsRequests WHERE mor = @AIRLINE_ID); "
+                + "SELECT * FROM ReservationsRequests WHERE pnr IN ({{pnrs}}) AND pnr <> @PNR AND mor = @AIRLINE_ID"
+            _ = try await client.execute(mixed, startingLine: 1, configuration: config,
+                                         password: "", operation: UUID(), pageIndex: 0) { _ in }
+            let logged = try await store.page(search: "ReservationsRequests")
+            let finalSQL = "SELECT * FROM ReservationsRequests WHERE pnr IN ('O''Brien @PNR {{ignored}}') "
+                + "AND pnr <> 'JJ7QYT' AND mor = 3\nLIMIT 101 OFFSET 0"
+            XCTAssertTrue(logged.contains { $0.sql.trimmingCharacters(in: .whitespacesAndNewlines) == finalSQL && $0.status == "success" },
+                          "El historial debe registrar exactamente el SQL expandido enviado al servidor: \(logged.map(\.sql))")
             do {
                 _ = try await client.execute("BAD QUERY; SELECT 'never sent'", startingLine: 1, configuration: config,
                                              password: "", operation: UUID()) { _ in }
@@ -149,8 +170,19 @@ private final class HistoryMySQLHandler: ChannelInboundHandler {
             if sql == "SET @limite = 5 * 2" {
                 variable = "10"
                 send([0, 0, 0, 2, 0, 0, 0], sequence: 1, context: context)
-            } else if sql.hasPrefix("SELECT @limite") || sql.hasPrefix("SELECT LEFT(CAST(@limite") {
+            } else if sql.hasPrefix("SELECT '10'") || sql.hasPrefix("SELECT @limite") || sql.hasPrefix("SELECT LEFT(CAST(@limite") {
                 result([variable], context: context)
+            } else if sql == "SELECT @AIRLINE_ID" {
+                result(["3"], types: [8], context: context)
+            } else if sql == "SELECT pnr FROM ReservationsRequests WHERE mor = 3" {
+                result(["O'Brien @PNR {{ignored}}"], context: context)
+            } else if sql.hasPrefix("SELECT * FROM ReservationsRequests WHERE pnr IN ('O''Brien @PNR {{ignored}}') "
+                                   + "AND pnr <> 'JJ7QYT' AND mor = 3") {
+                result(["mixed query succeeded"], context: context)
+            } else if sql == "SELECT @PNR, @AIRLINE_ID" {
+                result(["JJ7QYT", "3"], types: [253, 8], context: context)
+            } else if sql.hasPrefix("SELECT * FROM ReservationsRequests WHERE pnr = 'JJ7QYT' and mor = 3") {
+                result(["JJ7QYT", "3"], context: context)
             } else if sql == "BAD QUERY" {
                 send([0xFF, 0x28, 0x04] + Array("#42000Syntax error".utf8), sequence: 1, context: context)
             } else if sql.hasPrefix("SELECT") || sql.hasPrefix("SHOW") {
@@ -162,11 +194,11 @@ private final class HistoryMySQLHandler: ChannelInboundHandler {
         input.discardReadBytes()
     }
 
-    private func result(_ values: [String?], context: ChannelHandlerContext) {
+    private func result(_ values: [String?], types: [UInt8]? = nil, context: ChannelHandlerContext) {
         send([UInt8(values.count)], sequence: 1, context: context)
         for (index, _) in values.enumerated() {
             let column = ["def", "demo", "", "", "value\(index)", ""].flatMap(text)
-                + [12, 45, 0, 0, 0, 1, 0, 253, 0, 0, 0, 0, 0]
+                + [12, 45, 0, 0, 0, 1, 0, types?[index] ?? 253, 0, 0, 0, 0, 0]
             send(column, sequence: UInt8(index + 2), context: context)
         }
         send([0xFE, 0, 0, 2, 0], sequence: UInt8(values.count + 2), context: context)
