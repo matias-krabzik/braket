@@ -198,7 +198,8 @@ private struct SettingsCommands: Commands {
         checkingTermination = true
         let lastState = controller.captureSessionState()
         Task {
-            let allowed = await controller.prepareToQuit()
+            let settingsClosed = await controller.settingsClose.prepareToClose()
+            let allowed = settingsClosed ? await controller.prepareToQuit() : false
             if allowed {
                 controller.saveSessionState(lastState)
                 controller.runner.terminateImmediately()

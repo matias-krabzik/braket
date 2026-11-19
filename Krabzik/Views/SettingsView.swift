@@ -138,6 +138,10 @@ struct SettingsView: View {
         }
         .frame(width: 930, height: 700)
         .background(Theme.background)
+        .background(SettingsTerminationBridge(coordinator: controller.settingsClose,
+                                              hasChanges: { hasChanges }, save: apply,
+                                              discard: { draft = GeneralDraft(settings: settings) },
+                                              dismiss: { dismiss() }))
         .tint(Theme.accent)
         .preferredColorScheme(Theme.colorScheme)
     }

@@ -79,5 +79,8 @@ requiere una primera instalación separada; no mezclar los dos actualizadores.
 Búsqueda automática optativa, sin perfil del sistema ni instalaciones silenciosas.
 El reinicio de Sparkle pasa por applicationShouldTerminate: conserva el diálogo
 de documentos sin guardar, la detención de procesos y la cancelación del cierre.
+Configuración permite que el delegado de la app resuelva el cierre: ofrece guardar,
+descartar o cancelar su borrador y espera a que termine de cerrarse su modal antes
+de continuar. Los editores de conexión que tenga abiertos conservan su bloqueo.
 La app debe posponer o cancelar el reinicio si el usuario cancela ese flujo.
 Un catálogo vacío significa que aún no hay versiones nativas publicadas.

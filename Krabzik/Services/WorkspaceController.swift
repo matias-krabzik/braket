@@ -40,6 +40,7 @@ final class WorkspaceController {
     var commandProject: CodeProject?
     var closingProjectURL: URL?
     var showingProjectWizard = false
+    let settingsClose = SettingsCloseCoordinator()
     var showingSettings = false
     var showingProjectSettings = false
     let runner = ProcessRunner()
