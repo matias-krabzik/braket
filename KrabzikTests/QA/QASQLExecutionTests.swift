@@ -12,6 +12,7 @@ final class QASQLExecutionTests: XCTestCase {
     private func script(_ qa: QAHarness, _ text: String, connection: DatabaseConnection?) async throws -> EditorDocument {
         let url = try qa.makeProject(name: "Tienda")
         await qa.openProject(url)
+        if let connection { try qa.controller.connections.addShared(connection) }
         return try await qa.openScript(text, named: "consulta.sql", connection: connection)
     }
 

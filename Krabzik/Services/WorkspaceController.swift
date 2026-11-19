@@ -400,6 +400,7 @@ final class WorkspaceController {
     }
 
     func adoptRelocatedWorkspace(_ updated: Workspace, from old: URL, to url: URL) {
+        connections.relocateProject(from: old, to: url)
         openWorkspaceURLs = openWorkspaceURLs.map { $0 == old ? url : $0 }
         openWorkspaceModels.removeValue(forKey: old)
         openWorkspaceModels[url] = updated

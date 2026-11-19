@@ -88,15 +88,17 @@ final class QAConnectionTests: XCTestCase {
     }
 
     /// CON-05
-    func testASavedProfileSurvivesAProjectChange() async throws {
+    func testASavedProfileStaysInItsOwnProject() async throws {
         let qa = try QAHarness(self)
         let first = try qa.makeProject(name: "Uno")
         let second = try qa.makeProject(name: "Dos")
         await qa.openProject(first)
         let profile = try await qa.addConnection(QAFixtures.connection("Compartida"))
         await qa.openProject(second)
-        XCTAssertTrue(qa.controller.connections.profiles.contains { $0.id == profile.id },
-                      "el catálogo es global, no del proyecto")
+        XCTAssertFalse(qa.controller.connections.profiles.contains { $0.id == profile.id })
+        XCTAssertFalse(qa.controller.connections.sharedProfiles.contains { $0.id == profile.id })
+        await qa.openProject(first)
+        XCTAssertTrue(qa.controller.connections.profiles.contains { $0.id == profile.id })
     }
 
     /// CON-06
@@ -214,9 +216,9 @@ final class QAConnectionTests: XCTestCase {
         theirs.host = "10.0.0.9"
         let url = try qa.makeProject(name: "Ajeno", connections: [theirs])
         await qa.openProject(url)
-        await qa.settle(until: { qa.controller.connections.profiles.count == 2 })
-        XCTAssertEqual(qa.controller.connections.profiles.count, 2)
-        let kept = try XCTUnwrap(qa.controller.connections.profiles.first { $0.id == mine.id })
+        XCTAssertEqual(qa.controller.connections.profiles.count, 1)
+        XCTAssertEqual(qa.controller.connections.allProfiles.count, 2)
+        let kept = try XCTUnwrap(qa.controller.connections.allProfiles.first { $0.id == mine.id })
         XCTAssertEqual(kept.name, "Mía", "el perfil que ya estaba no se modifica")
         XCTAssertEqual(kept.host, mine.host)
     }

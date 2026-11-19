@@ -273,11 +273,15 @@ private struct SQLResultToolbar: View {
     private var result: SQLResult { draft.result }
     private var busy: Bool {
         execution.isRunning || draft.sending || controller.isReadOnly
-            || result.connection.map { controller.database.state($0.id).busy } == true
+            || result.connection.map { connection in
+                controller.database.state(connection.id).busy
+                    || !controller.connections.profiles.contains { $0.id == connection.id }
+            } != false
     }
 
     private func run(page: Int? = nil) {
-        guard let document = controller.sqlResultsDocument, let connection = result.connection else { return }
+        guard let document = controller.sqlResultsDocument, let id = result.connection?.id,
+              let connection = controller.connections.profiles.first(where: { $0.id == id }) else { return }
         controller.database.execute(document, connection: connection, queryOverride: result.sql, databaseOverride: result.database,
                                     pageIndex: page ?? 0, targetResultID: page == nil ? nil : result.id,
                                     startingLineOverride: result.line)

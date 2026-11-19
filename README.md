@@ -238,3 +238,9 @@ No se garantiza compatibilidad con servidores derivados de MySQL ni con versione
 El editor evita propagar cada pulsación por SwiftUI. Los registros y resultados tienen límites; no hay sondeos periódicos en reposo. El cliente MySQL crea un único hilo de eventos cuando se usa por primera vez y mantiene una conexión por perfil utilizado. Cada proceso de código tiene su propio grupo para detener también a sus hijos.
 
 Las versiones de las dependencias están fijadas en `Package.resolved`. Las licencias se incluyen en `Krabzik/Resources/ThirdPartyNotices.txt` y dentro de la app. Para regenerar el proyecto Xcode después de agregar archivos Swift: `python3 scripts/generate_project.py`.
+
+### Conexiones por proyecto
+
+Las conexiones nuevas pertenecen al proyecto abierto. En **Administrar conexiones → Compartidas** se pueden buscar y agregar perfiles reutilizables sin volver a ingresar la contraseña. La opción **Compartir con otros proyectos** de la edición habilita esa reutilización; editar un perfil compartido actualiza los proyectos que lo usan. Para una variante privada de un perfil utilizado en otros proyectos, duplicarlo.
+
+Las conexiones de versiones anteriores se conservan como compartidas y se agregan explícitamente a cada proyecto. Las declaradas en un proyecto antiguo confiable se conservan en ese proyecto al importarlo. Quitar una compartida del proyecto no la borra del catálogo ni del llavero; desde Configuración sin proyecto abierto se puede eliminar del catálogo completo. Los perfiles, las asociaciones locales y los recientes se guardan en las preferencias de esta Mac, y las contraseñas permanecen en el llavero. Cada proyecto conserva sus propias selecciones por archivo y sus recientes.

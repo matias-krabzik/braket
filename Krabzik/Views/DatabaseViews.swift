@@ -8,6 +8,8 @@ struct ConnectionsSettingsView: View {
     @State private var editing: DatabaseConnection?
     @State private var removing: DatabaseConnection?
     @State private var selectionHost = UUID()
+    @State private var showingShared = false
+    @State private var sharedSearch = ""
 
     private var connectedCount: Int {
         controller.connections.profiles.filter { controller.database.states[$0.id]?.status == .connected }.count
@@ -18,10 +20,15 @@ struct ConnectionsSettingsView: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Conexiones").font(.title2.weight(.semibold))
-                    Text("Compartidas entre todos tus proyectos")
+                    Text(controller.connections.hasProject ? "Conexiones de este proyecto" : "Catálogo de conexiones compartidas")
                         .font(.callout).foregroundStyle(.secondary)
                 }
                 Spacer()
+                if controller.connections.hasProject {
+                    Button { showingShared.toggle() } label: { Label("Compartidas", systemImage: "person.2") }
+                        .help("Buscar y agregar una conexión compartida a este proyecto")
+                        .qaControl("connections.shared", title: "Compartidas") { showingShared.toggle() }
+                }
                 Button { editing = DatabaseConnection() } label: {
                     Label("Nueva conexión", systemImage: "plus")
                 }
@@ -34,20 +41,22 @@ struct ConnectionsSettingsView: View {
                 Text("MySQL · TCP/IP")
             }.font(.caption).foregroundStyle(.secondary).padding(.horizontal, 20).padding(.bottom, 16)
             Divider()
-            ScrollView {
+            if showingShared {
+                sharedCatalog
+            } else { ScrollView {
                 LazyVStack(spacing: 12) {
                     if controller.connections.profiles.isEmpty {
                         ContentUnavailableView("Tus bases de datos, en un solo lugar", systemImage: "externaldrive",
-                                               description: Text("Agregá una conexión y elegila desde cualquier script SQL."))
+                                               description: Text("Creá una conexión o agregá una desde Compartidas."))
                     }
                     ForEach(controller.connections.profiles) { connection in
                         connectionCard(connection)
                     }
                 }.padding(20)
-            }
+            } }
             Divider()
             HStack {
-                Text("Cada script elige su conexión. Abrir otra no cierra las demás.")
+                Text("Cada proyecto elige sus conexiones. Las contraseñas se conservan en el llavero.")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 if showsDone { Button("Listo") { dismiss() }.keyboardShortcut(.cancelAction) }
@@ -77,8 +86,55 @@ struct ConnectionsSettingsView: View {
                     }
                 }
         } message: {
-            Text("Se quitará de todos los proyectos. Los scripts que la usan quedarán sin conexión asignada.")
+            Text(controller.connections.hasProject
+                 ? "Se quitará de este proyecto. Las conexiones compartidas seguirán disponibles para los demás."
+                 : "Se eliminará del catálogo y de todos los proyectos que la usan.")
         }
+    }
+
+    private var sharedCatalog: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Agregar desde Compartidas").font(.headline)
+                Spacer()
+                Button("Volver") { showingShared = false }
+            }
+            TextField("Buscar por nombre, servidor o usuario…", text: $sharedSearch).textFieldStyle(.roundedBorder)
+                .accessibilityLabel("Buscar conexiones compartidas")
+            ScrollView {
+                LazyVStack(spacing: 8) {
+                    ForEach(controller.connections.sharedProfiles.filter {
+                        sharedSearch.isEmpty || $0.name.localizedStandardContains(sharedSearch)
+                            || $0.host.localizedStandardContains(sharedSearch) || $0.username.localizedStandardContains(sharedSearch)
+                    }) { connection in
+                        HStack {
+                            Image(systemName: "externaldrive")
+                            VStack(alignment: .leading) {
+                                Text(connection.name).fontWeight(.medium)
+                                Text(connection.destination).font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            let added = controller.connections.profiles.contains { $0.id == connection.id }
+                            Button(added ? "Agregada" : "Agregar") {
+                                do { try controller.connections.addShared(connection) }
+                                catch { controller.errors.report(error) }
+                            }.disabled(added || controller.isReadOnly)
+                                .help("Usar esta conexión en el proyecto; conserva la contraseña del llavero")
+                                .qaControl("connections.shared.add." + connection.name, title: added ? "Agregada" : "Agregar",
+                                           enabled: !added && !controller.isReadOnly) {
+                                    do { try controller.connections.addShared(connection) }
+                                    catch { controller.errors.report(error) }
+                                }
+                        }.padding(12).background(Theme.sidebar, in: RoundedRectangle(cornerRadius: 6))
+                    }
+                    if controller.connections.sharedProfiles.isEmpty {
+                        Text("No hay conexiones compartidas. Podés compartir una desde su edición.").foregroundStyle(.secondary)
+                    }
+                }
+            }
+            Text("Editar una compartida actualiza su perfil en todos los proyectos que la usan.")
+                .font(.caption).foregroundStyle(.secondary)
+        }.padding(20)
     }
 
     private func connectionCard(_ connection: DatabaseConnection) -> some View {
@@ -89,6 +145,8 @@ struct ConnectionsSettingsView: View {
                     .frame(width: 38, height: 38).background(Theme.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 9))
                 VStack(alignment: .leading, spacing: 4) {
                     Text(connection.name).font(.headline)
+                    Text(controller.connections.isShared(connection) ? "Compartida" : "Solo este proyecto")
+                        .font(.caption2).foregroundStyle(.secondary)
                     Text(state.destination(for: connection)).font(.caption).foregroundStyle(.secondary)
                         .lineLimit(1).truncationMode(.middle).help(state.destination(for: connection))
                 }
@@ -174,7 +232,15 @@ struct ConnectionSheet: View {
     @State private var busy = false
     @State private var message: String?
     @State private var succeeded = false
+    @State private var shared = false
     let controller: WorkspaceController
+
+    init(connection: DatabaseConnection, controller: WorkspaceController) {
+        self.controller = controller
+        _connection = State(initialValue: connection)
+        _shared = State(initialValue: controller.connections.allProfiles.contains { $0.id == connection.id }
+            ? controller.connections.isShared(connection) : !controller.connections.hasProject)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -215,6 +281,18 @@ struct ConnectionSheet: View {
                     }
                 }
             }.textFieldStyle(.roundedBorder).disabled(busy)
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle("Compartir con otros proyectos", isOn: $shared)
+                    .disabled(busy || !controller.connections.hasProject
+                              || controller.connections.otherProjectCount(connection) > 0)
+                Text(shared
+                     ? "Disponible en Compartidas. Los cambios se reflejan en los proyectos que la agregaron."
+                     : "Solo se mostrará en este proyecto.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if controller.connections.otherProjectCount(connection) > 0 {
+                    Text("Para crear una versión privada, duplicá la conexión.").font(.caption).foregroundStyle(.secondary)
+                }
+            }
             DisclosureGroup("Parámetros avanzados") {
                 Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
                     row("Timeout (segundos)") {
@@ -340,7 +418,7 @@ struct ConnectionSheet: View {
         Task {
             defer { busy = false }
             do {
-                try await controller.connections.save(connection, password: password)
+                try await controller.connections.save(connection, password: password, shared: shared)
                 dismiss()
             }
             catch {

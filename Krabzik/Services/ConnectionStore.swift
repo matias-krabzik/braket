@@ -1,7 +1,8 @@
 import Foundation
 import Observation
 
-/// Catálogo global de perfiles. Las contraseñas permanecen en el llavero.
+/// Perfiles locales con pertenencia por proyecto y un catálogo optativo de compartidas.
+/// Las contraseñas permanecen en el llavero; los proyectos no importan perfiles ajenos automáticamente.
 @MainActor @Observable
 final class ConnectionStore {
     static let profilesKey = "mysql.globalConnections.v1"
@@ -10,40 +11,97 @@ final class ConnectionStore {
     private let session: WorkspaceSession
     private let database: DatabaseController
     private let defaults: UserDefaults
-    private(set) var profiles: [DatabaseConnection]
+    static let catalogKey = "mysql.projectConnections.v2"
+    private struct Placement: Codable {
+        var shared: Bool
+        var projects: Set<String>
+    }
+    private struct Catalog: Codable {
+        var profiles: [DatabaseConnection]
+        var placements: [String: Placement]
+        var imports: [String: UUID]
+    }
+    private(set) var allProfiles: [DatabaseConnection]
+    private var placements: [String: Placement]
+    private var imports: [String: UUID]
+    private let loadFailed: Bool
+    private var recentScopes: [String: [String]]
+    private var scope: String { session.url?.standardizedFileURL.path ?? "__standalone__" }
+    var hasProject: Bool { session.url != nil }
+    var profiles: [DatabaseConnection] {
+        allProfiles.filter { connection in
+            if !hasProject { return isShared(connection) }
+            return placements[connection.id.uuidString]?.projects.contains(scope) == true
+        }
+    }
+    var sharedProfiles: [DatabaseConnection] { allProfiles.filter { isShared($0) } }
+    var availableShared: [DatabaseConnection] {
+        let installed = Set(profiles.map(\.id))
+        return sharedProfiles.filter { !installed.contains($0.id) }
+    }
+    func isShared(_ connection: DatabaseConnection) -> Bool { placements[connection.id.uuidString]?.shared ?? true }
+    func otherProjectCount(_ connection: DatabaseConnection) -> Int {
+        placements[connection.id.uuidString]?.projects.filter { $0 != scope && $0 != "__standalone__" }.count ?? 0
+    }
     private var selections: [String: String]
-    private(set) var recentIDs: [UUID]
+    var recentIDs: [UUID] {
+        (recentScopes[scope] ?? defaults.stringArray(forKey: Self.recentKey) ?? []).compactMap(UUID.init(uuidString:))
+    }
     private var migrated: Set<String>
 
     init(session: WorkspaceSession, database: DatabaseController, defaults: UserDefaults = .standard) {
         self.session = session
         self.database = database
         self.defaults = defaults
-        profiles = defaults.data(forKey: Self.profilesKey)
-            .flatMap { try? JSONDecoder().decode([DatabaseConnection].self, from: $0) } ?? []
+        var loadError: Error?
+        if let data = defaults.data(forKey: Self.catalogKey) {
+            do {
+                let catalog = try JSONDecoder().decode(Catalog.self, from: data)
+                allProfiles = catalog.profiles
+                placements = catalog.placements
+                imports = catalog.imports
+            } catch {
+                allProfiles = []
+                placements = [:]
+                imports = [:]
+                loadError = error
+            }
+        } else {
+            allProfiles = defaults.data(forKey: Self.profilesKey)
+                .flatMap { try? JSONDecoder().decode([DatabaseConnection].self, from: $0) } ?? []
+            placements = [:]
+            imports = [:]
+        }
         selections = defaults.dictionary(forKey: Self.selectionsKey) as? [String: String] ?? [:]
-        recentIDs = (defaults.stringArray(forKey: Self.recentKey) ?? []).compactMap(UUID.init(uuidString:))
+        recentScopes = defaults.dictionary(forKey: "mysql.projectRecents.v2") as? [String: [String]] ?? [:]
         migrated = Set(defaults.stringArray(forKey: "mysql.migratedProfiles.v1") ?? [])
-        for connection in profiles { _ = database.state(connection.id) }
+        loadFailed = loadError != nil
+        if let loadError { session.errors.report(loadError) }
+        for connection in allProfiles { _ = database.state(connection.id) }
     }
 
-    /// Cada archivo conserva una selección independiente, compartida entre proyectos.
+    /// Cada proyecto conserva su selección y sus recientes, incluso para el mismo archivo.
+    private func selectionKey(_ url: URL) -> String { scope + "|" + url.standardizedFileURL.path }
     func relocateScript(from source: URL, to destination: URL) {
         let old = source.standardizedFileURL.path
         let new = destination.standardizedFileURL.path
-        if let selection = selections.removeValue(forKey: old) { selections[new] = selection }
+        for key in Array(selections.keys) where key == old || key.hasSuffix("|" + old) {
+            let value = selections.removeValue(forKey: key)
+            selections[String(key.dropLast(old.count)) + new] = value
+        }
         defaults.set(selections, forKey: Self.selectionsKey)
     }
 
     func persistDraftSelection(_ document: EditorDocument) {
         guard !document.isDraft, let id = document.draftConnectionID else { return }
-        selections[document.url.standardizedFileURL.path] = id.uuidString
+        selections[selectionKey(document.url)] = id.uuidString
         document.draftConnectionID = nil
         defaults.set(selections, forKey: Self.selectionsKey)
     }
 
     func selected(for document: EditorDocument) -> DatabaseConnection? {
-        guard let id = document.draftConnectionID?.uuidString ?? selections[document.url.standardizedFileURL.path] else { return nil }
+        guard let id = document.draftConnectionID?.uuidString ?? selections[selectionKey(document.url)]
+            ?? selections[document.url.standardizedFileURL.path] else { return nil }
         return profiles.first { $0.id.uuidString == id }
     }
 
@@ -62,15 +120,15 @@ final class ConnectionStore {
             document.clearVariableNotes(connectionID: previous.id)
         }
         if let id {
-            recentIDs.removeAll { $0 == id }
-            recentIDs.insert(id, at: 0)
-            recentIDs = Array(recentIDs.prefix(3))
-            defaults.set(recentIDs.map(\.uuidString), forKey: Self.recentKey)
+            var recent = recentIDs.filter { $0 != id }
+            recent.insert(id, at: 0)
+            recentScopes[scope] = Array(recent.prefix(3)).map(\.uuidString)
+            defaults.set(recentScopes, forKey: "mysql.projectRecents.v2")
         }
         if document.isDraft { document.draftConnectionID = id
             return }
         document.draftConnectionID = nil
-        selections[document.url.standardizedFileURL.path] = id?.uuidString
+        selections[selectionKey(document.url)] = id?.uuidString ?? ""
         defaults.set(selections, forKey: Self.selectionsKey)
     }
 
@@ -85,20 +143,31 @@ final class ConnectionStore {
         }
         for original in connections {
             let key = url.standardizedFileURL.path + "|" + original.id.uuidString
-            guard !migrated.contains(key) else { continue }
+            guard imports[key] == nil else { continue }
             do {
                 var connection = try original.validated()
-                if let existing = profiles.first(where: { $0.id == original.id }), existing != original {
+                var updated = allProfiles
+                if migrated.contains(key) {
+                    guard let existing = allProfiles.first(where: { candidate in
+                        var sameID = candidate
+                        sameID.id = original.id
+                        return sameID == original
+                    }) else { continue }
+                    connection = existing
+                } else if let existing = allProfiles.first(where: { $0.id == original.id }), existing != original {
                     connection.id = UUID()
                     let password = try CredentialStore.read(for: original)
                     if !password.isEmpty { try CredentialStore.save(password, for: connection) }
                 }
-                if !profiles.contains(where: { $0.id == connection.id }) {
-                    var updated = profiles
-                    updated.append(connection)
-                    try persist(updated)
-                    _ = database.state(connection.id)
-                }
+                if !updated.contains(where: { $0.id == connection.id }) { updated.append(connection) }
+                var placement = placements[connection.id.uuidString] ?? Placement(shared: true, projects: [])
+                placement.projects.insert(scope)
+                var next = placements
+                next[connection.id.uuidString] = placement
+                var mapped = imports
+                mapped[key] = connection.id
+                try persist(updated, placements: next, imports: mapped)
+                _ = database.state(connection.id)
                 migrated.insert(key)
                 defaults.set(Array(migrated), forKey: "mysql.migratedProfiles.v1")
             } catch { session.errors.report(error) }
@@ -123,7 +192,9 @@ final class ConnectionStore {
             || previous.tlsClientKeyPath != connection.tlsClientKeyPath
     }
 
-    func save(_ requested: DatabaseConnection, password: String) async throws {
+    func save(_ requested: DatabaseConnection, password: String, shared: Bool? = nil) async throws {
+        guard !session.isReadOnly else { throw DatabaseFailure("El proyecto está en solo lectura.") }
+        let owner = scope
         QAProbe.action("connection.save.request", ["name": requested.name,
                                                    "host": requested.host + ":" + String(requested.port),
                                                    "user": requested.username,
@@ -136,7 +207,19 @@ final class ConnectionStore {
             QAProbe.failure("connection.save.rejected", AppError.describe(error))
             throw error
         }
-        let previous = profiles.first { $0.id == connection.id }
+        let previous = allProfiles.first { $0.id == connection.id }
+        guard previous == nil || profiles.contains(where: { $0.id == connection.id }) else {
+            throw DatabaseFailure("Agregá la conexión desde Compartidas antes de editarla.")
+        }
+        var placement = placements[connection.id.uuidString]
+            ?? Placement(shared: previous != nil || !hasProject, projects: [])
+        placement.shared = !hasProject || (shared ?? placement.shared)
+        if !placement.shared && placement.projects.contains(where: { $0 != owner && $0 != "__standalone__" }) {
+            throw DatabaseFailure("La conexión se usa en otros proyectos. Duplicala para crear una copia privada.")
+        }
+        placement.projects.insert(owner)
+        var next = placements
+        next[connection.id.uuidString] = placement
         let oldPassword = try CredentialStore.read(for: connection)
         let keepSession = previous?.configurationWithoutTint == connection.configurationWithoutTint && oldPassword == password
         if let previous, !keepSession {
@@ -145,14 +228,21 @@ final class ConnectionStore {
                 throw DatabaseFailure("La conexión está ocupada o se canceló el cambio.")
             }
         }
-        var updated = profiles
+        // El proyecto puede cambiar mientras se espera el cierre de una sesión.
+        // Combinar con la pertenencia más reciente, conservando el proyecto que inició la edición.
+        var latest = placements[connection.id.uuidString] ?? placement
+        latest.shared = placement.shared
+        latest.projects.insert(owner)
+        next = placements
+        next[connection.id.uuidString] = latest
+        var updated = allProfiles
         if let index = updated.firstIndex(where: { $0.id == connection.id }) { updated[index] = connection }
         else { updated.append(connection) }
         if keepSession {
-            try persist(updated)
+            try persist(updated, placements: next)
         } else {
             try CredentialStore.save(password, for: connection)
-            do { try persist(updated) }
+            do { try persist(updated, placements: next) }
             catch {
                 try? CredentialStore.save(oldPassword, for: connection)
                 throw error
@@ -165,32 +255,83 @@ final class ConnectionStore {
         QAProbe.state("state.connections", ["profiles": QAField.count(profiles.count)])
     }
 
+    func addShared(_ connection: DatabaseConnection) throws {
+        guard !session.isReadOnly, isShared(connection), allProfiles.contains(where: { $0.id == connection.id }) else {
+            throw DatabaseFailure("No se puede agregar esta conexión compartida.")
+        }
+        var next = placements
+        var placement = next[connection.id.uuidString] ?? Placement(shared: true, projects: [])
+        placement.projects.insert(scope)
+        next[connection.id.uuidString] = placement
+        try persist(allProfiles, placements: next)
+        _ = database.state(connection.id)
+    }
+
+    func relocateProject(from source: URL, to destination: URL) {
+        let old = source.standardizedFileURL.path, new = destination.standardizedFileURL.path
+        var next = placements
+        for id in next.keys where next[id]?.projects.contains(old) == true {
+            next[id]?.projects.remove(old)
+            next[id]?.projects.insert(new)
+        }
+        var mapped = imports
+        for key in Array(mapped.keys) where key.hasPrefix(old + "|") {
+            mapped[new + key.dropFirst(old.count)] = mapped.removeValue(forKey: key)
+        }
+        do { try persist(allProfiles, placements: next, imports: mapped) }
+        catch { session.errors.report(error)
+            return }
+        for key in Array(selections.keys) where key.hasPrefix(old + "|") {
+            selections[new + key.dropFirst(old.count)] = selections.removeValue(forKey: key)
+        }
+        defaults.set(selections, forKey: Self.selectionsKey)
+        recentScopes[new] = recentScopes.removeValue(forKey: old)
+        defaults.set(recentScopes, forKey: "mysql.projectRecents.v2")
+    }
+
     func remove(_ connection: DatabaseConnection) {
+        guard !session.isReadOnly, profiles.contains(where: { $0.id == connection.id }) else { return }
+        let owner = scope, global = !hasProject
         QAProbe.action("connection.remove.request", ["name": connection.name])
         Task {
             guard await database.disconnect(connection) else {
                 QAProbe.action("connection.remove.cancelled", ["name": connection.name])
                 return
             }
-            do { try persist(profiles.filter { $0.id != connection.id }) }
+            var next = placements
+            var placement = next[connection.id.uuidString] ?? Placement(shared: true, projects: [])
+            placement.projects.remove(owner)
+            let delete = global || (!placement.shared && placement.projects.isEmpty)
+            next[connection.id.uuidString] = delete ? nil : placement
+            do { try persist(delete ? allProfiles.filter { $0.id != connection.id } : allProfiles, placements: next) }
             catch { session.errors.report(error)
                 return }
-            forget(connection)
-            database.states.removeValue(forKey: connection.id)
-            selections = selections.filter { $0.value != connection.id.uuidString }
+            if delete { forget(connection)
+                database.states.removeValue(forKey: connection.id) }
+            // Tombstones impiden restaurar una selección global anterior al volver a agregarla.
+            for key in Array(selections.keys) where selections[key] == connection.id.uuidString {
+                if delete || key.hasPrefix(owner + "|") { selections[key] = "" }
+                else if !key.contains("|") { selections[owner + "|" + key] = "" }
+            }
             defaults.set(selections, forKey: Self.selectionsKey)
-            recentIDs.removeAll { $0 == connection.id }
-            defaults.set(recentIDs.map(\.uuidString), forKey: Self.recentKey)
-            QAProbe.action("connection.remove.ok", ["name": connection.name,
-                                                    "profiles": QAField.count(profiles.count)])
+            for key in Array(recentScopes.keys) where delete || key == owner {
+                recentScopes[key]?.removeAll { $0 == connection.id.uuidString }
+            }
+            defaults.set(recentScopes, forKey: "mysql.projectRecents.v2")
+            QAProbe.action("connection.remove.ok", ["name": connection.name, "profiles": QAField.count(profiles.count)])
             QAProbe.state("state.connections", ["profiles": QAField.count(profiles.count)])
         }
     }
 
-    private func persist(_ updated: [DatabaseConnection]) throws {
-        let data = try JSONEncoder().encode(updated)
-        defaults.set(data, forKey: Self.profilesKey)
-        profiles = updated
+    private func persist(_ updated: [DatabaseConnection], placements next: [String: Placement]? = nil,
+                         imports mapped: [String: UUID]? = nil) throws {
+        guard !loadFailed else { throw DatabaseFailure("El catálogo no pudo leerse. Se conservó sin sobrescribirlo.") }
+        let catalog = Catalog(profiles: updated, placements: next ?? placements, imports: mapped ?? imports)
+        let data = try JSONEncoder().encode(catalog)
+        defaults.set(data, forKey: Self.catalogKey)
+        allProfiles = updated
+        placements = catalog.placements
+        imports = catalog.imports
     }
 
     private func forget(_ connection: DatabaseConnection) {

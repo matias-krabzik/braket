@@ -23,25 +23,25 @@ struct DatabaseExplorer: View {
                             .id((controller.workspaceURL?.standardizedFileURL.path ?? "") + connection.id.uuidString)
                     }
                     if controller.connections.profiles.isEmpty {
-                        Text("Agregá una conexión global con +.").foregroundStyle(.secondary).padding()
+                        Text("Agregá una conexión del proyecto o elegí una de Compartidas con +.").foregroundStyle(.secondary).padding()
                     }
                 }.padding(.bottom, 14)
             }
         }
         .font(Theme.interfaceFont(13)).background(Theme.background)
         .qaScreen("explorer.databases")
-        .confirmationDialog("¿Eliminar la conexión guardada?", isPresented: Binding(get: { removing != nil },
-                                                                                    set: { if !$0 { removing = nil } }),
+        .confirmationDialog("¿Quitar la conexión del proyecto?", isPresented: Binding(get: { removing != nil },
+                                                                                      set: { if !$0 { removing = nil } }),
                             titleVisibility: .visible) {
             if let removing {
-                Button("Eliminar " + removing.name, role: .destructive) {
+                Button("Quitar " + removing.name, role: .destructive) {
                     controller.connections.remove(removing)
                     self.removing = nil
                 }
             }
             Button("Cancelar", role: .cancel) { removing = nil }
         } message: {
-            Text("Se quitará de todos los proyectos. Los scripts que la usan quedarán sin conexión asignada.")
+            Text("Se quitará de este proyecto. Las compartidas seguirán disponibles en el catálogo.")
         }
         .sheet(isPresented: Binding(get: { ddl != nil }, set: { if !$0 { ddl = nil } })) {
             VStack(alignment: .leading) {
@@ -232,7 +232,7 @@ struct DatabaseExplorer: View {
                     NSPasteboard.general.setString(connection.host + ":" + String(connection.port), forType: .string)
                 }
                 Divider()
-                Button("Eliminar conexión…", systemImage: "trash", role: .destructive) { removing = connection }
+                Button("Quitar del proyecto…", systemImage: "trash", role: .destructive) { removing = connection }
                     .disabled(controller.isReadOnly || state.busy || state.status == .connecting)
             case .database(let database, _):
                 Button("Usar en la sesión") { controller.database.selectDatabase(database, connection: connection) }
