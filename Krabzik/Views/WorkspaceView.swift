@@ -302,6 +302,9 @@ struct WorkspaceView: View {
                                        controller.executeSQL()
                                    }, completion: { text, position in
                                        let connection = controller.connections.selected(for: document)
+                                       let noBackslash = connection.map { controller.database.state($0.id).noBackslashEscapes } ?? false
+                                       if let lists = controller.database.listCompletions(text: text, position: position,
+                                                                                          noBackslashEscapes: noBackslash) { return lists }
                                        let database = connection.map { controller.database.state($0.id).currentDatabase } ?? ""
                                        return controller.database.schema.completions(connection: connection, database: database,
                                                                                      text: text, position: position)

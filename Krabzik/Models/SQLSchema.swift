@@ -5,6 +5,7 @@ struct SQLColumnOrigin: Sendable, Equatable {
     var table: String
     var column: String
     var binary = false
+    var mysqlType: UInt8?
 }
 
 struct SQLSchemaColumn: Codable, Sendable, Equatable, Identifiable {
@@ -84,6 +85,23 @@ enum SQLValue {
 
     static func literal(_ text: String?) -> String {
         guard let text else { return "NULL" }
-        return "CONVERT(X'" + text.utf8.map { String(format: "%02X", $0) }.joined() + "' USING utf8mb4)"
+        // Comillas SQL duplicadas: válidas también con ANSI_QUOTES y NO_BACKSLASH_ESCAPES.
+        // Aislar backslash, NUL y Ctrl-Z evita depender del sql_mode de la sesión.
+        // Los valores normales quedan legibles: 'O''Brien', sin CONVERT ni hexadecimal.
+        var parts: [String] = [], segment = ""
+        func flush() {
+            guard !segment.isEmpty else { return }
+            parts.append("'" + segment.replacingOccurrences(of: "'", with: "''") + "'")
+            segment = ""
+        }
+        for scalar in text.unicodeScalars {
+            if [0, 26, 92].contains(scalar.value) {
+                flush()
+                parts.append("CHAR(\(scalar.value) USING utf8mb4)")
+            } else { segment.unicodeScalars.append(scalar) }
+        }
+        flush()
+        if parts.isEmpty { return "''" }
+        return parts.count == 1 ? parts[0] : "CONCAT(" + parts.joined(separator: ", ") + ")"
     }
 }

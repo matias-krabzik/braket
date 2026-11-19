@@ -304,6 +304,7 @@ final class WorkspaceController {
         connections.install([])
         session.close()
         database.output.configure(project: nil)
+        database.configureLists(project: nil)
         outputVisible = false
         database.resultsVisible = false
         sqlResultsDocumentID = nil
@@ -326,6 +327,7 @@ final class WorkspaceController {
         docs.closeAll()
         session.open(project, at: url, trust: decided)
         database.output.configure(project: url)
+        database.configureLists(project: url)
         outputVisible = false
         database.resultsVisible = false
         sqlResultsDocumentID = nil

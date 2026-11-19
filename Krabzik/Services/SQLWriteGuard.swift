@@ -45,6 +45,10 @@ enum SQLWriteGuard {
         let scan = SQLScript.scan(statement, noBackslashEscapes: noBackslashEscapes)
         guard !scan.hasExecutableComment, let first = scan.words.first else { return .write }
         let outer = scan.outer
+        if Array(outer.prefix(2)) == ["SET", "LIST"] {
+            guard let list = try? SQLListStatement.parse(statement, noBackslashEscapes: noBackslashEscapes) else { return .write }
+            return effect(of: list.query, noBackslashEscapes: noBackslashEscapes)
+        }
         switch first.word {
         case "SELECT":
             return select(scan)

@@ -257,7 +257,7 @@ final class SQLWorkspaceTests: XCTestCase {
         return (result, table)
     }
 
-    @MainActor func testEditsAreStagedIndependentlyAndSQLDoesNotInterpolateText() throws {
+    @MainActor func testEditsAreStagedIndependentlyAndTextCannotBecomeSQL() throws {
         let (result, table) = fixture()
         let draft = SQLResultDraft(result: result)
         draft.configure(table)
@@ -266,7 +266,13 @@ final class SQLWorkspaceTests: XCTestCase {
         XCTAssertEqual(result.rows[0][1], "Before")
         let mutations = try draft.mutations()
         XCTAssertEqual(mutations.count, 1)
-        XCTAssertFalse(mutations[0].sql.contains("DROP TABLE"))
+        for noBackslash in [false, true] {
+            let scan = SQLScript.scan(mutations[0].sql, noBackslashEscapes: noBackslash)
+            XCTAssertFalse(scan.words.contains { $0.word == "DROP" }, "El contenido sigue siendo un valor, no una sentencia")
+            var cursor = SQLScript(mutations[0].sql)
+            XCTAssertNotNil(try cursor.next(noBackslashEscapes: noBackslash))
+            XCTAssertNil(try cursor.next(noBackslashEscapes: noBackslash))
+        }
         XCTAssertTrue(mutations[0].sql.contains("WHERE `id` = 1 LIMIT 1"))
         XCTAssertFalse(mutations[0].sql.contains("CAST("))
         XCTAssertEqual(mutations[0].originalRow, result.rows[0])

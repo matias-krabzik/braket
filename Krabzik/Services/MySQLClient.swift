@@ -35,6 +35,7 @@ struct DatabaseSessionInfo: Sendable {
 ///
 /// No guarda la contraseña: la relee del llavero cuando hace falta (S4).
 actor MySQLClient {
+    let clientLists = SQLClientListStore()
     /// Resultado de cancelar. `localOnly` significa que se cerró el socket pero el
     /// servidor pudo no haber recibido el KILL: la consulta puede seguir corriendo.
     enum CancelOutcome: Sendable, Equatable {
@@ -202,7 +203,7 @@ actor MySQLClient {
     }
 
     func execute(_ text: String, startingLine: Int, configuration: DatabaseConnection, password: String,
-                 operation: UUID, timeoutSeconds: Int = 15, pageIndex: Int? = nil,
+                 operation: UUID, timeoutSeconds: Int = 15, pageIndex: Int? = nil, listScope: String = "default",
                  onStatement: @escaping @Sendable (SQLResult) async throws -> Void = { _ in },
                  onResult: @escaping @Sendable (SQLResult) async -> Void) async throws -> DatabaseSessionInfo {
         try Task.checkCancellation()
@@ -230,15 +231,37 @@ actor MySQLClient {
             statementNumber += 1
             guard statementNumber <= 200 else { throw DatabaseFailure("Ejecutá como máximo 200 sentencias por vez.") }
             guard resultCount < 200 else { throw DatabaseFailure("Se alcanzó el límite de 200 resultados por ejecución.") }
+            let noBackslash = session.flags.contains(.SERVER_STATUS_NO_BACKSLASH_ESCAPES)
+            let listStatement: SQLListStatement?
+            let expanded: String
+            do {
+                listStatement = try SQLListStatement.parse(statement.text, noBackslashEscapes: noBackslash)
+                if let listStatement { await clientLists.remove(listStatement.name, scope: listScope) }
+                expanded = try SQLListStatement.expand(listStatement?.query ?? statement.text,
+                                                       lists: await clientLists.snapshot(listScope), noBackslashEscapes: noBackslash)
+            } catch {
+                var failure = SQLResult(statement: statementNumber, line: statement.line)
+                failure.sql = statement.text
+                failure.connection = configuration
+                failure.database = session.database
+                failure.setValues = SQLSetStatement(statement.text, noBackslashEscapes: noBackslash) == nil ? nil : []
+                failure.error = "Línea \(statement.line): \(Self.message(error))"
+                try await onStatement(failure)
+                await onResult(failure)
+                throw error
+            }
             var pending = SQLResult(statement: statementNumber, line: statement.line)
             pending.sql = statement.text
             pending.connection = configuration
             pending.database = session.database
-            let setStatement = SQLSetStatement(statement.text,
-                                               noBackslashEscapes: session.flags.contains(.SERVER_STATUS_NO_BACKSLASH_ESCAPES))
-            pending.setValues = setStatement == nil ? nil : []
-            let pagination = pageIndex.flatMap {
-                SQLPagination(statement.text, page: $0, noBackslashEscapes: session.flags.contains(.SERVER_STATUS_NO_BACKSLASH_ESCAPES))
+            let setStatement = listStatement == nil ? SQLSetStatement(statement.text,
+                                                                      noBackslashEscapes: noBackslash) : nil
+            pending.setValues = setStatement == nil && listStatement == nil ? nil : []
+            if let listStatement {
+                pending.setValues = [SQLSetValue(name: "{{" + listStatement.name + "}}", value: "Cargando…", isList: true)]
+            }
+            let pagination = (listStatement == nil ? pageIndex : nil).flatMap {
+                SQLPagination(expanded, page: $0, noBackslashEscapes: session.flags.contains(.SERVER_STATUS_NO_BACKSLASH_ESCAPES))
             }
             if let pagination { pending.page = SQLPage(index: pagination.index) }
             try await onStatement(pending)
@@ -247,8 +270,9 @@ actor MySQLClient {
                 catch { return }
                 await self.expire(operation)
             }
-            let command = MySQLTextCommand(sql: pagination?.query ?? statement.text, statement: statementNumber, line: statement.line,
-                                           byteLimit: min(remainingBytes, 4_000_000), resultLimit: 200 - resultCount)
+            let command = MySQLTextCommand(sql: pagination?.query ?? expanded, statement: statementNumber, line: statement.line,
+                                           byteLimit: min(remainingBytes, 4_000_000), resultLimit: 200 - resultCount,
+                                           rowLimit: listStatement == nil ? 1000 : 10_000)
             do {
                 try await sendLogged(command, on: session.connection, configuration: configuration, database: pending.database,
                                      history: history, source: "Consulta", operation: operation)
@@ -258,6 +282,21 @@ actor MySQLClient {
                 session.flags = captured.1
                 if let database = Self.useDatabase(in: statement.text) { session.database = database }
                 sessions[id] = session
+                if let listStatement {
+                    let list = try SQLClientList(name: listStatement.name, results: captured.0, query: listStatement.query,
+                                                 connectionName: configuration.name)
+                    try Task.checkCancellation()
+                    try await clientLists.set(list, scope: listScope)
+                    timeout.cancel()
+                    if timedOut.contains(operation) || cancelled.contains(operation) || Task.isCancelled {
+                        await clientLists.remove(listStatement.name, scope: listScope)
+                        throw CancellationError()
+                    }
+                    var contextual = pending
+                    contextual.setValues = [list.note]
+                    await onResult(contextual)
+                    continue
+                }
                 var totalRows: Int?
                 if let pagination, let countSQL = pagination.countQuery,
                    captured.0.count == 1, captured.0[0].rowCount > SQLPage.size || pagination.index > 0 {
@@ -277,19 +316,22 @@ actor MySQLClient {
                 var setValues: [SQLSetValue]?
                 if let setStatement {
                     setValues = setStatement.targets.isEmpty ? [SQLSetValue(name: "SET", value: "Aplicado")]
-                        : setStatement.targets.map { SQLSetValue(name: $0.label, value: "No disponible") }
+                        : setStatement.targets.map { SQLSetValue(name: $0.label, value: "No disponible",
+                                                                 reference: $0.expression == $0.label ? nil : $0.expression) }
                     if let query = setStatement.query {
                         do {
                             let values = try await read(query, on: session.connection, configuration: configuration,
                                                         history: nil, source: "Variables SET")
                             if let row = values.rows.first, row.count == setStatement.targets.count {
                                 setValues = zip(setStatement.targets, row).map { target, value in
-                                    SQLSetValue(name: target.label, value: value.map { $0.count >= 2048 ? $0 + "…" : $0 } ?? "NULL")
+                                    SQLSetValue(name: target.label, value: value.map { $0.count >= 2048 ? $0 + "…" : $0 } ?? "NULL",
+                                                reference: target.expression == target.label ? nil : target.expression)
                                 }
                             }
                         } catch {
                             if timedOut.contains(operation) || cancelled.contains(operation) { throw error }
-                            setValues = setStatement.targets.map { SQLSetValue(name: $0.label, value: "No disponible") }
+                            setValues = setStatement.targets.map { SQLSetValue(name: $0.label, value: "No disponible",
+                                                                               reference: $0.expression == $0.label ? nil : $0.expression) }
                         }
                     }
                 }
@@ -322,7 +364,7 @@ actor MySQLClient {
                 let captured = try? await session.connection.eventLoop.submit {
                     (command.results, command.status, command.reusableAfterFailure)
                 }.get()
-                if let captured {
+                if let captured, listStatement == nil {
                     for (index, result) in captured.0.enumerated() { var contextual = result
                     contextual.resultIndex = index
                     contextual.sql = statement.text

@@ -201,6 +201,71 @@ final class DatabaseTests: XCTestCase {
         return await sink.values
     }
 
+    func testMySQLClientListsCaptureExpandAndSurviveReconnect() async throws {
+        let config = try configuration(), client = MySQLClient()
+        do {
+            let capture = try await execute("SET LIST ids = (SELECT 9007199254740993 AS id UNION ALL SELECT 56 UNION ALL SELECT 56)",
+                                            client: client, config: config)
+            XCTAssertEqual(capture.count, 1)
+            XCTAssertTrue(capture[0].columns.isEmpty)
+            XCTAssertEqual(capture[0].setValues?.first?.value, "2 valores")
+            XCTAssertEqual(capture[0].setValues?.first?.isList, true)
+            await client.disconnect(config.id)
+            let found = try await execute("SELECT 9007199254740993 AS id WHERE 9007199254740993 IN ({{ids}})",
+                                          client: client, config: config)
+            XCTAssertEqual(found.last?.rows, [["9007199254740993"]])
+            let original = "001 O'Brien 😀\\x"
+            _ = try await execute("SET LIST names = (SELECT " + SQLValue.literal(original) + " AS name)", client: client, config: config)
+            let text = try await execute("SELECT " + SQLValue.literal(original) + " AS name WHERE "
+                                         + SQLValue.literal(original) + " IN ({{names}})", client: client, config: config)
+            XCTAssertEqual(text.last?.rows, [[original]])
+            _ = try await execute("SET SESSION cte_max_recursion_depth=20000; SET LIST many = ("
+                                   + "WITH RECURSIVE n AS (SELECT 1 AS id UNION ALL SELECT id+1 FROM n WHERE id<1001) SELECT id FROM n)",
+                                  client: client, config: config)
+            let lists = await client.clientLists.snapshot("default")
+            XCTAssertEqual(lists["many"]?.values.count, 1001)
+            do {
+                _ = try await execute("SET LIST many = (WITH RECURSIVE n AS (SELECT 1 AS id UNION ALL "
+                                       + "SELECT id+1 FROM n WHERE id<10001) SELECT id FROM n)", client: client, config: config)
+                XCTFail("No guardar listas truncadas")
+            } catch {}
+            let afterFailure = await client.clientLists.snapshot("default")
+            XCTAssertNil(afterFailure["many"], "Una actualización fallida no conserva silenciosamente datos viejos")
+            XCTAssertNotNil(afterFailure["ids"])
+            do {
+                _ = try await client.execute("SELECT 1 WHERE 1 IN ({{ids}})", startingLine: 1, configuration: config,
+                                             password: "", operation: UUID(), listScope: "another-project") { _ in }
+                XCTFail("No compartir listas entre proyectos")
+            } catch {}
+            await client.shutdown()
+        } catch {
+            await client.shutdown()
+            throw error
+        }
+    }
+
+    func testMySQLReadableLiteralsRoundTripInBothEscapeModes() async throws {
+        let config = try configuration(), client = MySQLClient()
+        let values = ["", "O'Brien", "José 😀", "é", "e\u{301}", "C:\\temp\\", "a\0b", "a\u{1A}b",
+                      "line one\nline two\r\n", "'\\'; DROP TABLE sample; --"]
+        do {
+            for mode in ["", "NO_BACKSLASH_ESCAPES,ANSI_QUOTES"] {
+                _ = try await execute("SET SESSION sql_mode = '" + mode + "'", client: client, config: config)
+                for value in values {
+                    let literal = SQLValue.literal(value)
+                    XCTAssertFalse(literal.contains("CONVERT("))
+                    let result = try await execute("SELECT HEX(" + literal + ")", client: client, config: config)
+                    let hex = value.utf8.map { String(format: "%02X", $0) }.joined()
+                    XCTAssertEqual(result.last?.rows, [[hex]])
+                }
+            }
+            await client.shutdown()
+        } catch {
+            await client.shutdown()
+            throw error
+        }
+    }
+
     func testMySQLSimultaneousConnectionsKeepSeparateDatabasesAndSessionVariables() async throws {
         let first = try configuration()
         var other = first

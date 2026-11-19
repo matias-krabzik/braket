@@ -3,6 +3,16 @@ import Foundation
 struct SQLSetValue: Sendable, Equatable {
     let name: String
     let value: String
+    var isList = false
+    var listSnapshot: SQLClientList?
+    var detail: String?
+    var reference: String?
+
+    var clipboardReference: String? { name == "SET" && reference == nil ? nil : (reference ?? name) }
+    var clipboardValues: String? {
+        if isList { return listSnapshot.flatMap { $0.values.isEmpty ? nil : $0.sql } }
+        return value
+    }
 }
 
 struct SQLSetNote {

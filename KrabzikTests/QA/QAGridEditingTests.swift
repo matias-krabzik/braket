@@ -204,7 +204,8 @@ final class QAGridEditingTests: XCTestCase {
         XCTAssertTrue(sql.contains("LIMIT 1"), "cada mutación toca una sola fila")
         let verifications = mutations.compactMap(\.verificationSQL).joined(separator: "\n")
         XCTAssertTrue(verifications.contains("FOR UPDATE"), "la verificación bloquea la fila: " + verifications)
-        XCTAssertFalse(sql.contains("'ANA'"), "los valores van como literales binarios, no interpolados")
+        XCTAssertTrue(sql.contains("`nombre` = 'ANA'"), "los valores se muestran como literales SQL legibles")
+        XCTAssertFalse(sql.contains("CONVERT("))
     }
 
     /// GRI-14

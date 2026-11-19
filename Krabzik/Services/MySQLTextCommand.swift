@@ -48,7 +48,6 @@ private enum Wire {
 /// Topes de lo que se retiene en memoria por resultado. No limitan la consulta: lo que
 /// sobra se recibe y se descarta, y el resultado queda marcado como truncado.
 private enum Retained {
-    static let rowsPerResult = 1000
     static let bytesPerCell = 16_384
     /// Costo que se le cobra a una celda vacía o nula, para que un millón de ellas también
     /// llegue al límite.
@@ -78,11 +77,13 @@ final class MySQLTextCommand: MySQLCommand, @unchecked Sendable {
     private let started = Date()
     private var storedBytes = 0
     private let byteLimit: Int
+    private let rowLimit: Int
     private let resultLimit: Int
 
-    init(sql: String, statement: Int, line: Int, byteLimit: Int = 4_000_000, resultLimit: Int = 200) {
+    init(sql: String, statement: Int, line: Int, byteLimit: Int = 4_000_000, resultLimit: Int = 200, rowLimit: Int = 1000) {
         self.sql = sql
         self.byteLimit = max(0, byteLimit)
+        self.rowLimit = max(0, rowLimit)
         self.resultLimit = resultLimit
         current = SQLResult(statement: statement, line: line)
     }
@@ -126,7 +127,8 @@ final class MySQLTextCommand: MySQLCommand, @unchecked Sendable {
                   packet.payload.readInteger(endianness: .little, as: UInt32.self) != nil,
                   let type = packet.payload.readInteger(as: UInt8.self) else { throw MySQLError.protocolError }
             current.origins.append(SQLColumnOrigin(database: database, table: table, column: originalName,
-                                                   binary: charset == Wire.binaryCharset && Wire.binaryFieldTypes.contains(type)))
+                                                   binary: charset == Wire.binaryCharset && Wire.binaryFieldTypes.contains(type),
+                                                   mysqlType: type))
             columnNames.append(name)
             binaryColumns.append(charset == Wire.binaryCharset && Wire.binaryFieldTypes.contains(type))
             if columnNames.count == count {
@@ -144,7 +146,7 @@ final class MySQLTextCommand: MySQLCommand, @unchecked Sendable {
             }
             let row = try MySQLProtocol.TextResultSetRow.decode(from: &packet, columnCount: columnNames.count)
             current.rowCount += 1
-            guard current.rows.count < Retained.rowsPerResult, storedBytes < byteLimit else {
+            guard current.rows.count < rowLimit, storedBytes < byteLimit else {
                 current.truncated = true
                 return .init()
             }

@@ -6,6 +6,33 @@ import Observation
 /// para no releerla: acotar su vida es el punto de docs/specs/S4-no-retener-password.md.
 @MainActor @Observable
 final class DatabaseController {
+    private(set) var listScope = UUID().uuidString
+    @ObservationIgnored private var listNamesRevision = 0
+    private(set) var listNames: [String] = []
+    func configureLists(project: URL?) {
+        listScope = project?.standardizedFileURL.path ?? UUID().uuidString
+        listNames = []
+        refreshListNames(scope: listScope)
+    }
+
+    private func refreshListNames(scope: String) {
+        guard listScope == scope else { return }
+        listNamesRevision += 1
+        let revision = listNamesRevision
+        Task {
+            let snapshot = await client.clientLists.snapshot(scope)
+            if listScope == scope, listNamesRevision == revision { listNames = snapshot.keys.sorted() }
+        }
+    }
+
+    func listCompletions(text: String, position: Int, noBackslashEscapes: Bool = false) -> [String]? {
+        let source = (text as NSString).substring(to: max(0, min(position, text.utf16.count)))
+        let prefix = SQLListStatement.code(source, noBackslashEscapes: noBackslashEscapes)
+        guard let range = prefix.range(of: #"\{\{[A-Za-z0-9_]*$"#, options: .regularExpression) else { return nil }
+        let typed = prefix[range].dropFirst(2)
+        return listNames.filter { $0.hasPrefix(typed) }.map { $0 + "}}" }
+    }
+
     var showingConnections = false
     var editingConnection: DatabaseConnection?
     var states: [UUID: DatabaseState] = [:]
@@ -249,8 +276,10 @@ final class DatabaseController {
         QAProbe.sql("sql.execute.begin", ["sql": QAField.sql(query.text), "line": QAField.count(query.startingLine),
                                           "connection": connection.name, "database": targetDatabase,
                                           "timeout": QAField.count(timeoutSeconds)])
+        let listScope = self.listScope
         execution.task = Task {
             defer {
+                refreshListNames(scope: listScope)
                 execution.finish(error: execution.error)
                 document.finishLoadingQueryMarkers(error: execution.error, revision: markerRevision)
                 execution.isRunning = false
@@ -276,7 +305,7 @@ final class DatabaseController {
                 }
                 let info = try await client.execute(query.text, startingLine: query.startingLine, configuration: connection,
                                                     password: password, operation: operation, timeoutSeconds: timeoutSeconds,
-                                                    pageIndex: pageIndex,
+                                                    pageIndex: pageIndex, listScope: listScope,
                                                     onStatement: { pending in
                     let accepted = await MainActor.run {
                         if pending.setValues == nil { self.resultsVisible = true }
@@ -290,6 +319,9 @@ final class DatabaseController {
                     await MainActor.run {
                         execution.receive(result)
                         document.setVariableNote(result, revision: markerRevision)
+                        if result.setValues?.contains(where: { $0.isList }) == true {
+                            self.refreshListNames(scope: listScope)
+                        }
                         document.setQueryMarker(result.error == nil ? .success : .failure,
                                                 line: result.line, revision: markerRevision, message: result.error)
                         QAProbe.sql("sql.result", ["sql": QAField.sql(result.sql),

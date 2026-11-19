@@ -21,12 +21,31 @@ import XCTest
         return (draft, table)
     }
 
+    func testReadableLiteralsAndSpecialCharactersAreModeIndependent() throws {
+        XCTAssertEqual(SQLValue.literal(nil), "NULL")
+        XCTAssertEqual(SQLValue.literal(""), "''")
+        XCTAssertEqual(SQLValue.literal("O'Brien 😀"), "'O''Brien 😀'")
+        XCTAssertEqual(SQLValue.literal("123"), "'123'")
+        XCTAssertEqual(SQLValue.literal("\\"), "CHAR(92 USING utf8mb4)")
+        XCTAssertEqual(SQLValue.literal("a\\b"), "CONCAT('a', CHAR(92 USING utf8mb4), 'b')")
+        XCTAssertEqual(SQLValue.literal("a\0b"), "CONCAT('a', CHAR(0 USING utf8mb4), 'b')")
+        let hostile = "'\\'; DELETE FROM users; -- 😀"
+        let literal = SQLValue.literal(hostile)
+        for noBackslash in [false, true] {
+            var script = SQLScript("SELECT " + literal)
+            XCTAssertNotNil(try script.next(noBackslashEscapes: noBackslash))
+            XCTAssertNil(try script.next(noBackslashEscapes: noBackslash))
+        }
+    }
+
     func testPrimaryKeyPredicateAndFullOriginalSnapshot() throws {
         let (draft, _) = fixture()
         draft.set(.text("After"), row: 0, column: 2)
         let mutation = try XCTUnwrap(draft.mutations().first)
         XCTAssertTrue(mutation.sql.hasSuffix("WHERE `id` = 9007199254740993 LIMIT 1"))
         XCTAssertFalse(mutation.sql.contains("CAST("))
+        XCTAssertFalse(mutation.sql.contains("CONVERT("))
+        XCTAssertTrue(mutation.sql.contains("SET `name` = 'After'"))
         XCTAssertFalse(mutation.sql.contains("AND `email`"))
         XCTAssertEqual(mutation.verificationSQL,
                        "SELECT `id`, `email`, `name` FROM `qa`.`users` WHERE `id` = 9007199254740993 LIMIT 2 FOR UPDATE")
@@ -56,7 +75,7 @@ import XCTest
         draft.configure(table)
         draft.set(.null, row: 0, column: 2)
         let sql = try draft.mutations()[0].sql
-        XCTAssertTrue(sql.contains("WHERE `id` = 9007199254740993 AND `email` = CONVERT(X'"))
+        XCTAssertTrue(sql.contains("WHERE `id` = 9007199254740993 AND `email` = 'old@example.test' LIMIT 1"))
         XCTAssertEqual(table.editingKey(in: ["email", "name"]), nil, "No sustituir una PK incompleta por otra clave")
         table.primaryKey = []
         XCTAssertEqual(table.editingKey(in: ["email", "name"]), ["email"])

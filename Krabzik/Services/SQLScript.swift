@@ -262,6 +262,11 @@ extension SQLScript {
                 }
                 index = min(index + 2, bytes.count)
                 emit(start, index, "comment")
+            } else if collectSyntax, byte == 123, following == 123,
+                      let end = bytes[(index + 2)...].firstIndex(of: 125), end + 1 < bytes.count, bytes[end + 1] == 125,
+                      bytes[(index + 2)..<end].allSatisfy({ isWordByte($0) || $0 <= Byte.space }) {
+                emit(index, end + 2, "variable.sql")
+                index = end + 2
             } else if collectSyntax, byte == 64 {
                 let start = index
                 index += 1
@@ -281,7 +286,9 @@ extension SQLScript {
                 let start = index
                 while index < bytes.count, isWordByte(bytes[index]) { index += 1 }
                 let word = String(decoding: bytes[start..<index], as: UTF8.self).uppercased()
+                let followsSet = scan.words.last?.word == "SET"
                 scan.words.append(SQLWord(word: word, offset: start, depth: depth))
+                if collectSyntax, depth == 0, word == "LIST", followsSet { emit(start, index, "keyword") }
                 if collectLexemes {
                     scan.lexemes.append(SQLLexeme(text: String(decoding: bytes[start..<index], as: UTF8.self), depth: depth))
                 }

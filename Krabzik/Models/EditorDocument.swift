@@ -167,14 +167,16 @@ final class EditorDocument: Identifiable {
     func setVariableNote(_ result: SQLResult, revision: Int) {
         guard revision == queryMarkerRevision, let values = result.setValues, let connection = result.connection else { return }
         let line = result.line + result.sql.filter { $0 == "\n" }.count
-        let displayed = result.error == nil ? values : [SQLSetValue(name: "SET", value: "Error")]
+        let displayed = result.error == nil ? values
+            : [SQLSetValue(name: values.first?.isList == true ? values[0].name : "SET", value: "Error",
+                           isList: values.first?.isList == true)]
         setNotes[line] = SQLSetNote(connectionID: connection.id, values: displayed, error: result.error)
         (editorStorage as? EditorSurface)?.refreshQueryMarkers()
     }
 
     func clearVariableNotes(connectionID: UUID) {
         let previous = setNotes.count
-        setNotes = setNotes.filter { $0.value.connectionID != connectionID }
+        setNotes = setNotes.filter { $0.value.connectionID != connectionID || $0.value.values.contains { $0.isList } }
         if setNotes.count != previous { (editorStorage as? EditorSurface)?.refreshQueryMarkers() }
     }
 

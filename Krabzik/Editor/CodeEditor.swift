@@ -64,9 +64,181 @@ struct CodeEditor: NSViewRepresentable {
     }
 }
 
-final class CodeTextView: NSTextView {
+enum SQLValuePillAction: CaseIterable { case copyReference, detail, copyValues }
+
+private final class SQLValuePillButton: NSButton {
+    var value: SQLSetValue?
+    var kind = SQLValuePillAction.detail
+    var pillRect: NSRect = .zero
+    var iconSize: CGFloat = 10
+    private var feedback: DispatchWorkItem?
+    override var acceptsFirstResponder: Bool { false }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+    func refreshIcon() {
+        guard kind != .detail else { image = nil
+        return }
+        image = NSImage(systemSymbolName: feedback == nil ? "doc.on.doc" : "checkmark", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: iconSize, weight: .regular))
+        contentTintColor = feedback == nil ? .secondaryLabelColor : .systemGreen
+    }
+    func cancelFeedback() { feedback?.cancel()
+    feedback = nil }
+    func showCopied() {
+        cancelFeedback()
+        let work = DispatchWorkItem { [weak self] in
+            self?.feedback = nil
+            self?.refreshIcon()
+        }
+        feedback = work
+        refreshIcon()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: work)
+    }
+}
+
+struct SQLValuePillHit {
+    let rect: NSRect
+    let value: SQLSetValue
+    let copyWidth: CGFloat
+    func frame(for action: SQLValuePillAction) -> NSRect {
+        switch action {
+        case .copyReference: NSRect(x: rect.minX, y: rect.minY, width: copyWidth, height: rect.height)
+        case .detail: NSRect(x: rect.minX + copyWidth, y: rect.minY,
+                             width: rect.width - copyWidth * 2, height: rect.height)
+        case .copyValues: NSRect(x: rect.maxX - copyWidth, y: rect.minY, width: copyWidth, height: rect.height)
+        }
+    }
+}
+
+final class CodeTextView: NSTextView, NSPopoverDelegate {
     weak var editorSurface: EditorSurface?
     private var variableTooltips: [NSView.ToolTipTag: String] = [:]
+    private(set) var valuePills: [SQLValuePillHit] = []
+    private var valuePillButtons: [SQLValuePillButton] = []
+    private(set) var valueDetailPopover: NSPopover?
+    private var valueDetailCard: SQLValueDetailCard?
+    var writeValueClipboard: (String) -> Void = { text in
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    @discardableResult
+    func performValuePillAction(_ action: SQLValuePillAction, value: SQLSetValue, rect: NSRect) -> Bool {
+        if action == .detail { openValueDetails(value, relativeTo: rect)
+        return false }
+        guard let text = action == .copyReference ? value.clipboardReference : value.clipboardValues else { return false }
+        writeValueClipboard(text)
+        return true
+    }
+
+    override func accessibilityChildren() -> [Any]? {
+        var children = super.accessibilityChildren() ?? []
+        for button in valuePillButtons where !children.contains(where: { ($0 as? NSView) === button }) {
+            children.append(button)
+        }
+        return children
+    }
+
+    private func synchronizeValuePillButtons() {
+        let count = valuePills.count * 3
+        while valuePillButtons.count > count {
+            let button = valuePillButtons.removeLast()
+            button.cancelFeedback()
+            button.removeFromSuperview()
+        }
+        while valuePillButtons.count < count {
+            let button = SQLValuePillButton()
+            // El nombre y el valor ya los dibuja el editor. Estos controles nunca dibujan títulos.
+            button.title = ""
+            button.alternateTitle = ""
+            button.imagePosition = .imageOnly
+            button.focusRingType = .none
+            button.setAccessibilityElement(true)
+            button.setAccessibilityRole(.button)
+            button.isBordered = false
+            button.target = self
+            button.action = #selector(pressValuePill(_:))
+            addSubview(button)
+            valuePillButtons.append(button)
+        }
+        for (index, pill) in valuePills.enumerated() {
+            for (offset, action) in SQLValuePillAction.allCases.enumerated() {
+                let button = valuePillButtons[index * 3 + offset]
+                if button.value?.name != pill.value.name || button.value?.value != pill.value.value
+                    || button.value?.reference != pill.value.reference
+                    || button.value?.listSnapshot?.capturedAt != pill.value.listSnapshot?.capturedAt { button.cancelFeedback() }
+                let frame = pill.frame(for: action)
+                if button.frame != frame { button.frame = frame }
+                button.pillRect = pill.rect
+                button.value = pill.value
+                button.kind = action
+                button.iconSize = pill.copyWidth / 2
+                let title: String
+                switch action {
+                case .copyReference:
+                    button.isEnabled = pill.value.clipboardReference != nil
+                    title = "Copiar referencia " + (pill.value.clipboardReference ?? pill.value.name)
+                case .detail:
+                    button.isEnabled = true
+                    title = "Ver valores de " + pill.value.name + ": " + pill.value.value
+                case .copyValues:
+                    button.isEnabled = !pill.value.isList || pill.value.listSnapshot?.values.isEmpty == false
+                    title = "Copiar valores de " + pill.value.name
+                }
+                button.setAccessibilityLabel(title)
+                button.toolTip = title
+                button.refreshIcon()
+            }
+        }
+    }
+
+    @objc private func pressValuePill(_ sender: SQLValuePillButton) {
+        guard let value = sender.value else { return }
+        if performValuePillAction(sender.kind, value: value, rect: sender.pillRect) { sender.showCopied() }
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        for pill in valuePills {
+            let rect = NSIntersectionRect(pill.rect, visibleRect)
+            if !rect.isEmpty { addCursorRect(rect, cursor: .pointingHand) }
+        }
+    }
+
+    func openValueDetails(_ value: SQLSetValue, relativeTo rect: NSRect) {
+        guard window != nil else { return }
+        dismissValueDetails()
+        editorSurface?.selectionActions.hide()
+        let card = SQLValueDetailCard(value: value)
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.animates = false
+        popover.appearance = effectiveAppearance
+        popover.delegate = self
+        popover.contentViewController = card
+        popover.contentSize = card.preferredContentSize
+        card.close = { [weak self] in
+            guard let self else { return }
+            self.dismissValueDetails()
+            self.window?.makeFirstResponder(self)
+        }
+        valueDetailCard = card
+        valueDetailPopover = popover
+        popover.show(relativeTo: rect, of: self, preferredEdge: .maxY)
+    }
+
+    func dismissValueDetails() {
+        valueDetailCard?.invalidate()
+        valueDetailPopover?.close()
+        valueDetailPopover = nil
+        valueDetailCard = nil
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        guard notification.object as? NSPopover === valueDetailPopover else { return }
+        valueDetailCard?.invalidate()
+        valueDetailCard = nil
+        valueDetailPopover = nil
+    }
 
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
@@ -125,6 +297,12 @@ final class CodeTextView: NSTextView {
         super.draw(dirtyRect)
         removeAllToolTips()
         variableTooltips.removeAll()
+        let previousRects = valuePills.map(\.rect)
+        valuePills.removeAll(keepingCapacity: true)
+        defer {
+            synchronizeValuePillButtons()
+            if previousRects != valuePills.map(\.rect) { window?.invalidateCursorRects(for: self) }
+        }
         guard let surface = editorSurface, let notes = surface.document?.setNotes, !notes.isEmpty,
               let layout = textLayoutManager, let content = layout.textContentManager,
               let viewport = layout.textViewportLayoutController.viewportRange else { return }
@@ -164,37 +342,42 @@ final class CodeTextView: NSTextView {
         ]
         let valueAttributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedSystemFont(ofSize: size, weight: .medium),
-            .foregroundColor: error == nil ? EditorPalette.green : NSColor.systemOrange, .paragraphStyle: paragraph
+            .foregroundColor: error == nil ? (value.isList ? NSColor.systemBlue : EditorPalette.green) : NSColor.systemOrange,
+            .paragraphStyle: paragraph
         ]
         let label = value.name as NSString
         let text = value.value.replacingOccurrences(of: "\n", with: "↵").replacingOccurrences(of: "\r", with: "") as NSString
         let padding = 8 * scale
-        let labelWidth = min(label.size(withAttributes: labelAttributes).width, min(180 * scale, available * 0.6))
-        let valueWidth = min(text.size(withAttributes: valueAttributes).width, 260 * scale)
-        let width = min(available, labelWidth + valueWidth + padding * 4 + 1)
+        let copyWidth = 20 * scale
+        let textBudget = available - copyWidth * 2 - padding * 4 - 1
+        guard textBudget > 24 * scale else { return 0 }
+        let labelWidth = min(label.size(withAttributes: labelAttributes).width, min(180 * scale, textBudget * 0.65))
+        let valueWidth = min(text.size(withAttributes: valueAttributes).width, min(260 * scale, textBudget - labelWidth))
+        let width = labelWidth + valueWidth + padding * 4 + copyWidth * 2 + 1
         let height = max(19 * scale, size + 6 * scale)
         let rect = NSRect(origin: origin, size: NSSize(width: width, height: height))
         let shape = NSBezierPath(roundedRect: rect, xRadius: height / 2, yRadius: height / 2)
-        let divider = rect.minX + labelWidth + padding * 2
+        let divider = rect.minX + copyWidth + labelWidth + padding * 2
         NSGraphicsContext.saveGraphicsState()
         shape.addClip()
-        NSColor.labelColor.withAlphaComponent(0.06).setFill()
+        (value.isList ? NSColor.systemBlue : NSColor.labelColor).withAlphaComponent(0.06).setFill()
         rect.fill()
         NSColor.labelColor.withAlphaComponent(0.045).setFill()
         NSRect(x: divider, y: rect.minY, width: rect.maxX - divider, height: height).fill()
         NSColor.separatorColor.setFill()
         NSRect(x: divider, y: rect.minY + 3 * scale, width: 0.7, height: height - 6 * scale).fill()
         let baselineInset = (height - label.size(withAttributes: labelAttributes).height) / 2
-        label.draw(in: NSRect(x: rect.minX + padding, y: rect.minY + baselineInset,
+        label.draw(in: NSRect(x: rect.minX + copyWidth + padding, y: rect.minY + baselineInset,
                               width: labelWidth, height: height), withAttributes: labelAttributes)
         text.draw(in: NSRect(x: divider + padding, y: rect.minY + baselineInset,
-                             width: max(0, rect.maxX - divider - padding * 2), height: height), withAttributes: valueAttributes)
+                             width: max(0, rect.maxX - copyWidth - divider - padding * 2), height: height), withAttributes: valueAttributes)
         NSGraphicsContext.restoreGraphicsState()
         NSColor.labelColor.withAlphaComponent(0.18).setStroke()
         shape.lineWidth = 0.7
         shape.stroke()
         let tag = addToolTip(rect, owner: self, userData: nil)
-        variableTooltips[tag] = error ?? (value.name + " = " + value.value)
+        variableTooltips[tag] = error ?? ((value.detail ?? (value.name + " = " + value.value)) + "\nClic para ver los valores")
+        if error == nil { valuePills.append(SQLValuePillHit(rect: rect, value: value, copyWidth: copyWidth)) }
         return width
     }
 
@@ -218,11 +401,22 @@ final class CodeTextView: NSTextView {
         let position = selectedRange().location
         let prefix = (string as NSString).substring(to: position)
         let word = String(prefix.reversed().prefix { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "$" }.reversed())
-        return NSRange(location: position - word.utf16.count, length: word.utf16.count)
+        var length = word.utf16.count
+        if prefix.range(of: #"\{\{[A-Za-z0-9_]*$"#, options: .regularExpression) != nil,
+           position + 2 <= string.utf16.count,
+           (string as NSString).substring(with: NSRange(location: position, length: 2)) == "}}" { length += 2 }
+        return NSRange(location: position - word.utf16.count, length: length)
     }
 
     override func mouseDown(with event: NSEvent) {
         editorSurface?.selectionActions.hide()
+        let point = convert(event.locationInWindow, from: nil)
+        if let pill = valuePills.last(where: { $0.rect.contains(point) }) {
+            let action = SQLValuePillAction.allCases.first { pill.frame(for: $0).contains(point) } ?? .detail
+            performValuePillAction(action, value: pill.value, rect: pill.rect)
+            return
+        }
+        dismissValueDetails()
         super.mouseDown(with: event)
         editorSurface?.selectionActions.schedule()
     }
@@ -448,6 +642,7 @@ private final class ObserverToken: @unchecked Sendable {
                     self?.gutter.needsDisplay = true
                     self?.scheduleHighlight()
                     self?.selectionActions.reposition()
+                    self?.textView.dismissValueDetails()
                 }
             })
     }
@@ -465,6 +660,7 @@ private final class ObserverToken: @unchecked Sendable {
 
     func applyZoom(_ scale: Double) {
         guard appliedZoom != scale else { return }
+        textView.dismissValueDetails()
         appliedZoom = scale
         let history = textView.undoManager
         history?.disableUndoRegistration()
@@ -493,6 +689,7 @@ private final class ObserverToken: @unchecked Sendable {
 
     func applyWrapLines(_ wraps: Bool) {
         guard appliedWrapLines != wraps else { return }
+        textView.dismissValueDetails()
         appliedWrapLines = wraps
         scrollView.hasHorizontalScroller = !wraps
         textView.isHorizontallyResizable = !wraps
@@ -543,6 +740,7 @@ private final class ObserverToken: @unchecked Sendable {
     /// Si nadie la llama, `ObserverToken` quita el observador al liberarse y el resaltado
     /// pendiente no hace nada, porque captura `self` de forma débil.
     func teardown() {
+        textView.dismissValueDetails()
         selectionActions.invalidate()
         gutter.stopLoadingAnimation()
         completionWork?.cancel()
@@ -561,6 +759,7 @@ private final class ObserverToken: @unchecked Sendable {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         selectionActions.hide()
+        if window == nil { textView.dismissValueDetails() }
         if window != nil {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
@@ -602,6 +801,7 @@ private final class ObserverToken: @unchecked Sendable {
     }
 
     func textDidChange(_ notification: Notification) {
+        textView.dismissValueDetails()
         selectionActions.hide()
         completionWork?.cancel()
         if completion != nil, !textView.hasMarkedText(), textView.selectedRange().length == 0 {

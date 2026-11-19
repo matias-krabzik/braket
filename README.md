@@ -62,6 +62,27 @@ Las automatizaciones que usan Codex conservan una hoja pequeña para conectar la
 
 ## MySQL y scripts SQL
 
+`SET LIST` captura una columna de un SELECT como lista de Braket en memoria, por proyecto:
+
+```sql
+SET LIST organizaciones = (
+    SELECT id FROM Organization WHERE name LIKE 'name%'
+);
+SELECT * FROM Users WHERE organization_id IN ({{organizaciones}});
+```
+
+Braket envía únicamente el SELECT de captura y sustituye `{{organizaciones}}` antes de enviar la
+consulta siguiente. Una píldora azul muestra la cantidad; su tooltip incluye valores y origen.
+Hacé clic en la píldora para abrir una tarjeta con búsqueda y copiar los valores en formato SQL.
+Si filtrás la tabla, **Copiar filtrados** copia únicamente las coincidencias. Las píldoras de SET
+normales también permiten consultar y copiar su valor, sin ejecutar otra consulta.
+Los iconos pequeños de la píldora copian directamente la referencia completa (izquierda) y sus
+valores (derecha); el centro conserva el acceso al detalle.
+Las referencias tienen resaltado y autocompletado. Los números conservan su precisión y los textos
+se citan como literales SQL. Se omiten NULL y duplicados, conservando el orden. Una lista vacía,
+inexistente o truncada detiene la consulta. El máximo es 10.000 filas por captura, sin listas parciales.
+No se guardan en disco y sobreviven a una reconexión de MySQL, hasta cerrar la aplicación.
+
 La herramienta **Logs** de la barra lateral abre el historial SQL del proyecto en el panel inferior.
 La pestaña **Logs** es fija, no tiene botón de cierre y comparte la barra con las pestañas de resultados.
 El editor permanece visible al consultar el historial. Guarda cada consulta
