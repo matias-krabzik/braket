@@ -254,3 +254,9 @@ Ejecutar el archivo SQL completo reemplaza los resultados anteriores sin fijar y
 Los resultados de un SELECT exterior de una sola tabla pueden editarse cuando las subconsultas aparecen en los filtros WHERE y el resultado conserva su clave primaria completa (o una clave única no nullable si la tabla no tiene PK). Se usan los metadatos reales de MySQL y la clave original de cada fila. Las escrituras mantienen la lectura FOR UPDATE, la comparación de valores originales y el rollback si hay conflictos. JOIN, UNION, agrupaciones exteriores, tablas derivadas y proyecciones calculadas siguen siendo de solo lectura.
 
 El timeout inicial de la aplicación es **60 segundos por sentencia**. Se configura en Configuración → Apariencia → SQL; el proyecto puede establecer otro en su configuración. El control del editor guarda un ajuste propio para ese archivo y proyecto, recordándolo al volver a abrirlo. **Heredar** elimina ese ajuste para usar el del proyecto o, si no tiene, el de la aplicación. En un archivo completo cada sentencia tiene su propio límite, y una ejecución en curso conserva el límite con el que comenzó.
+
+### Copiar y pegar celdas de resultados
+
+Con una celda seleccionada, **⌘C** copia su valor completo y **⌘V** pega un valor validado según el tipo del campo. El pegado queda como cambio pendiente para revisar antes de enviarlo a MySQL. También están las acciones Copiar valor y Pegar valor del menú contextual. Los resultados de solo lectura permiten copiar, y los campos generados o filas eliminadas no permiten pegar.
+
+Mientras se edita dentro de una celda, los atajos actúan sobre la selección de texto del editor y Enter confirma la edición. Copiar entre celdas de Braket conserva NULL y DEFAULT como valores especiales; copiar el texto literal «NULL» desde otra aplicación pega texto, sin convertirlo silenciosamente en NULL.

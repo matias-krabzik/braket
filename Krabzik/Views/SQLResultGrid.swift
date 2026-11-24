@@ -1,6 +1,30 @@
 import SwiftUI
 
 final class SQLGridTable: NSTableView {
+    var pasteboard = NSPasteboard.general
+    var copySelection: (() -> Bool)?
+    var pasteSelection: (() -> Bool)?
+    var canCopySelection: (() -> Bool)?
+    var canPasteSelection: (() -> Bool)?
+
+    @objc func copy(_ sender: Any?) { _ = copySelection?() }
+    @objc func paste(_ sender: Any?) { _ = pasteSelection?() }
+    override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+        switch item.action {
+        case #selector(copy(_:)): canCopySelection?() == true
+        case #selector(paste(_:)): canPasteSelection?() == true
+        default: super.validateUserInterfaceItem(item)
+        }
+    }
+    private func handleClipboard(_ event: NSEvent) -> Bool {
+        guard window?.firstResponder === self, let action = SQLCellClipboard.action(for: event) else { return false }
+        switch action {
+        case .copy: copy(nil)
+        case .paste: paste(nil)
+        }
+        return true
+    }
+
     override func drawGrid(inClipRect clipRect: NSRect) {
         guard numberOfRows > 0 else { return }
         let rowsRect = NSRect(x: bounds.minX, y: bounds.minY, width: bounds.width,
@@ -33,6 +57,7 @@ final class SQLGridTable: NSTableView {
         super.mouseDown(with: event)
     }
     override func keyDown(with event: NSEvent) {
+        if handleClipboard(event) { return }
         if [123, 124, 125, 126, 48].contains(event.keyCode),
            event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
             navigate?(event.keyCode, event.modifierFlags.contains(.shift))
@@ -45,6 +70,7 @@ final class SQLGridTable: NSTableView {
         super.keyDown(with: event)
     }
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if handleClipboard(event) { return true }
         if event.modifierFlags.contains(.command), event.keyCode == 36, Self.reviewFocusedGrid() { return true }
         return super.performKeyEquivalent(with: event)
     }
@@ -176,6 +202,10 @@ struct SQLResultGrid: NSViewRepresentable {
         table.action = #selector(Coordinator.selectCell(_:))
         table.doubleAction = #selector(Coordinator.editCell(_:))
         context.coordinator.table = table
+        table.copySelection = { [weak coordinator = context.coordinator] in coordinator?.copySelectedValue() ?? false }
+        table.pasteSelection = { [weak coordinator = context.coordinator] in coordinator?.pasteSelectedValue() ?? false }
+        table.canCopySelection = { [weak coordinator = context.coordinator] in coordinator?.canCopySelectedValue == true }
+        table.canPasteSelection = { [weak coordinator = context.coordinator] in coordinator?.canPasteSelectedValue == true }
         table.review = { [weak coordinator = context.coordinator] in
             guard let draft = coordinator?.draft, draft.hasChanges else { return }
             draft.showingReview = true
@@ -316,7 +346,8 @@ struct SQLResultGrid: NSViewRepresentable {
                 : value == .null || value == .serverDefault ? .tertiaryLabelColor : EditorPalette.text
             field.lineBreakMode = .byTruncatingTail
             field.usesSingleLineMode = true
-            field.toolTip = value.display + "\nFlechas: navegar · Enter: editar · ⌘Enter: revisar cambios"
+            field.toolTip = value.display + "\nFlechas: navegar · ⌘C: copiar · ⌘V: pegar"
+                + " · Enter: editar · ⌘Enter: revisar cambios"
             field.setAccessibilityLabel(draft.result.columns[column] + ", fila \(visibleRow(row) + 1)")
             return cell
         }
@@ -344,6 +375,45 @@ struct SQLResultGrid: NSViewRepresentable {
             table.scrollColumnToVisible(column)
             table.reloadData()
             table.window?.makeFirstResponder(table)
+        }
+        private var clipboardCell: SQLCell? {
+            guard let cell = draft.selectedCell, (0..<draft.rowCount).contains(cell.row),
+                  draft.result.columns.indices.contains(cell.column) else { return nil }
+            let count = cell.row < draft.result.rows.count ? draft.result.rows[cell.row].count
+                : draft.inserted[cell.row - draft.result.rows.count].count
+            return cell.column < count ? cell : nil
+        }
+        var canCopySelectedValue: Bool { !editing && clipboardCell != nil }
+        var canPasteSelectedValue: Bool {
+            guard !editing, let cell = clipboardCell, let table,
+                  draft.canEditCell(row: cell.row, column: cell.column), draft.column(cell.column) != nil else { return false }
+            return table.pasteboard.availableType(from: [.string]) != nil
+        }
+        @discardableResult func copySelectedValue() -> Bool {
+            guard canCopySelectedValue, let cell = clipboardCell, let table else { return false }
+            SQLCellClipboard.write(draft.value(row: cell.row, column: cell.column), to: table.pasteboard)
+            return true
+        }
+        @discardableResult func pasteSelectedValue() -> Bool {
+            guard canPasteSelectedValue, let cell = clipboardCell, let column = draft.column(cell.column), let table,
+                  let value = SQLCellClipboard.read(from: table.pasteboard) else { return false }
+            do {
+                let validated: SQLCellValue
+                switch value {
+                case .text(let text): validated = .text(try SQLCellInput.validate(text, column: column))
+                case .null:
+                    guard column.nullable else { throw DatabaseFailure("Este campo no admite NULL.") }
+                    validated = .null
+                case .serverDefault:
+                    guard column.canDefault else { throw DatabaseFailure("Este campo no tiene DEFAULT.") }
+                    validated = .serverDefault
+                }
+                draft.error = nil
+                draft.set(validated, row: cell.row, column: cell.column)
+                table.reloadData()
+                return true
+            } catch { draft.error = AppError.describe(error)
+            return false }
         }
         func navigate(key: UInt16, shift: Bool = false) {
             guard !editing, let table, draft.rowCount > 0, !table.tableColumns.isEmpty else { return }
@@ -378,6 +448,7 @@ struct SQLResultGrid: NSViewRepresentable {
             editing = true
             let editor = SQLCellEditorController(column: metadata, value: draft.value(row: row, column: column))
             editor.scale = scale
+            editor.textView.pasteboard = table.pasteboard
             editor.serverNow = serverNow
             cellEditor = editor
             let tableColumn = table.tableColumns[column]
@@ -436,7 +507,8 @@ struct SQLResultGrid: NSViewRepresentable {
                 menu.addItem(item)
             }
             menu.autoenablesItems = false
-            add("Copiar valor", "copy")
+            add("Copiar valor", "copy", enabled: canCopySelectedValue)
+            add("Pegar valor", "paste", enabled: canPasteSelectedValue)
             if !draft.canEdit { add(draft.reason.isEmpty ? "Edición no disponible" : draft.reason, "", enabled: false) }
             let metadata = draft.column(column)
             add("Editar celda", "edit", enabled: draft.canEdit && metadata?.generated != true && !draft.deleted.contains(row))
@@ -458,8 +530,9 @@ struct SQLResultGrid: NSViewRepresentable {
             guard let action = item.representedObject as? String else { return }
             switch action {
             case "copy":
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(draft.value(row: menuRow, column: menuColumn).display, forType: .string)
+                copySelectedValue()
+            case "paste":
+                pasteSelectedValue()
             case "edit":
                 beginEditing(row: menuRow, column: menuColumn)
                 return

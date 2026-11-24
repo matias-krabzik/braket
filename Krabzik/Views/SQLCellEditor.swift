@@ -1,6 +1,23 @@
 import AppKit
 
 final class SQLCellTextView: NSTextView {
+    var pasteboard = NSPasteboard.general
+    override func copy(_ sender: Any?) {
+        let range = selectedRange()
+        guard range.length > 0, range.location != NSNotFound, NSMaxRange(range) <= string.utf16.count else { return }
+        let text = (string as NSString).substring(with: range)
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+    }
+    override func paste(_ sender: Any?) { _ = readSelection(from: pasteboard, type: .string) }
+    private func handleClipboard(_ event: NSEvent) -> Bool {
+        guard window?.firstResponder === self, let action = SQLCellClipboard.action(for: event) else { return false }
+        switch action {
+        case .copy: copy(nil)
+        case .paste: paste(nil)
+        }
+        return true
+    }
     var confirm: (() -> Void)?
     var cancel: (() -> Void)?
     var advance: ((Bool) -> Void)?
@@ -13,6 +30,7 @@ final class SQLCellTextView: NSTextView {
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if handleClipboard(event) { return true }
         if [36, 76].contains(event.keyCode), event.modifierFlags.contains(.command) {
             commandEnter()
             return true
@@ -25,6 +43,7 @@ final class SQLCellTextView: NSTextView {
     }
 
     override func keyDown(with event: NSEvent) {
+        if handleClipboard(event) { return }
         if [36, 76].contains(event.keyCode), !hasMarkedText() {
             if event.modifierFlags.contains(.command) { commandEnter() } else { confirm?() }
             return
