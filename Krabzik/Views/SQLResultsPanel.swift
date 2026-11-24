@@ -148,7 +148,10 @@ private struct SQLResultContent: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(16)
             } else {
                 SQLResultGrid(draft: draft, scale: controller.settings.resultFontScale, theme: controller.settings.theme,
-                              serverNow: { column in
+                              openRelated: { target in
+                                  guard let connection = draft.result.connection else { return }
+                                  controller.openRelatedRecord(target, connection: connection)
+                              }, serverNow: { column in
                                   guard let connection = draft.result.connection else { throw DatabaseFailure("Sin conexión MySQL.") }
                                   return try await controller.database.serverNow(column: column, connection: connection)
                               })
@@ -158,11 +161,19 @@ private struct SQLResultContent: View {
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12)
                     .qaLabel("sql.result.schemaError", error)
             }
+            if let error = draft.relations.error {
+                HStack {
+                    Text(error).font(Theme.interfaceFont(12)).foregroundStyle(.orange)
+                    Spacer()
+                    Button("Reintentar") { Task { await loadRelations() } }
+                }.padding(8)
+            }
             if let error = draft.result.error {
                 Text(error).font(Theme.interfaceFont(12)).foregroundStyle(.orange).textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(8)
             }
         }
+        .task { await loadRelations() }
         .onAppear { draft.configure(schemaTable) }
         .onChange(of: schemaTable) { _, table in draft.configure(table) }
         .sheet(isPresented: $draft.showingReview) {
@@ -201,6 +212,45 @@ private struct SQLResultContent: View {
                 .qaScreen("grid.review")
         }
     }
+    private func loadRelations() async {
+        guard let connection = draft.result.connection else { return }
+        let relations = draft.relations
+        let client = controller.database.client
+        let connections = controller.connections
+        relations.load = { target in
+            guard connections.profiles.contains(where: {
+                $0.id == connection.id && $0.configurationWithoutTint == connection.configurationWithoutTint
+            }) else { throw DatabaseFailure("La conexión del resultado cambió o se quitó. Volvé a ejecutar la consulta de origen.") }
+            let password = try CredentialStore.read(for: connection)
+            return try await client.metadataQuery(target.previewQuery, configuration: connection,
+                                                  password: password)
+        }
+        let sources = Set(draft.result.origins.filter { !$0.database.isEmpty && !$0.table.isEmpty }
+            .map { SQLTableIdentity(database: $0.database, table: $0.table) })
+        var errors: [String] = []
+        for source in sources where relations.keys[source] == nil {
+            guard connections.profiles.contains(where: {
+                $0.id == connection.id && $0.configurationWithoutTint == connection.configurationWithoutTint
+            }) else { relations.error = "La conexión del resultado cambió o se quitó. Volvé a ejecutar la consulta de origen."
+            return }
+            if let cached = controller.database.schema.snapshot(connection)?.tables.first(where: {
+                $0.database == source.database && $0.name == source.table
+            })?.foreignKeys { relations.keys[source] = cached
+            continue }
+            do {
+                let password = try CredentialStore.read(for: connection)
+                let result = try await controller.database.client.metadataQuery(SQLForeignKey.query(database: source.database,
+                                                                                                    table: source.table),
+                                                                                configuration: connection, password: password)
+                try Task.checkCancellation()
+                relations.keys[source] = SQLForeignKey.grouped(result.rows)[source.table] ?? []
+            } catch {
+                if !Task.isCancelled { errors.append("No se pudieron leer las relaciones: " + MySQLClient.message(error)) }
+            }
+        }
+        if !Task.isCancelled { relations.error = errors.isEmpty ? nil : errors.joined(separator: "\n") }
+    }
+
     private func submit() {
         controller.database.submit(draft, profiles: controller.connections.profiles)
     }

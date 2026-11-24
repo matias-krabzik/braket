@@ -39,6 +39,7 @@ struct SQLMutation: Sendable {
 @MainActor @Observable
 final class SQLResultDraft {
     let result: SQLResult
+    let relations = SQLResultRelations()
     var table: SQLSchemaTable?
     var reason = "Cargando estructura…"
     var changes: [SQLCell: SQLCellValue] = [:]
@@ -193,6 +194,7 @@ final class SQLResultDraft {
                                             "reason": "la columna no tiene DEFAULT"])
             return
         }
+        relations.collapse(row)
         defer { QAProbe.state("state.draft", qaFields) }
         if row >= result.rows.count { inserted[row - result.rows.count][column] = value
         return }
@@ -228,6 +230,7 @@ final class SQLResultDraft {
             QAProbe.action("grid.deleteRow", ["row": QAField.count(row)])
             QAProbe.state("state.draft", qaFields)
         }
+        relations.collapse(row)
         if row >= result.rows.count {
             inserted.remove(at: row - result.rows.count)
             insertedOriginals.remove(at: row - result.rows.count)

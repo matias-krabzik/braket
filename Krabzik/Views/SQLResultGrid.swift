@@ -1,6 +1,12 @@
 import SwiftUI
 
 final class SQLGridTable: NSTableView {
+    var expandedRelationRows: Set<Int> = []
+    var relationsLayout: (() -> Void)?
+    override func layout() {
+        super.layout()
+        relationsLayout?()
+    }
     var pasteboard = NSPasteboard.general
     var copySelection: (() -> Bool)?
     var pasteSelection: (() -> Bool)?
@@ -32,14 +38,32 @@ final class SQLGridTable: NSTableView {
         let visibleGrid = clipRect.intersection(rowsRect)
         guard !visibleGrid.isEmpty else { return }
         NSGraphicsContext.saveGraphicsState()
-        NSBezierPath(rect: visibleGrid).addClip()
+        let clipping = NSBezierPath(rect: visibleGrid)
+        clipping.windingRule = .evenOdd
+        for row in expandedRelationRows {
+            let rect = rect(ofRow: row)
+            let card = NSRect(x: visibleGrid.minX, y: rect.minY + rowHeight, width: visibleGrid.width,
+                              height: max(0, rect.height - rowHeight)).intersection(visibleGrid)
+            if !card.isEmpty { clipping.appendRect(card) }
+        }
+        clipping.addClip()
         super.drawGrid(inClipRect: visibleGrid)
+        let lines = NSBezierPath()
+        for column in tableColumns.indices {
+            let x = rect(ofColumn: column).maxX - 0.5
+            lines.move(to: NSPoint(x: x, y: rowsRect.minY))
+            lines.line(to: NSPoint(x: x, y: rowsRect.maxY))
+        }
+        gridColor.setStroke()
+        lines.lineWidth = 1
+        lines.stroke()
         NSGraphicsContext.restoreGraphicsState()
     }
 
     var navigate: ((UInt16, Bool) -> Void)?
     var editSelected: (() -> Void)?
     var review: (() -> Void)?
+    var openRelatedRow: ((Int, Int, NSPoint) -> Void)?
     var contextualMenu: ((Int, Int) -> NSMenu)?
     override func menu(for event: NSEvent) -> NSMenu? {
         let point = convert(event.locationInWindow, from: nil)
@@ -53,6 +77,14 @@ final class SQLGridTable: NSTableView {
             let point = convert(event.locationInWindow, from: nil)
             let frame = editor.view.convert(editor.view.bounds, to: self)
             if !frame.contains(point), !editor.confirmValue() { return }
+        }
+        if event.modifierFlags.intersection([.command, .option, .control, .shift]) == .command {
+            let point = convert(event.locationInWindow, from: nil)
+            let row = row(at: point)
+            if row >= 0, point.y - rect(ofRow: row).minY < rowHeight {
+                openRelatedRow?(row, column(at: point), point)
+                return
+            }
         }
         super.mouseDown(with: event)
     }
@@ -115,6 +147,13 @@ private final class SQLGridCellView: NSTableCellView {
         addSubview(valueLabel)
         textField = valueLabel
     }
+    override func layout() {
+        super.layout()
+        let scale = (superview as? SQLRelationRowView)?.grid?.rowHeight ?? 27
+        valueLabel.frame = NSRect(x: 0, y: bounds.height - min(bounds.height, scale), width: max(0, bounds.width - 1),
+                                  height: max(0, min(bounds.height, scale) - 1))
+        if isFlipped { valueLabel.frame.origin.y = 0 }
+    }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }
 
@@ -122,13 +161,17 @@ private final class SQLGridCellView: NSTableCellView {
 private final class SQLGridScroller: NSScroller {}
 
 private final class SQLGridScrollView: NSScrollView {
+    let relationRail = SQLRelationRail()
+    var relationWidth: CGFloat = 0
+
     override func tile() {
         super.tile()
         let gutter = NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
         var viewport = contentView.frame
-        viewport.size.width = min(viewport.width, max(0, bounds.width - gutter))
+        viewport.size.width = min(viewport.width, max(0, bounds.width - gutter - relationWidth))
         viewport.size.height = min(viewport.height, max(0, bounds.height - gutter))
         contentView.frame = viewport
+        relationRail.frame = NSRect(x: viewport.maxX, y: viewport.minY, width: relationWidth, height: viewport.height)
     }
 }
 
@@ -156,9 +199,11 @@ struct SQLResultGrid: NSViewRepresentable {
     let draft: SQLResultDraft
     let scale: Double
     let theme: AppTheme
+    var openRelated: ((SQLRelatedTarget) -> Void)?
     var serverNow: (@MainActor (SQLSchemaColumn) async throws -> String)?
     func makeCoordinator() -> Coordinator { Coordinator(draft: draft) }
     static func dismantleNSView(_ scroll: NSScrollView, coordinator: Coordinator) {
+        NotificationCenter.default.removeObserver(coordinator)
         coordinator.cellEditor?.cancelEditing()
         coordinator.draft.scrollOrigin = scrollOffset(in: scroll)
     }
@@ -186,15 +231,23 @@ struct SQLResultGrid: NSViewRepresentable {
         scroll.horizontalScroller = SQLGridScroller()
         scroll.scrollerStyle = .legacy
         scroll.autohidesScrollers = false
+        scroll.addSubview(scroll.relationRail)
+        scroll.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(context.coordinator, selector: #selector(Coordinator.layoutRelations),
+                                               name: NSView.boundsDidChangeNotification, object: scroll.contentView)
         let table = SQLGridTable()
         table.style = .plain
         table.selectionHighlightStyle = .none
         table.allowsMultipleSelection = false
         table.navigate = { [weak coordinator = context.coordinator] key, shift in coordinator?.navigate(key: key, shift: shift) }
+        table.relationsLayout = { [weak coordinator = context.coordinator] in coordinator?.layoutRelations() }
+        table.openRelatedRow = { [weak coordinator = context.coordinator] row, column, point in
+            coordinator?.activateRelation(row: row, column: column, point: point, newTab: true)
+        }
         table.editSelected = { [weak coordinator = context.coordinator] in coordinator?.editSelectedCell() }
         table.columnAutoresizingStyle = .noColumnAutoresizing
         table.intercellSpacing = .zero
-        table.gridStyleMask = [.solidVerticalGridLineMask, .solidHorizontalGridLineMask]
+        table.gridStyleMask = [.solidHorizontalGridLineMask]
         table.gridColor = .separatorColor.withAlphaComponent(0.2)
         table.delegate = context.coordinator
         table.dataSource = context.coordinator
@@ -229,6 +282,14 @@ struct SQLResultGrid: NSViewRepresentable {
         coordinator.scale = scale
         coordinator.theme = theme
         coordinator.serverNow = serverNow
+        coordinator.openRelated = openRelated
+        _ = draft.relations.keys
+        _ = draft.relations.expanded
+        if let scroll = scroll as? SQLGridScrollView {
+            scroll.relationWidth = draft.relations.keys.values.contains(where: { !$0.isEmpty }) ? 32 * scale : 0
+            scroll.relationRail.layer?.backgroundColor = EditorPalette.background(for: theme).cgColor
+            scroll.tile()
+        }
         // Observe the pending values even while the table owns its field editor.
         _ = draft.changes
         _ = draft.inserted
@@ -268,6 +329,8 @@ struct SQLResultGrid: NSViewRepresentable {
             }
             coordinator.insertedCount = draft.inserted.count
         }
+        coordinator.refreshRelationHeights()
+        coordinator.layoutRelations()
         if !coordinator.restoredScroll {
             coordinator.restoredScroll = true
             let origin = draft.scrollOrigin
@@ -301,6 +364,9 @@ struct SQLResultGrid: NSViewRepresentable {
         var settingWidth = false
         var restoredScroll = false
         var insertedCount = 0
+        var openRelated: ((SQLRelatedTarget) -> Void)?
+        private var relationHeights: [Int: CGFloat] = [:]
+        private var layingOutRelations = false
         private func modelRow(_ row: Int) -> Int {
             row < draft.inserted.count ? draft.rowCount - 1 - row : row - draft.inserted.count
         }
@@ -314,7 +380,7 @@ struct SQLResultGrid: NSViewRepresentable {
             if editing, let cell = draft.selectedCell, cell.row == modelRow(row), let editor = cellEditor {
                 return max(27 * scale, editor.desiredHeight)
             }
-            return 27 * scale
+            return 27 * scale + (draft.relations.expanded[modelRow(row)]?.cardHeight(scale: scale) ?? 0)
         }
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
             guard let column = Int(tableColumn?.identifier.rawValue ?? ""), row < draft.rowCount else { return nil }
@@ -344,10 +410,29 @@ struct SQLResultGrid: NSViewRepresentable {
             let pending = draft.changes[SQLCell(row: row, column: column)] != nil || row >= draft.result.rows.count
             field.textColor = draft.deleted.contains(row) ? .systemRed : pending ? .systemOrange
                 : value == .null || value == .serverDefault ? .tertiaryLabelColor : EditorPalette.text
+            let related = !draft.relations.targets(row: row, column: column, draft: draft).isEmpty
+            if related {
+                let text = NSMutableAttributedString(string: value.display, attributes: [
+                    .font: Theme.nativeCodeFont(scale: scale), .foregroundColor: pending ? NSColor.systemOrange : NSColor.systemBlue
+                ])
+                text.append(NSAttributedString(string: "  "))
+                if let image = NSImage(systemSymbolName: "link", accessibilityDescription: "Clave foránea") {
+                    let attachment = NSTextAttachment()
+                    image.isTemplate = true
+                    attachment.image = image
+                    attachment.bounds = NSRect(x: 0, y: -2 * scale, width: 12 * scale, height: 12 * scale)
+                    text.append(NSAttributedString(attachment: attachment))
+                }
+                field.attributedStringValue = text
+            }
             field.lineBreakMode = .byTruncatingTail
             field.usesSingleLineMode = true
             field.toolTip = value.display + "\nFlechas: navegar · ⌘C: copiar · ⌘V: pegar"
                 + " · Enter: editar · ⌘Enter: revisar cambios"
+            if related {
+                field.toolTip = "Clave foránea · " + value.display
+                    + "\nBotón al extremo derecho: ver detalle · ⌘+clic: abrir en pestaña"
+            }
             field.setAccessibilityLabel(draft.result.columns[column] + ", fila \(visibleRow(row) + 1)")
             return cell
         }
@@ -442,6 +527,8 @@ struct SQLResultGrid: NSViewRepresentable {
         }
         func beginEditing(row: Int, column: Int) {
             guard !editing, let table, let metadata = draft.column(column), draft.canEditCell(row: row, column: column) else { return }
+            draft.relations.collapse(row)
+            refreshRelationHeights()
             select(row: row, column: column)
             guard let field = table.view(atColumn: column, row: visibleRow(row), makeIfNecessary: true),
                   draft.beginEditing(row: row, column: column) else { return }
@@ -492,6 +579,79 @@ struct SQLResultGrid: NSViewRepresentable {
             editor.onAdvance = { [weak self] shift in self?.navigate(key: 48, shift: shift) }
             editor.show(relativeTo: field.bounds, of: field)
         }
+        func refreshRelationHeights() {
+            guard let table else { return }
+            let heights = Dictionary(uniqueKeysWithValues: draft.relations.expanded.map {
+                (visibleRow($0.key), $0.value.cardHeight(scale: scale))
+            })
+            if heights != relationHeights {
+                let changed = Set(heights.keys).union(relationHeights.keys).filter { $0 >= 0 && $0 < draft.rowCount }
+                relationHeights = heights
+                table.expandedRelationRows = Set(heights.keys)
+                table.noteHeightOfRows(withIndexesChanged: IndexSet(changed))
+                table.needsDisplay = true
+            }
+        }
+        func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+            let view = SQLRelationRowView()
+            view.grid = table
+            let index = modelRow(row)
+            view.configure(record: draft.relations.expanded[index], scale: scale, theme: theme,
+                           open: { [weak self] target in self?.openRelated?(target) },
+                           close: { [weak self] in self?.draft.relations.collapse(index) })
+            return view
+        }
+        @objc func layoutRelations() {
+            guard !layingOutRelations, let table, let scroll = table.enclosingScrollView as? SQLGridScrollView else { return }
+            layingOutRelations = true
+            defer { layingOutRelations = false }
+            let rail = scroll.relationRail
+            rail.subviews.forEach { $0.removeFromSuperview() }
+            table.enumerateAvailableRowViews { view, row in
+                view.needsLayout = true
+                view.layoutSubtreeIfNeeded()
+                guard rail.frame.width > 0, !self.draft.relations.targets(row: self.modelRow(row), draft: self.draft).isEmpty else {
+                    return
+                }
+                let button = SQLRelationButton()
+                button.isBordered = false
+                button.image = NSImage(systemSymbolName: self.draft.relations.expanded[self.modelRow(row)] == nil
+                                       ? "chevron.down" : "chevron.up", accessibilityDescription: "Ver registro relacionado")
+                button.toolTip = "Ver registro relacionado · ⌘+clic: abrir en una nueva pestaña"
+                let point = table.convert(NSPoint(x: 0, y: table.rect(ofRow: row).minY), to: rail)
+                button.frame = NSRect(x: 2, y: point.y, width: rail.bounds.width - 4, height: 27 * self.scale)
+                button.perform = { [weak self] flags in
+                    self?.activateRelation(row: row, column: -1,
+                                           point: NSPoint(x: table.visibleRect.maxX - 24, y: table.rect(ofRow: row).minY),
+                                           newTab: flags.contains(.command))
+                }
+                rail.addSubview(button)
+            }
+        }
+        func activateRelation(row: Int, column: Int, point: NSPoint, newTab: Bool) {
+            guard !editing, let table else { return }
+            let row = modelRow(row)
+            let cellTargets = draft.relations.targets(row: row, column: column, draft: draft)
+            let targets = cellTargets.isEmpty ? draft.relations.targets(row: row, draft: draft) : cellTargets
+            guard !targets.isEmpty else { return }
+            let perform: (SQLRelatedTarget) -> Void = { [weak self] target in
+                guard let self else { return }
+                if newTab { self.openRelated?(target) }
+                else { self.draft.relations.toggle(target, row: row) }
+            }
+            if targets.count == 1 { perform(targets[0])
+            return }
+            let menu = NSMenu()
+            for target in targets {
+                let item = NSMenuItem(title: target.label, action: #selector(chooseRelation(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = SQLRelationMenuAction { perform(target) }
+                menu.addItem(item)
+            }
+            menu.popUp(positioning: nil, at: point, in: table)
+        }
+        @objc private func chooseRelation(_ item: NSMenuItem) { (item.representedObject as? SQLRelationMenuAction)?.perform() }
+
         func menu(row: Int, column: Int) -> NSMenu {
             let row = modelRow(row)
             table?.window?.makeFirstResponder(table)
@@ -507,6 +667,11 @@ struct SQLResultGrid: NSViewRepresentable {
                 menu.addItem(item)
             }
             menu.autoenablesItems = false
+            if !draft.relations.targets(row: row, column: column, draft: draft).isEmpty {
+                add("Ver registro relacionado", "related")
+                add("Abrir registro en nueva pestaña", "related-tab")
+                menu.addItem(.separator())
+            }
             add("Copiar valor", "copy", enabled: canCopySelectedValue)
             add("Pegar valor", "paste", enabled: canPasteSelectedValue)
             if !draft.canEdit { add(draft.reason.isEmpty ? "Edición no disponible" : draft.reason, "", enabled: false) }
@@ -529,6 +694,10 @@ struct SQLResultGrid: NSViewRepresentable {
         @objc private func menuAction(_ item: NSMenuItem) {
             guard let action = item.representedObject as? String else { return }
             switch action {
+            case "related", "related-tab":
+                guard let table else { return }
+                activateRelation(row: visibleRow(menuRow), column: menuColumn,
+                                 point: NSPoint(x: 20, y: table.rect(ofRow: visibleRow(menuRow)).minY), newTab: action == "related-tab")
             case "copy":
                 copySelectedValue()
             case "paste":

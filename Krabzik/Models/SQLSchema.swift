@@ -52,6 +52,7 @@ struct SQLSchemaTable: Codable, Sendable, Equatable, Identifiable {
     var primaryKey: [String]?
     var createSQL: String?
     var metadataComplete: Bool?
+    var foreignKeys: [SQLForeignKey]?
     var id: String { database + "." + name }
     var qualified: String { SQLValue.identifier(database) + "." + SQLValue.identifier(name) }
 

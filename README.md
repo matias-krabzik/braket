@@ -94,6 +94,8 @@ No se guardan en disco y sobreviven a una reconexión de MySQL, hasta cerrar la 
 
 Con **⌘+clic** sobre una tabla en el editor SQL se abre su definición (`CREATE TABLE`) en una pestaña nueva de solo lectura. También está disponible desde **Abrir definición de tabla** en el menú contextual del explorador. La navegación usa la conexión y base seleccionadas en el archivo y respeta las referencias `base.tabla`.
 
+Los resultados señalan las claves foráneas declaradas en MySQL con un icono de enlace. El botón fijo al extremo derecho de cada fila abre una tarjeta anidada con el registro relacionado; si hay varias relaciones, permite elegir. **⌘+clic** sobre una celda relacionada (o sobre la fila cuando hay una única relación) abre una nueva pestaña con la consulta del registro. La tarjeta también ofrece **Abrir en pestaña**. Se respetan las claves compuestas; NULL y relaciones cuyos componentes no estén en el resultado no se navegan. La vista previa es de solo lectura y consulta hasta 100 registros usando una conexión independiente, sin interrumpir la sesión del editor.
+
 La herramienta **Logs** de la barra lateral abre el historial SQL del proyecto en el panel inferior.
 La pestaña **Logs** es fija, no tiene botón de cierre y comparte la barra con las pestañas de resultados.
 El editor permanece visible al consultar el historial. Guarda cada consulta

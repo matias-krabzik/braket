@@ -12,6 +12,8 @@ final class SQLSchemaLoadingTests: XCTestCase {
             var result = SQLResult(statement: 0, line: 1)
             if sql.contains("INFORMATION_SCHEMA.TABLES") {
                 result.rows = (offset..<min(offset + 500, 1201)).map { ["table_\($0)", "BASE TABLE", "InnoDB"] }
+            } else if sql.contains("INFORMATION_SCHEMA.KEY_COLUMN_USAGE") {
+                result.rows = []
             } else if sql.contains("INFORMATION_SCHEMA.COLUMNS") {
                 if failColumns { throw DatabaseFailure("Permiso de metadatos denegado") }
                 result.rows = (offset..<min(offset + 500, 2402)).map {
@@ -37,7 +39,7 @@ final class SQLSchemaLoadingTests: XCTestCase {
         XCTAssertTrue(snapshot.tables.allSatisfy { $0.columns.count == 2 && $0.uniqueKeys == [["id"]] })
         let calls = await pages.calls
         XCTAssertTrue(snapshot.tables.allSatisfy { $0.primaryKey == ["id"] })
-        XCTAssertEqual(calls, 11, "1201 tables must not require 2403 queries")
+        XCTAssertEqual(calls, 12, "1201 tables must not require 2403 queries")
         let progress = await sink.values
         XCTAssertEqual(progress[1].tables?.count, 1201)
         XCTAssertTrue(progress[1].tables?.allSatisfy { $0.columns.isEmpty } == true)

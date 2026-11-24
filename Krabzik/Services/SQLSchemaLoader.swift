@@ -53,6 +53,9 @@ struct SQLSchemaLoader: Sendable {
                 tables[index].uniqueKeys = indices.keys.sorted().filter { invalid[table]?.contains($0) != true }
                     .compactMap { indices[$0] }
             }
+            let foreignRows = try await pages(SQLForeignKey.query(database: database))
+            let foreignKeys = SQLForeignKey.grouped(foreignRows)
+            for index in tables.indices { tables[index].foreignKeys = foreignKeys[tables[index].name] ?? [] }
             allTables += tables
             await progress(.init(database: database, message: "\(database): estructura cargada.", tables: tables))
         }

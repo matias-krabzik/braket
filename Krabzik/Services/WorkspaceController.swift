@@ -417,6 +417,26 @@ final class WorkspaceController {
         }
     }
 
+    func openRelatedRecord(_ target: SQLRelatedTarget, connection: DatabaseConnection) {
+        guard !isReadOnly, workspace != nil, !isSwitchingWorkspace else { return }
+        guard connections.profiles.contains(where: {
+            $0.id == connection.id && $0.configurationWithoutTint == connection.configurationWithoutTint
+        }) else {
+            errors.report(DatabaseFailure("La conexión del resultado cambió o se quitó. Volvé a ejecutar la consulta de origen."))
+            return
+        }
+        do {
+            let suggested = target.key.table + ".sql"
+            let name = ExplorerFileSystem.validName(suggested) ? suggested : "registro.sql"
+            let document = try docs.createDraft(name: name, text: target.query + "\n")
+            connections.select(connection.id, for: document)
+            workflowVisible = false
+            outputVisible = false
+            sqlResultsDocumentID = document.id
+            database.execute(document, connection: connection, databaseOverride: target.key.database)
+        } catch { errors.report(error) }
+    }
+
     func renameFile(_ url: URL) {
         guard fileOperation == nil else { return }
         if let destination = files.rename(url) { connections.relocateScript(from: url, to: destination) }
