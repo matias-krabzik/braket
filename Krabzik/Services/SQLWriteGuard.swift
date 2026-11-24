@@ -47,6 +47,7 @@ enum SQLWriteGuard {
         let outer = scan.outer
         if Array(outer.prefix(2)) == ["SET", "LIST"] {
             guard let list = try? SQLListStatement.parse(statement, noBackslashEscapes: noBackslashEscapes) else { return .write }
+            if list.literalValues != nil { return .read }
             return effect(of: list.query, noBackslashEscapes: noBackslashEscapes)
         }
         switch first.word {

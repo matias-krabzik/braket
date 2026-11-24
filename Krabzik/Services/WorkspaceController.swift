@@ -387,6 +387,36 @@ final class WorkspaceController {
         }
     }
 
+    func openTableDefinition(at position: Int, in document: EditorDocument) {
+        guard let connection = connections.selected(for: document) else { return }
+        let state = database.state(connection.id)
+        guard let reference = SQLTableReference.at(position, in: document.text,
+                                                   noBackslashEscapes: state.noBackslashEscapes) else { return }
+        let target = reference.database ?? (state.currentDatabase.isEmpty ? connection.database : state.currentDatabase)
+        guard !target.isEmpty else {
+            errors.report(DatabaseFailure("Seleccioná una base de datos para abrir la definición de la tabla."))
+            return
+        }
+        openTableDefinition(SQLSchemaTable(database: target, name: reference.name, kind: "BASE TABLE", engine: ""),
+                            connection: connection)
+    }
+
+    func openTableDefinition(_ table: SQLSchemaTable, connection: DatabaseConnection) {
+        let project = workspaceURL
+        Task {
+            do {
+                let password = try CredentialStore.read(for: connection)
+                let sql = try await database.client.createTable(table, config: connection, password: password)
+                guard workspaceURL == project, connections.profiles.contains(where: { $0.id == connection.id }) else { return }
+                _ = try docs.openTableDefinition(table, sql: sql)
+                workflowVisible = false
+            } catch {
+                guard workspaceURL == project else { return }
+                errors.report(error)
+            }
+        }
+    }
+
     func renameFile(_ url: URL) {
         guard fileOperation == nil else { return }
         if let destination = files.rename(url) { connections.relocateScript(from: url, to: destination) }
@@ -489,7 +519,7 @@ final class WorkspaceController {
 
     func executeSQL() {
         if SQLGridTable.reviewFocusedGrid() { return }
-        guard let document = selectedDocument, document.language == "SQL",
+        guard let document = selectedDocument, document.language == "SQL", !document.isTableDefinition,
               let connection = connections.selected(for: document), !isReadOnly else {
             QAProbe.action("sql.execute.unavailable", ["language": selectedDocument?.language ?? "",
                                                        "readOnly": QAField.bool(isReadOnly),
@@ -504,7 +534,7 @@ final class WorkspaceController {
     }
 
     func executeSQLFile() {
-        guard let document = selectedDocument, document.language == "SQL",
+        guard let document = selectedDocument, document.language == "SQL", !document.isTableDefinition,
               let connection = connections.selected(for: document), !isReadOnly else { return }
         sqlResultsDocumentID = document.id
         outputVisible = false

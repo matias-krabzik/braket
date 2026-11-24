@@ -164,7 +164,8 @@ struct WorkspaceView: View {
                         ForEach(controller.documents) { document in
                             WorkspaceEditorTab(title: document.url.lastPathComponent,
                                                icon: Image(nsImage: FileIcons.file(document.url)),
-                                               tooltip: document.isDraft ? "Borrador · sin guardar" : document.url.path,
+                                               tooltip: document.isTableDefinition ? "Definición de tabla · solo lectura"
+                                                   : document.isDraft ? "Borrador · sin guardar" : document.url.path,
                                                isDirty: document.isDirty,
                                                selected: !controller.workflowVisible && controller
                                                .selectedDocumentID == document.id,
@@ -277,7 +278,7 @@ struct WorkspaceView: View {
                         Button("Recargar") { controller.files.reload(document) }
                     }.font(.system(size: Theme.zoom(11))).padding(.horizontal, 18).padding(.vertical, 6)
                 }
-                if document.language == "SQL" { SQLToolbar(document: document, controller: controller) }
+                if document.language == "SQL", !document.isTableDefinition { SQLToolbar(document: document, controller: controller) }
                 ZStack(alignment: .topTrailing) {
                     if document.pixelArt != nil {
                         PixelArtEditorView(document: document, readOnly: controller.isReadOnly,
@@ -294,12 +295,16 @@ struct WorkspaceView: View {
                         markdownContent(document)
                     } else {
                         CodeEditor(document: document, theme: Theme.settings.theme, uiScale: controller.settings.codeFontScale,
-                                   wrapsLines: controller.settings.wrapLines, readOnly: controller.isReadOnly,
+                                   wrapsLines: controller.settings.wrapLines, readOnly: controller.isReadOnly || document.isTableDefinition,
                                    options: controller.settings.editorOptions,
                                    canExecuteSelection: canExecuteSelection(document),
                                    executeSelection: {
                                        guard controller.selectedDocument?.id == document.id else { return }
                                        controller.executeSQL()
+                                   }, navigationNoBackslashEscapes: controller.connections.selected(for: document)
+                                       .map { controller.database.state($0.id).noBackslashEscapes } ?? false,
+                                   openTableDefinition: { position in
+                                       controller.openTableDefinition(at: position, in: document)
                                    }, completion: { text, position in
                                        let connection = controller.connections.selected(for: document)
                                        let noBackslash = connection.map { controller.database.state($0.id).noBackslashEscapes } ?? false
@@ -312,7 +317,8 @@ struct WorkspaceView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                     if document.search.visible, document.pixelArt == nil, document.previewImage == nil {
-                        EditorSearchBar(document: document, readOnly: controller.isReadOnly, search: document.search)
+                        EditorSearchBar(document: document, readOnly: controller.isReadOnly || document.isTableDefinition,
+                                        search: document.search)
                             .id(document.id)
                             .frame(maxWidth: Theme.zoom(620))
                             .padding(12)
@@ -329,7 +335,7 @@ struct WorkspaceView: View {
     }
 
     private func canExecuteSelection(_ document: EditorDocument) -> Bool {
-        guard document.language == "SQL", !controller.isReadOnly, !document.sqlExecution.isRunning,
+        guard document.language == "SQL", !document.isTableDefinition, !controller.isReadOnly, !document.sqlExecution.isRunning,
               let connection = controller.connections.selected(for: document) else { return false }
         return !controller.database.state(connection.id).busy
     }

@@ -30,6 +30,7 @@ final class EditorDocument: Identifiable {
     let id: URL
     var url: URL { id }
     var focusEditorOnOpen = true
+    var isTableDefinition = false
     var isDraft = false
     var draftConnectionID: UUID?
     var isDirty = false

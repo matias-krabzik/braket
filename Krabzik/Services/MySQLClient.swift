@@ -243,6 +243,26 @@ actor MySQLClient {
             do {
                 listStatement = try SQLListStatement.parse(statement.text, noBackslashEscapes: noBackslash)
                 if let listStatement { await clientLists.remove(listStatement.name, scope: listScope) }
+                if let listStatement, let values = listStatement.literalValues {
+                    let list = try SQLClientList(name: listStatement.name, values: values, query: statement.text)
+                    var local = SQLResult(statement: statementNumber, line: statement.line)
+                    local.sql = statement.text
+                    local.connection = configuration
+                    local.database = session.database
+                    local.setValues = []
+                    try await onStatement(local)
+                    try Task.checkCancellation()
+                    guard !cancelled.contains(operation), !timedOut.contains(operation) else { throw CancellationError() }
+                    try await clientLists.set(list, scope: listScope)
+                    timeout.cancel()
+                    if timedOut.contains(operation) || cancelled.contains(operation) || Task.isCancelled {
+                        await clientLists.remove(listStatement.name, scope: listScope)
+                        throw CancellationError()
+                    }
+                    local.setValues = [list.note]
+                    await onResult(local)
+                    continue
+                }
                 expanded = try SQLListStatement.expand(listStatement?.query ?? statement.text,
                                                        lists: await clientLists.snapshot(listScope), noBackslashEscapes: noBackslash)
                 let scalars = try SQLScalarExpansion(expanded, noBackslashEscapes: noBackslash)

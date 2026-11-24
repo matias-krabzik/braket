@@ -27,6 +27,49 @@ final class SQLClientListTests: XCTestCase {
         XCTAssertEqual(SQLWriteGuard.effect(of: "SET LIST ids = (SELECT 1 INTO OUTFILE '/tmp/a')"), .write)
     }
 
+    func testLiteralEmailListAndExpansion() throws {
+        let sql = "SET LIST EMAIL = ['ashlee@example.com', 'nick@example.com'];"
+        let statement = try XCTUnwrap(SQLListStatement.parse(sql))
+        XCTAssertEqual(statement.name, "EMAIL")
+        let list = try SQLClientList(name: statement.name, values: XCTUnwrap(statement.literalValues), query: sql)
+        XCTAssertEqual(list.values, [.text("ashlee@example.com"), .text("nick@example.com")])
+        XCTAssertEqual(try SQLListStatement.expand("SELECT * FROM Users WHERE email IN ({{EMAIL}})", lists: ["EMAIL": list]),
+                       "SELECT * FROM Users WHERE email IN ('ashlee@example.com', 'nick@example.com')")
+        XCTAssertEqual(list.note.listSnapshot, list)
+        XCTAssertEqual(list.note.clipboardReference, "{{EMAIL}}")
+        XCTAssertEqual(list.note.clipboardValues, "'ashlee@example.com', 'nick@example.com'")
+        XCTAssertEqual(SQLWriteGuard.effect(of: sql), .read)
+        var script = SQLScript(sql + "\nSELECT 1 WHERE 'a' IN ({{EMAIL}});")
+        XCTAssertNotNil(try SQLListStatement.parse(XCTUnwrap(script.next()).text)?.literalValues)
+        XCTAssertTrue(try XCTUnwrap(script.next()).text.hasPrefix("SELECT"))
+        XCTAssertNil(try script.next())
+    }
+
+    func testLiteralValuesRespectTypesEscapesCommentsAndDeduplication() throws {
+        let sql = #"SET LIST items = [9007199254740993, -2.5e+3, '001', 'O''Brien', '😀,]', NULL, '001', /* , ] */ "x"]"#
+        let statement = try XCTUnwrap(SQLListStatement.parse(sql))
+        let list = try SQLClientList(name: statement.name, values: XCTUnwrap(statement.literalValues), query: sql)
+        XCTAssertEqual(list.values, [.number("9007199254740993"), .number("-2.5e+3"), .text("001"), .text("O'Brien"),
+                                     .text("😀,]"), .text("x")])
+        XCTAssertFalse(list.sql.contains("CONVERT"))
+        XCTAssertEqual(try SQLListStatement.parse(#"SET LIST a = ['a\nb']"#)?.literalValues, [.text("a\nb")])
+        XCTAssertEqual(try SQLListStatement.parse(#"SET LIST a = ['a\nb']"#, noBackslashEscapes: true)?.literalValues,
+                       [.text(#"a\nb"#)])
+        XCTAssertEqual(try SQLListStatement.parse("SET LIST a = []")?.literalValues, [])
+        XCTAssertEqual(try SQLListStatement.parse("SET LIST a = [ /* vacío */ ]")?.literalValues, [])
+    }
+
+    func testLiteralExpressionsMalformedArraysAndLimitsAreRejected() throws {
+        for body in ["[1,]", "[,1]", "[1,,2]", "[[1]]", "[@email]", "[CONCAT('a','b')]", "[1+2]", "[TRUE]",
+                     "['a' 'b']", "['a'] + 1", "['a']; SELECT 1", "['a'", "[/*!1*/ 1]", "[1); DELETE FROM t]"] {
+            XCTAssertThrowsError(try SQLListStatement.parse("SET LIST a = " + body), body)
+        }
+        XCTAssertThrowsError(try SQLClientList(name: "a", values: [.number("1); DROP TABLE t")], query: ""))
+        let oversized = "SET LIST a = [" + Array(repeating: "1", count: 10_001).joined(separator: ",") + "]"
+        XCTAssertThrowsError(try SQLListStatement.parse(oversized))
+        XCTAssertThrowsError(try SQLClientList(name: "a", values: [.text(String(repeating: "x", count: 1_000_001))], query: ""))
+    }
+
     func testTypedExpansionPreservesBigIntegersAndEscapesTextWithoutConvert() throws {
         let ids = try capture(["9007199254740993", "56", nil, "56"])
         XCTAssertEqual(ids.sql, "9007199254740993, 56")

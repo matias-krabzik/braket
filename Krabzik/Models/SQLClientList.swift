@@ -21,6 +21,22 @@ struct SQLClientList: Sendable, Equatable {
                         + values.prefix(10).map(\.sql).joined(separator: ", ") + (values.count > 10 ? ", …" : "") + "\n" + query)
     }
 
+    init(name: String, values: [Element], query: String) throws {
+        guard values.count <= 10_000 else { throw DatabaseFailure("La lista supera 10.000 elementos.") }
+        for case .number(let number) in values {
+            guard number.range(of: #"^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$"#,
+                               options: .regularExpression) != nil else {
+                throw DatabaseFailure("Valor numérico no válido en la lista.")
+            }
+        }
+        self.name = name
+        var seen: Set<String> = []
+        self.values = values.filter { seen.insert($0.sql).inserted }
+        self.query = query
+        self.connectionName = "Valores locales"
+        guard sql.utf8.count <= 1_000_000 else { throw DatabaseFailure("La lista supera el límite de 1 MB.") }
+    }
+
     init(name: String, results: [SQLResult], query: String, connectionName: String) throws {
         guard results.count == 1, let result = results.first, result.columns.count == 1 else {
             throw DatabaseFailure("SET LIST necesita un SELECT que devuelva exactamente una columna.")

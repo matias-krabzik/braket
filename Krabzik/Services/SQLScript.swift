@@ -199,6 +199,7 @@ struct SQLLexeme: Sendable {
     let text: String
     let depth: Int
     var quoted = false
+    var offset = 0
 }
 
 struct SQLWordScan: Sendable {
@@ -245,7 +246,7 @@ extension SQLScript {
                 emit(start, index, byte == Byte.backtick ? "type" : "string")
                 if collectLexemes {
                     scan.lexemes.append(SQLLexeme(text: String(decoding: bytes[start..<min(index, bytes.count)], as: UTF8.self),
-                                                  depth: depth, quoted: true))
+                                                  depth: depth, quoted: true, offset: start))
                 }
             } else if byte == Byte.hash
                 || (byte == Byte.hyphen && following == Byte.hyphen
@@ -290,14 +291,15 @@ extension SQLScript {
                 scan.words.append(SQLWord(word: word, offset: start, depth: depth))
                 if collectSyntax, depth == 0, word == "LIST", followsSet { emit(start, index, "keyword") }
                 if collectLexemes {
-                    scan.lexemes.append(SQLLexeme(text: String(decoding: bytes[start..<index], as: UTF8.self), depth: depth))
+                    scan.lexemes.append(SQLLexeme(text: String(decoding: bytes[start..<index], as: UTF8.self), depth: depth, offset: start))
                 }
             } else {
                 if collectSyntax, [43, 45, 42, 47, 37, 61, 60, 62, 33, 124, 38, 94, 126, 58].contains(byte) {
                     emit(index, index + 1, "operator")
                 }
                 if collectLexemes, byte > Byte.space {
-                    scan.lexemes.append(SQLLexeme(text: String(decoding: [byte], as: UTF8.self), depth: depth))
+                    scan.lexemes.append(SQLLexeme(text: String(decoding: [byte], as: UTF8.self),
+                                                  depth: depth, offset: index))
                 }
                 index += 1
             }

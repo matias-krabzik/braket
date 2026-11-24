@@ -2,7 +2,6 @@ import SwiftUI
 
 struct DatabaseExplorer: View {
     let controller: WorkspaceController
-    @State private var ddl: String?
     @State private var removing: DatabaseConnection?
     var body: some View {
         let widestCount = controller.connections.profiles.map(countText).max { $0.count < $1.count } ?? ""
@@ -42,16 +41,6 @@ struct DatabaseExplorer: View {
             Button("Cancelar", role: .cancel) { removing = nil }
         } message: {
             Text("Se quitará de este proyecto. Las compartidas seguirán disponibles en el catálogo.")
-        }
-        .sheet(isPresented: Binding(get: { ddl != nil }, set: { if !$0 { ddl = nil } })) {
-            VStack(alignment: .leading) {
-                Text("Definición de la tabla").font(.headline)
-                ScrollView([.horizontal, .vertical]) {
-                    Text(ddl ?? "").font(Theme.codeFont()).textSelection(.enabled).padding()
-                }
-                HStack { Spacer()
-                Button("Cerrar") { ddl = nil }.keyboardShortcut(.cancelAction) }
-            }.padding(20).frame(width: 760, height: 520)
         }
     }
 
@@ -250,13 +239,8 @@ struct DatabaseExplorer: View {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(table.qualified, forType: .string)
                 }
-                Button("Ver CREATE TABLE") {
-                    Task {
-                        do {
-                            let password = try CredentialStore.read(for: connection)
-                            ddl = try await controller.database.client.createTable(table, config: connection, password: password)
-                        } catch { store.errors[connection.id] = MySQLClient.message(error) }
-                    }
+                Button("Abrir definición de tabla", systemImage: "doc.text.magnifyingglass") {
+                    controller.openTableDefinition(table, connection: connection)
                 }
             case .column, .pending:
                 Button("Copiar nombre", systemImage: "doc.on.doc") {

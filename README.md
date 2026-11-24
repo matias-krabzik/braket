@@ -73,6 +73,15 @@ SELECT * FROM Users WHERE organization_id IN ({{organizaciones}});
 
 Braket envía únicamente el SELECT de captura y sustituye `{{organizaciones}}` antes de enviar la
 consulta siguiente. Una píldora azul muestra la cantidad; su tooltip incluye valores y origen.
+También podés definir una lista directamente, sin un SELECT:
+
+```sql
+SET LIST EMAIL = ['ashlee@example.com', 'nick@example.com'];
+SELECT * FROM Users WHERE email IN ({{EMAIL}});
+```
+
+Los literales admiten texto entre comillas y números (también combinados), conservan la precisión numérica y usan la misma píldora de detalle y copia. Se omiten NULL y duplicados; `[]` define una lista vacía, que no puede expandirse en un `IN`.
+
 Hacé clic en la píldora para abrir una tarjeta con búsqueda y copiar los valores en formato SQL.
 Si filtrás la tabla, **Copiar filtrados** copia únicamente las coincidencias. Las píldoras de SET
 normales también permiten consultar y copiar su valor, sin ejecutar otra consulta.
@@ -82,6 +91,8 @@ Las referencias tienen resaltado y autocompletado. Los números conservan su pre
 se citan como literales SQL. Se omiten NULL y duplicados, conservando el orden. Una lista vacía,
 inexistente o truncada detiene la consulta. El máximo es 10.000 filas por captura, sin listas parciales.
 No se guardan en disco y sobreviven a una reconexión de MySQL, hasta cerrar la aplicación.
+
+Con **⌘+clic** sobre una tabla en el editor SQL se abre su definición (`CREATE TABLE`) en una pestaña nueva de solo lectura. También está disponible desde **Abrir definición de tabla** en el menú contextual del explorador. La navegación usa la conexión y base seleccionadas en el archivo y respeta las referencias `base.tabla`.
 
 La herramienta **Logs** de la barra lateral abre el historial SQL del proyecto en el panel inferior.
 La pestaña **Logs** es fija, no tiene botón de cierre y comparte la barra con las pestañas de resultados.

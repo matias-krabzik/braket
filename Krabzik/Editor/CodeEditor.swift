@@ -35,6 +35,8 @@ struct CodeEditor: NSViewRepresentable {
     var options = EditorOptions()
     var canExecuteSelection = false
     var executeSelection: (() -> Void)?
+    var navigationNoBackslashEscapes = false
+    var openTableDefinition: ((Int) -> Void)?
     var completion: ((String, Int) -> [String])?
 
     func makeNSView(context: Context) -> EditorSurface {
@@ -49,6 +51,8 @@ struct CodeEditor: NSViewRepresentable {
         view.selectionActions.canExecute = canExecuteSelection
         view.selectionActions.readOnly = readOnly
         view.selectionActions.schedule()
+        view.textView.navigationNoBackslashEscapes = navigationNoBackslashEscapes
+        view.textView.openTableDefinition = document.language == "SQL" ? openTableDefinition : nil
         view.textView.isEditable = !readOnly
         view.completion = document.language == "SQL" ? completion : nil
         view.textView.sqlCompletionEnabled = view.completion != nil
@@ -110,6 +114,8 @@ struct SQLValuePillHit {
 }
 
 final class CodeTextView: NSTextView, NSPopoverDelegate {
+    var navigationNoBackslashEscapes = false
+    var openTableDefinition: ((Int) -> Void)?
     weak var editorSurface: EditorSurface?
     private var variableTooltips: [NSView.ToolTipTag: String] = [:]
     private(set) var valuePills: [SQLValuePillHit] = []
@@ -415,6 +421,21 @@ final class CodeTextView: NSTextView, NSPopoverDelegate {
             let action = SQLValuePillAction.allCases.first { pill.frame(for: $0).contains(point) } ?? .detail
             performValuePillAction(action, value: pill.value, rect: pill.rect)
             return
+        }
+        if event.modifierFlags.intersection([.command, .shift, .option, .control]) == .command,
+           let openTableDefinition, let layoutManager, let textContainer {
+            let location = NSPoint(x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
+            let glyph = layoutManager.glyphIndex(for: location, in: textContainer)
+            if glyph < layoutManager.numberOfGlyphs,
+               layoutManager.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: textContainer)
+                .insetBy(dx: -2, dy: 0).contains(location) {
+                let position = layoutManager.characterIndexForGlyph(at: glyph)
+                if SQLTableReference.at(position, in: string,
+                                        noBackslashEscapes: navigationNoBackslashEscapes) != nil {
+                    openTableDefinition(position)
+                    return
+                }
+            }
         }
         dismissValueDetails()
         super.mouseDown(with: event)

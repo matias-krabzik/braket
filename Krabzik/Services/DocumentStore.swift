@@ -114,6 +114,15 @@ final class DocumentStore {
         return document
     }
 
+    func openTableDefinition(_ table: SQLSchemaTable, sql: String) throws -> EditorDocument {
+        let suggested = table.name + ".definition.sql"
+        let name = ExplorerFileSystem.validName(suggested) ? suggested : "tabla.definition.sql"
+        let document = try createDraft(name: name, text: sql + (sql.hasSuffix("\n") ? "" : "\n"))
+        document.isTableDefinition = true
+        document.isDirty = false
+        return document
+    }
+
     func createPixelDraft(width: Int = 64, height: Int = 64) throws -> EditorDocument {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("Braket-Drafts")
             .appendingPathComponent(UUID().uuidString).appendingPathComponent("Sin título.pxa")

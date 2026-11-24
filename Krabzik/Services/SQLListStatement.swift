@@ -3,6 +3,7 @@ import Foundation
 struct SQLListStatement {
     let name: String
     let query: String
+    var literalValues: [SQLClientList.Element]?
 
     static func code(_ sql: String, noBackslashEscapes: Bool) -> String {
         let masked = NSMutableString(string: sql)
@@ -17,12 +18,22 @@ struct SQLListStatement {
         let scan = SQLScript.scan(sql, noBackslashEscapes: noBackslashEscapes)
         guard Array(scan.outer.prefix(2)) == ["SET", "LIST"] else { return nil }
         let masked = code(sql, noBackslashEscapes: noBackslashEscapes) as NSString
-        let regex = try NSRegularExpression(pattern: #"(?i)^\s*SET\s+LIST\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\("#)
+        let regex = try NSRegularExpression(pattern: #"(?i)^\s*SET\s+LIST\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([\[(])"#)
         guard !scan.hasExecutableComment, let match = regex.firstMatch(in: masked as String,
                                                                        range: NSRange(location: 0, length: masked.length)) else {
-            throw DatabaseFailure("Usá SET LIST nombre = (SELECT una_columna FROM tabla).")
+            throw DatabaseFailure("Usá SET LIST nombre = ['texto', 123] o SET LIST nombre = (SELECT una_columna FROM tabla).")
         }
         let start = NSMaxRange(match.range)
+        if masked.substring(with: match.range(at: 2)) == "[" {
+            let close = masked.range(of: "]", range: NSRange(location: start, length: masked.length - start))
+            guard close.location != NSNotFound,
+                  ["", ";"].contains(masked.substring(from: NSMaxRange(close)).trimmingCharacters(in: .whitespacesAndNewlines)) else {
+                throw DatabaseFailure("Cerrá la lista con ] y no agregues texto después del cierre.")
+            }
+            let source = (sql as NSString).substring(with: NSRange(location: start, length: close.location - start))
+            return Self(name: masked.substring(with: match.range(at: 1)), query: sql,
+                        literalValues: try SQLListLiteral.parse(source, noBackslashEscapes: noBackslashEscapes))
+        }
         var depth = 1, end = start
         while end < masked.length, depth > 0 {
             if masked.character(at: end) == 40 { depth += 1 }
