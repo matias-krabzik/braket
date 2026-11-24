@@ -4,6 +4,7 @@ struct SQLResultsPanel: View {
     @Bindable var execution: SQLExecution
     let controller: WorkspaceController
     let hide: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var showingLogs: Bool { controller.outputVisible }
 
     private func selectResult(_ result: SQLResult) {
@@ -50,7 +51,7 @@ struct SQLResultsPanel: View {
                             HStack(spacing: 3) {
                                 Button { selectResult(result) } label: {
                                     HStack(spacing: 6) {
-                                        if result.isLoading { ProgressView().controlSize(.mini) }
+                                        if result.isLoading { WorkspaceProgress().controlSize(.mini) }
                                         else { Image(systemName: "tablecells") }
                                         Text("Consulta \(index + 1)" + (draft.hasChanges ? " •" : ""))
                                     }.padding(.vertical, 5).padding(.leading, 9)
@@ -73,11 +74,13 @@ struct SQLResultsPanel: View {
                             }
                             .background(Theme.surfaceInk.opacity(!showingLogs && execution.selectedResult?.id == result.id ? 0.1 : 0.025),
                                         in: RoundedRectangle(cornerRadius: 5))
+                            .transition(reduceMotion ? .opacity : .offset(y: 4).combined(with: .opacity))
                             .contextMenu { tabMenu(result) }
                             .qaControl("sql.result.tab.\(index)", title: "Consulta \(index + 1)",
                                        enabled: !result.isLoading) { selectResult(result) }
                         }
-                    }.padding(.horizontal, 5).padding(.vertical, 3)
+                    }.animation(.easeOut(duration: reduceMotion ? 0.08 : 0.15), value: execution.results.map(\.id))
+                        .padding(.horizontal, 5).padding(.vertical, 3)
                 }.scrollIndicators(.hidden)
                 Menu {
                     ForEach(SQLResultTabAction.allCases, id: \.self) { action in
@@ -95,7 +98,7 @@ struct SQLResultsPanel: View {
             } else if let result = execution.selectedResult {
                 if result.isLoading {
                     VStack(spacing: 12) {
-                        ProgressView().controlSize(.regular)
+                        WorkspaceProgress().controlSize(.regular)
                         Text("Ejecutando consulta…").font(Theme.interfaceFont(13))
                         Text("Límite: \(execution.timeoutSeconds) segundos").foregroundStyle(.secondary)
                         Button("Cancelar") { controller.database.cancel(execution) }.disabled(execution.isCancelling)
@@ -103,6 +106,7 @@ struct SQLResultsPanel: View {
                 } else {
                     SQLResultToolbar(execution: execution, draft: execution.draft(for: result), controller: controller)
                     SQLResultContent(draft: execution.draft(for: result), controller: controller).id(result.id)
+                        .workspaceReveal(result.id)
                 }
             } else {
                 Text("Todavía no hay resultados. Ejecutá una consulta para verlos aquí.")
@@ -113,6 +117,7 @@ struct SQLResultsPanel: View {
                     .frame(maxWidth: .infinity, alignment: .leading).padding(8)
             }
         }.background(Theme.background)
+            .workspaceReveal(showingLogs)
     }
 }
 
@@ -197,7 +202,7 @@ private struct SQLResultContent: View {
                 }
                 if let error = draft.error { Text(error).foregroundStyle(.orange).textSelection(.enabled) }
                 HStack {
-                    if draft.sending { ProgressView().controlSize(.small) }
+                    if draft.sending { WorkspaceProgress().controlSize(.small) }
                     Spacer()
                     Button("Cancelar") { draft.showingReview = false }.keyboardShortcut(.cancelAction).disabled(draft.sending)
                         .qaControl("grid.review.cancel", title: "Cancelar", enabled: !draft.sending) {
@@ -399,7 +404,7 @@ private struct SQLResultToolbar: View {
             if let connection = result.connection, result.origins.contains(where: { !$0.table.isEmpty }),
                !draft.canEdit, !draft.sent {
                 if controller.database.schema.loading.contains(connection.id) {
-                    ProgressView().controlSize(.mini).help("Cargando estructura…")
+                    WorkspaceProgress().controlSize(.mini).help("Cargando estructura…")
                 } else {
                     action("Cargar estructura", icon: "arrow.down.doc", enabled: !controller.isReadOnly,
                            id: "grid.loadSchema") {

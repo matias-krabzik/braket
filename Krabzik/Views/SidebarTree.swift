@@ -172,13 +172,10 @@ struct SidebarTree<Value, Content: View>: View {
 
     var body: some View {
         LazyVStack(alignment: .leading, spacing: 0) {
-            ForEach(rows(nodes)) { row in rowView(row) }
+            ForEach(rows(nodes)) { row in rowView(row).workspaceReveal(row.id) }
         }
         .clipped()
-        .transaction { transaction in
-            transaction.animation = nil
-            transaction.disablesAnimations = true
-        }
+
     }
 
     private func toggle(_ row: Row) {

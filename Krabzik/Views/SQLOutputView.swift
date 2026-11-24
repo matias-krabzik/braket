@@ -10,7 +10,7 @@ struct SQLOutputView: View {
                 TextField("Buscar SQL, conexión o base…", text: $output.search)
                     .textFieldStyle(.plain).accessibilityLabel("Buscar en Logs")
                     .qaField("output.search", text: $output.search)
-                if output.loading { ProgressView().controlSize(.small) }
+                if output.loading { WorkspaceProgress().controlSize(.small) }
                 Button(output.hasUpdates ? "Ver nuevas ejecuciones" : "Actualizar") { Task { await output.reload() } }
                     .disabled(output.loading)
                     .qaControl("output.refresh", title: "Actualizar", enabled: !output.loading) {

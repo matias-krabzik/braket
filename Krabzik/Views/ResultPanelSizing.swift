@@ -2,6 +2,7 @@ import SwiftUI
 
 /// A persistent divider gives results a useful initial size without AppKit resetting it to the minimum.
 struct WorkspaceVerticalSplit<Top: View, Bottom: View>: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let showsBottom: Bool
     let isResults: Bool
     @ViewBuilder var top: () -> Top
@@ -36,10 +37,12 @@ struct WorkspaceVerticalSplit<Top: View, Bottom: View>: View {
                             fraction = min(0.8, max(0.2, fraction + (direction == .increment ? 0.05 : -0.05)))
                             UserDefaults.standard.set(fraction, forKey: key)
                         }
-                    bottom().frame(height: bottomHeight)
+                    bottom().frame(height: bottomHeight).workspaceReveal(isResults)
+                        .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
                 }
             } else { top() }
         }
+        .animation(.easeOut(duration: reduceMotion ? 0.08 : 0.16), value: showsBottom)
         .onAppear { restore() }
         .onChange(of: isResults) { _, _ in restore() }
     }

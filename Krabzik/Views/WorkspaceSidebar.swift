@@ -33,7 +33,7 @@ struct WorkspaceSidebar: View {
             if let operation = controller.fileOperation {
                 Divider()
                 HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
+                    WorkspaceProgress().controlSize(.small)
                     VStack(alignment: .leading, spacing: 3) {
                         Text("\(operation.action) · \(operation.completed) de \(operation.total)")
                         Text(operation.filename).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)

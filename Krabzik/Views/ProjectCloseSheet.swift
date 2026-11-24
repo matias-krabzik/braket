@@ -30,7 +30,7 @@ struct ProjectCloseSheet: View {
             }
             if closing.phase == .stopping {
                 HStack(spacing: 10) {
-                    ProgressView().controlSize(.small)
+                    WorkspaceProgress().controlSize(.small)
                     Text(closing
                         .canForce ? "Hay procesos que siguen activos. Podés esperar o forzar su detención." : "Deteniendo procesos…")
                         .font(.callout).foregroundStyle(.secondary)

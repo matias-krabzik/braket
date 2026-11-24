@@ -255,7 +255,7 @@ final class SQLCellEditorController: NSViewController, NSTextViewDelegate, NSPop
             if let date = SQLCellInput.formatter(kind).date(from: base) { picker.dateValue = date }
         }
         let popover = NSPopover()
-        popover.animates = false
+        popover.animates = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         popover.behavior = .transient
         popover.delegate = self
         popover.contentViewController = controller

@@ -32,6 +32,7 @@ struct ProjectWizard: View {
                         Text(error).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
                     }
                 }
+                .workspaceReveal(step)
                 .padding(26)
             }
             Divider()
@@ -165,7 +166,7 @@ struct ProjectWizard: View {
             Button("Cancelar") { dismiss() }.keyboardShortcut(.cancelAction).disabled(detecting)
                 .qaControl("wizard.cancel", title: "Cancelar", enabled: !detecting) { dismiss() }
             Spacer()
-            if detecting || busy { ProgressView().controlSize(.small) }
+            if detecting || busy { WorkspaceProgress().controlSize(.small) }
             if step > 0 {
                 Button("Atrás") { error = nil
                 step -= 1 }.disabled(detecting)

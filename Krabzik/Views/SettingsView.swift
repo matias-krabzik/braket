@@ -121,6 +121,7 @@ struct SettingsView: View {
                 case .updates: UpdatesSettingsView()
                 }
             }
+            .workspaceReveal(page)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             Divider()

@@ -45,6 +45,7 @@ struct EditorSearchBar: View {
         .background(Theme.bar, in: RoundedRectangle(cornerRadius: 9))
         .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(Theme.border) }
         .shadow(color: .black.opacity(0.28), radius: 12, y: 4)
+        .workspaceReveal(search.showsReplacement)
         .onExitCommand(perform: search.hide)
         .onAppear {
             focused = true

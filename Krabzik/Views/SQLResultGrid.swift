@@ -137,22 +137,31 @@ final class SQLGridField: NSTextField {
     }
 }
 
-private final class SQLGridCellView: NSTableCellView {
+final class SQLGridCellView: NSTableCellView {
     let valueLabel = SQLGridField()
+    let relationButton = SQLRelationButton()
+    var baseHeight: CGFloat = 27
+    var buttonWidth: CGFloat = 24
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         valueLabel.cell = SQLGridTextCell(textCell: "")
         valueLabel.frame = bounds
         valueLabel.autoresizingMask = [.width, .height]
         addSubview(valueLabel)
+        relationButton.isBordered = false
+        relationButton.isHidden = true
+        relationButton.contentTintColor = .systemBlue
+        addSubview(relationButton)
         textField = valueLabel
     }
     override func layout() {
         super.layout()
-        let scale = (superview as? SQLRelationRowView)?.grid?.rowHeight ?? 27
-        valueLabel.frame = NSRect(x: 0, y: bounds.height - min(bounds.height, scale), width: max(0, bounds.width - 1),
-                                  height: max(0, min(bounds.height, scale) - 1))
-        if isFlipped { valueLabel.frame.origin.y = 0 }
+        let height = min(bounds.height, baseHeight)
+        let top = isFlipped ? 0 : bounds.height - height
+        let inset = relationButton.isHidden ? 0 : buttonWidth + 6
+        valueLabel.frame = NSRect(x: 0, y: top, width: max(0, bounds.width - 1 - inset), height: max(0, height - 1))
+        relationButton.frame = NSRect(x: max(0, bounds.width - buttonWidth - 4), y: top,
+                                      width: buttonWidth, height: height)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }
@@ -348,7 +357,13 @@ struct SQLResultGrid: NSViewRepresentable {
             guard index < row.count else { return nil }
             return ((row[index] ?? "NULL") as NSString).size(withAttributes: [.font: font]).width
         }
-        return min(420 * scale, max(90 * scale, (max(heading, values.max() ?? 0) + 28 * scale)))
+        let relationSpace: CGFloat
+        if draft.result.origins.indices.contains(index) {
+            let origin = draft.result.origins[index]
+            let source = SQLTableIdentity(database: origin.database, table: origin.table)
+            relationSpace = draft.relations.keys[source]?.contains(where: { $0.columns.contains(origin.column) }) == true ? 32 * scale : 0
+        } else { relationSpace = 0 }
+        return min(420 * scale, max(90 * scale, (max(heading, values.max() ?? 0) + 28 * scale + relationSpace)))
     }
 
     @MainActor final class Coordinator: NSObject, NSTableViewDelegate, NSTableViewDataSource, NSTextFieldDelegate {
@@ -380,7 +395,8 @@ struct SQLResultGrid: NSViewRepresentable {
             if editing, let cell = draft.selectedCell, cell.row == modelRow(row), let editor = cellEditor {
                 return max(27 * scale, editor.desiredHeight)
             }
-            return 27 * scale + (draft.relations.expanded[modelRow(row)]?.cardHeight(scale: scale) ?? 0)
+            return 27 * scale +
+                (draft.relations.expanded[modelRow(row)]?.cardHeight(scale: scale, availableWidth: relationContentWidth) ?? 0)
         }
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
             guard let column = Int(tableColumn?.identifier.rawValue ?? ""), row < draft.rowCount else { return nil }
@@ -411,20 +427,25 @@ struct SQLResultGrid: NSViewRepresentable {
             field.textColor = draft.deleted.contains(row) ? .systemRed : pending ? .systemOrange
                 : value == .null || value == .serverDefault ? .tertiaryLabelColor : EditorPalette.text
             let related = !draft.relations.targets(row: row, column: column, draft: draft).isEmpty
-            if related {
-                let text = NSMutableAttributedString(string: value.display, attributes: [
-                    .font: Theme.nativeCodeFont(scale: scale), .foregroundColor: pending ? NSColor.systemOrange : NSColor.systemBlue
-                ])
-                text.append(NSAttributedString(string: "  "))
-                if let image = NSImage(systemSymbolName: "link", accessibilityDescription: "Clave foránea") {
-                    let attachment = NSTextAttachment()
-                    image.isTemplate = true
-                    attachment.image = image
-                    attachment.bounds = NSRect(x: 0, y: -2 * scale, width: 12 * scale, height: 12 * scale)
-                    text.append(NSAttributedString(attachment: attachment))
-                }
-                field.attributedStringValue = text
+            cell.baseHeight = 27 * scale
+            cell.buttonWidth = 24 * scale
+            cell.relationButton.isHidden = !related
+            cell.relationButton.isEnabled = !editing
+            cell.relationButton.perform = { [weak self, weak cell] flags in
+                guard let self, let table = self.table, let cell else { return }
+                let point = cell.convert(NSPoint(x: cell.bounds.maxX - 10, y: 10), to: table)
+                self.activateRelation(row: self.visibleRow(row), column: column, point: point,
+                                      newTab: flags.contains(.command))
             }
+            if related {
+                if !pending { field.textColor = .systemBlue }
+                let targets = draft.relations.targets(row: row, column: column, draft: draft)
+                let expanded = draft.relations.expanded[row].map { targets.contains($0.target) } ?? false
+                cell.relationButton.image = NSImage(systemSymbolName: expanded ? "chevron.down" : "chevron.right",
+                                                    accessibilityDescription: "Ver registro relacionado")
+                cell.relationButton.toolTip = "Ver registro relacionado · ⌘+clic: abrir en una nueva pestaña"
+            }
+            cell.needsLayout = true
             field.lineBreakMode = .byTruncatingTail
             field.usesSingleLineMode = true
             field.toolTip = value.display + "\nFlechas: navegar · ⌘C: copiar · ⌘V: pegar"
@@ -579,16 +600,23 @@ struct SQLResultGrid: NSViewRepresentable {
             editor.onAdvance = { [weak self] shift in self?.navigate(key: 48, shift: shift) }
             editor.show(relativeTo: field.bounds, of: field)
         }
+        private var relationContentWidth: CGFloat {
+            max(0, (table?.enclosingScrollView?.contentView.bounds.width ?? 0) - 32)
+        }
         func refreshRelationHeights() {
             guard let table else { return }
             let heights = Dictionary(uniqueKeysWithValues: draft.relations.expanded.map {
-                (visibleRow($0.key), $0.value.cardHeight(scale: scale))
+                (visibleRow($0.key), $0.value.cardHeight(scale: scale, availableWidth: relationContentWidth))
             })
             if heights != relationHeights {
                 let changed = Set(heights.keys).union(relationHeights.keys).filter { $0 >= 0 && $0 < draft.rowCount }
                 relationHeights = heights
                 table.expandedRelationRows = Set(heights.keys)
-                table.noteHeightOfRows(withIndexesChanged: IndexSet(changed))
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.16
+                    context.allowsImplicitAnimation = true
+                    table.noteHeightOfRows(withIndexesChanged: IndexSet(changed))
+                }
                 table.needsDisplay = true
             }
         }
@@ -605,6 +633,7 @@ struct SQLResultGrid: NSViewRepresentable {
             guard !layingOutRelations, let table, let scroll = table.enclosingScrollView as? SQLGridScrollView else { return }
             layingOutRelations = true
             defer { layingOutRelations = false }
+            refreshRelationHeights()
             let rail = scroll.relationRail
             rail.subviews.forEach { $0.removeFromSuperview() }
             table.enumerateAvailableRowViews { view, row in

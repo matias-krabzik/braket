@@ -541,7 +541,7 @@ private struct WorkflowExecutionPanel: View {
             HStack {
                 Image(systemName: "text.alignleft").foregroundStyle(Theme.accent)
                 Text("Ejecución").font(.system(size: Theme.zoom(11), weight: .semibold))
-                if model.isRunning { ProgressView().controlSize(.mini) }
+                if model.isRunning { WorkspaceProgress().controlSize(.mini) }
                 Spacer()
                 if focusedStep != nil {
                     Button("Registro completo") { focusedStep = nil }.buttonStyle(.plain)
@@ -841,7 +841,7 @@ private struct WorkflowInspector: View {
                 Divider()
             } else if isRunning {
                 HStack(spacing: 8) {
-                    ProgressView().controlSize(.mini)
+                    WorkspaceProgress().controlSize(.mini)
                     Text("Ejecutando este nodo…")
                 }.font(.system(size: Theme.zoom(11))).padding(.horizontal, 12).padding(.vertical, 8)
                     .frame(maxWidth: .infinity, alignment: .leading)

@@ -79,14 +79,14 @@ struct DatabaseExplorer: View {
         let connected = state.status == .connected
         let connecting = state.status == .connecting
         if store.loading.contains(connection.id) {
-            ProgressView().controlSize(.mini).help(store.progress[connection.id] ?? "Cargando estructura")
+            WorkspaceProgress().controlSize(.mini).help(store.progress[connection.id] ?? "Cargando estructura")
         } else if let error = store.errors[connection.id] ?? state.error {
             Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange).help(error)
                 .qaLabel("explorer.schema.error." + connection.name, error)
         }
 
         Group {
-            if connecting { ProgressView().controlSize(.mini) }
+            if connecting { WorkspaceProgress().controlSize(.mini) }
             else { ConnectionPlug(connected: connected) }
         }
         .frame(width: Theme.zoom(32), height: Theme.zoom(24))

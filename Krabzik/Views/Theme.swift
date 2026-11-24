@@ -51,3 +51,46 @@ import SwiftUI
             : Color(red: 0.47, green: 0.67, blue: 0.91)
     }
 }
+
+/// Shared timings keep workspace transitions consistent and follow the live system preference.
+struct WorkspaceMotion: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let value: AnyHashable
+    @State private var visible = false
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(visible ? 1 : 0)
+            .offset(y: visible || reduceMotion ? 0 : 4)
+            .task(id: value) {
+                visible = false
+                await Task.yield()
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeOut(duration: reduceMotion ? 0.08 : 0.15)) { visible = true }
+            }
+    }
+}
+
+extension View {
+    func workspaceReveal<Value: Hashable>(_ value: Value) -> some View {
+        modifier(WorkspaceMotion(value: AnyHashable(value)))
+    }
+}
+
+/// Short queries finish before the indicator appears, avoiding a loading flash.
+struct WorkspaceProgress: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var visible = false
+    var body: some View {
+        Group {
+            if visible {
+                if reduceMotion { Image(systemName: "hourglass").accessibilityLabel("Cargando") }
+                else { ProgressView() }
+            } else { Color.clear.frame(width: 16, height: 16) }
+        }
+        .task {
+            do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
+            visible = true
+        }
+    }
+}

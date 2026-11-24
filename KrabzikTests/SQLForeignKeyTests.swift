@@ -87,7 +87,7 @@ import XCTest
             SQLSchemaColumn(name: "organization_id", type: "bigint unsigned", nullable: true, extra: "")
         ], uniqueKeys: [["id"]], primaryKey: ["id"]))
         editable.widths[0] = 450
-        editable.widths[1] = 450
+        editable.widths[1] = 120
         editable.relations.load = { _ in
             var value = SQLResult(statement: 0, line: 1)
             value.columns = ["id", "name", "country"]
@@ -119,6 +119,37 @@ import XCTest
         let scroll = try XCTUnwrap(table.enclosingScrollView)
         XCTAssertGreaterThanOrEqual(rail.frame.minX, scroll.contentView.frame.maxX)
         XCTAssertEqual(rail.subviews.count, 1, "Solo la fila con una FK no nula ofrece el botón")
+        let fittedHeight = table.rect(ofRow: 0).height
+        window.setContentSize(NSSize(width: 360, height: 430))
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertGreaterThan(table.rect(ofRow: 0).height, fittedHeight + 10,
+                             "Solo una tabla que desborda reserva espacio para el scroll horizontal")
+        window.setContentSize(NSSize(width: 780, height: 430))
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(table.rect(ofRow: 0).height, fittedHeight, accuracy: 1,
+                       "Al volver a caber, el footer queda pegado a la última fila")
+
+        editable.widths[1] = 44
+        try await Task.sleep(for: .milliseconds(100))
+        let narrow = try XCTUnwrap(table.view(atColumn: 1, row: 0, makeIfNecessary: true) as? SQLGridCellView)
+        narrow.layoutSubtreeIfNeeded()
+        XCTAssertFalse(narrow.relationButton.isHidden)
+        XCTAssertGreaterThanOrEqual(narrow.relationButton.frame.minX, 0)
+        XCTAssertLessThanOrEqual(narrow.relationButton.frame.maxX, narrow.bounds.maxX)
+        XCTAssertLessThan(narrow.valueLabel.frame.maxX, narrow.relationButton.frame.minX)
+        XCTAssertFalse(narrow.valueLabel.stringValue.contains("\u{FFFC}"), "El botón no forma parte del texto de la celda")
+        narrow.relationButton.performClick(nil)
+        XCTAssertNil(editable.relations.expanded[0])
+        narrow.relationButton.performClick(nil)
+        XCTAssertNotNil(editable.relations.expanded[0])
+        editable.widths[1] = 120
+        try await Task.sleep(for: .milliseconds(150))
+        let record = try XCTUnwrap(editable.relations.expanded[0])
+        XCTAssertNotNil(record.elapsed)
+        let layout = SQLRelationLayout(scale: 1, interfaceScale: Theme.settings.uiScale)
+        XCTAssertGreaterThanOrEqual(record.cardHeight(scale: 1), layout.headerHeight + layout.footerHeight
+                                    + layout.tableHeight(rows: 1) + 2 * layout.outerInset)
+
         let point = table.convert(NSPoint(x: table.rect(ofColumn: 0).midX, y: table.rect(ofRow: 0).minY + 10), to: nil)
         let event = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: .command,
                                                      timestamp: 0, windowNumber: window.windowNumber,

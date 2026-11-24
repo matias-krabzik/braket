@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import Observation
 
 @MainActor @Observable
@@ -7,9 +7,14 @@ final class SQLRelatedRecord {
     var result: SQLResult?
     var error: String?
     var loading = true
+    var elapsed: TimeInterval?
     init(target: SQLRelatedTarget) { self.target = target }
-    func cardHeight(scale: Double) -> CGFloat {
-        CGFloat(error == nil ? 86 + min(4, max(1, result?.rows.count ?? 1)) * 30 : 160) * scale
+    func cardHeight(scale: Double, availableWidth: CGFloat = .infinity) -> CGFloat {
+        let layout = SQLRelationLayout(scale: scale, interfaceScale: Theme.settings.uiScale)
+        let body = result.map {
+            layout.tableHeight(rows: $0.rows.count, horizontalScroll: layout.tableWidth($0) > availableWidth + 0.5)
+        } ?? 100 * scale
+        return layout.headerHeight + layout.footerHeight + body + 2 + 2 * layout.outerInset
     }
 }
 
@@ -65,6 +70,7 @@ final class SQLResultRelations {
         let load = load
         tasks[row] = Task { [weak self, weak record] in
             guard let record else { return }
+            let started = ContinuousClock.now
             do {
                 guard let load else { throw DatabaseFailure("La vista relacionada no está disponible.") }
                 let result = try await load(target)
@@ -74,7 +80,35 @@ final class SQLResultRelations {
                 guard !Task.isCancelled, self?.expanded[row] === record else { return }
                 record.error = MySQLClient.message(error)
             }
+            let duration = started.duration(to: .now).components
+            record.elapsed = Double(duration.seconds) + Double(duration.attoseconds) / 1e18
             record.loading = false
         }
+    }
+}
+
+/// The card and native table share exact dimensions so a result row never needs its own vertical scroll.
+@MainActor struct SQLRelationLayout {
+    let scale: Double
+    let interfaceScale: Double
+    var headerHeight: CGFloat { max(36, 36 * interfaceScale) }
+    var footerHeight: CGFloat { max(26, 26 * interfaceScale) }
+    var outerInset: CGFloat { 12 * interfaceScale }
+    var scrollerSpace: CGFloat { NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy) + 2 }
+    var rowHeight: CGFloat {
+        let font = Theme.nativeCodeFont(scale: scale)
+        return ceil(font.ascender - font.descender + font.leading) + 16 * scale
+    }
+    func tableHeight(rows: Int, horizontalScroll: Bool = false) -> CGFloat {
+        rowHeight * CGFloat(1 + max(1, rows)) + CGFloat(max(1, rows)) + (horizontalScroll ? scrollerSpace : 0)
+    }
+    func columnWidth(_ column: Int, result: SQLResult) -> CGFloat {
+        let font = Theme.nativeCodeFont(scale: scale)
+        let content = ([result.columns[column]] + result.rows.prefix(10).map { column < $0.count ? $0[column] ?? "NULL" : "" })
+        return min(320 * scale, max(100 * scale, content.map { ($0 as NSString).size(withAttributes: [.font: font]).width }
+            .max() ?? 0))
+    }
+    func tableWidth(_ result: SQLResult) -> CGFloat {
+        result.columns.indices.reduce(0) { $0 + columnWidth($1, result: result) + 16 * scale }
     }
 }

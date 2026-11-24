@@ -180,7 +180,7 @@ struct ConnectionsSettingsView: View {
             }
             if let progress = controller.database.schema.progress[connection.id] {
                 HStack {
-                    ProgressView().controlSize(.mini)
+                    WorkspaceProgress().controlSize(.mini)
                     Text(progress).font(.caption).foregroundStyle(.secondary)
                     Spacer()
                     Button("Cancelar carga") { controller.database.schema.cancel(connection.id) }
@@ -339,7 +339,7 @@ struct ConnectionSheet: View {
             HStack {
                 Button("Probar") { test() }.disabled(busy)
                     .qaControl("connection.sheet.test", title: "Probar", enabled: !busy, action: test)
-                if busy { ProgressView().controlSize(.small) }
+                if busy { WorkspaceProgress().controlSize(.small) }
                 Spacer()
                 Button("Cancelar") { dismiss() }.keyboardShortcut(.cancelAction).disabled(busy)
                     .qaControl("connection.sheet.cancel", title: "Cancelar", enabled: !busy) { dismiss() }
@@ -430,6 +430,7 @@ struct ConnectionSheet: View {
 }
 
 struct SQLToolbar: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let document: EditorDocument
     @Bindable var controller: WorkspaceController
     @State private var processingFlash = false
@@ -593,10 +594,11 @@ struct SQLToolbar: View {
         }
         .background(Theme.bar)
         .qaScreen("sql.toolbar")
-        .task(id: document.sqlExecution.isRunning) {
+        .task(id: "\(document.sqlExecution.isRunning)-\(reduceMotion)") {
             guard document.sqlExecution.isRunning else { processingFlash = false
                 return }
             processingFlash = true
+            guard !reduceMotion else { return }
             while !Task.isCancelled && document.sqlExecution.isRunning {
                 do { try await Task.sleep(for: .milliseconds(Int.random(in: 240...720))) }
                 catch { break }

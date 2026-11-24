@@ -12,7 +12,27 @@ final class SQLRelationRail: NSView {
 
 final class SQLRelationButton: NSButton {
     var perform: ((NSEvent.ModifierFlags) -> Void)?
-    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+    private var hoverArea: NSTrackingArea?
+    private var hovering = false
+    override func resetCursorRects() { addCursorRect(bounds, cursor: isEnabled ? .pointingHand : .arrow) }
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+        hoverArea = area
+        addTrackingArea(area)
+    }
+    override func mouseEntered(with event: NSEvent) { hovering = true
+    needsDisplay = true }
+    override func mouseExited(with event: NSEvent) { hovering = false
+    needsDisplay = true }
+    override func draw(_ dirtyRect: NSRect) {
+        if hovering, isEnabled {
+            NSColor.labelColor.withAlphaComponent(0.08).setFill()
+            NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: 4, yRadius: 4).fill()
+        }
+        super.draw(dirtyRect)
+    }
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         target = self
@@ -33,7 +53,8 @@ final class SQLRelationRowView: NSTableRowView {
         guard let record else { host?.removeFromSuperview()
         host = nil
         return }
-        let card = SQLRelationCard(record: record, scale: scale, theme: theme, open: open, close: close)
+        let width = max(0, (grid?.enclosingScrollView?.contentView.bounds.width ?? bounds.width) - 32)
+        let card = SQLRelationCard(record: record, scale: scale, theme: theme, open: open, close: close, availableWidth: width)
         if let host { host.rootView = card }
         else {
             let host = NSHostingView(rootView: card)
@@ -46,6 +67,12 @@ final class SQLRelationRowView: NSTableRowView {
         super.layout()
         guard let host, let clip = grid?.enclosingScrollView?.contentView else { return }
         addSubview(host, positioned: .above, relativeTo: nil)
+        let width = max(0, clip.bounds.width - 32)
+        if abs(host.rootView.availableWidth - width) > 0.5 {
+            var card = host.rootView
+            card.availableWidth = width
+            host.rootView = card
+        }
         host.frame = NSRect(x: clip.bounds.minX, y: 27 * scale, width: clip.bounds.width,
                             height: max(0, bounds.height - 27 * scale))
     }
@@ -57,25 +84,24 @@ struct SQLRelationCard: View {
     let theme: AppTheme
     let open: (SQLRelatedTarget) -> Void
     let close: () -> Void
+    var availableWidth: CGFloat = .infinity
 
+    private var layout: SQLRelationLayout { SQLRelationLayout(scale: scale, interfaceScale: Theme.settings.uiScale) }
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "link").foregroundStyle(.secondary)
                 Text(record.target.label).font(Theme.interfaceFont(12)).foregroundStyle(.secondary).lineLimit(1)
-                if let result = record
-                    .result {
-                    Text("\(result.rows.count) " + (result.rows.count == 1 ? "registro" : "registros")).foregroundStyle(.secondary) }
                 Spacer()
                 Button { open(record.target) } label: { Label("Abrir en pestaña", systemImage: "arrow.up.forward.square") }
                     .buttonStyle(.plain).layoutPriority(1)
                         .help("Abrir la consulta del registro relacionado en una nueva pestaña · ⌘+clic en la fila")
                 Button(action: close) { Image(systemName: "xmark").frame(width: 24, height: 24) }
                     .buttonStyle(.plain).help("Cerrar detalle relacionado")
-            }.font(Theme.interfaceFont(12)).padding(.horizontal, 12).padding(.vertical, 6)
+            }.font(Theme.interfaceFont(12)).padding(.horizontal, 12).frame(height: layout.headerHeight)
             Divider()
             if record.loading {
-                HStack { ProgressView().controlSize(.small)
+                HStack { WorkspaceProgress().controlSize(.small)
                 Text("Cargando registro relacionado…") }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let error = record.error {
                 Text(error).foregroundStyle(.orange).textSelection(.enabled)
@@ -86,22 +112,38 @@ struct SQLRelationCard: View {
                 Text("No se encontró el registro relacionado.").foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            Divider()
+            HStack(spacing: 12) {
+                if let elapsed = record.elapsed {
+                    Label("\(Int((elapsed * 1000).rounded())) ms", systemImage: "clock")
+                        .help("Duración total de la consulta relacionada, incluida la conexión y la lectura")
+                } else { Text(record.loading ? "Cargando…" : "Consulta finalizada") }
+                if let result = record.result {
+                    Text("\(result.rows.count) " + (result.rows.count == 1 ? "registro" : "registros"))
+                }
+                Spacer()
+                Label("Solo lectura", systemImage: "lock")
+            }.font(Theme.interfaceFont(11)).foregroundStyle(.secondary)
+                .padding(.horizontal, 12).frame(height: layout.footerHeight)
         }
         .font(Theme.interfaceFont(12))
         .background(Color(nsColor: EditorPalette.background(for: theme)))
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.secondary.opacity(0.3)))
-        .padding(.horizontal, 16).padding(.vertical, 10)
+        .workspaceReveal(record.loading)
+        .padding(.horizontal, 16).padding(.vertical, layout.outerInset)
         .background(Color(nsColor: EditorPalette.background(for: theme)))
     }
 
     private func subtable(_ result: SQLResult) -> some View {
-        ScrollView([.horizontal, .vertical]) {
+        let overflows = layout.tableWidth(result) > availableWidth + 0.5
+        return ScrollView(.horizontal, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 0) {
                     ForEach(result.columns.indices, id: \.self) { index in
                         Text(result.columns[index]).font(Font(Theme.nativeCodeFont(scale: scale)).weight(.bold))
-                            .frame(width: width(index, result: result), alignment: .leading).padding(8)
+                            .frame(width: layout.columnWidth(index, result: result), height: layout.rowHeight, alignment: .leading)
+                            .padding(.horizontal, 8 * scale)
                             .overlay(alignment: .trailing) { Divider() }
                     }
                 }.background(Theme.bar)
@@ -113,22 +155,18 @@ struct SQLRelationCard: View {
                             Text(value ?? "NULL").font(Font(Theme.nativeCodeFont(scale: scale)))
                                 .foregroundStyle(value == nil ? .tertiary : .primary)
                                 .lineLimit(1).textSelection(.enabled)
-                                .frame(width: width(column, result: result), alignment: .leading).padding(8)
+                                .frame(width: layout.columnWidth(column, result: result), height: layout.rowHeight, alignment: .leading)
+                                .padding(.horizontal, 8 * scale)
                                 .overlay(alignment: .trailing) { Divider() }
                         }
                     }.contentShape(Rectangle()).onTapGesture {
                         if NSEvent.modifierFlags.contains(.command) { open(record.target) }
                     }.help("⌘+clic: abrir este registro en una nueva pestaña")
                 }
-            }
-        }
+            }.padding(.bottom, overflows ? layout.scrollerSpace : 0)
+        }.frame(height: layout.tableHeight(rows: result.rows.count, horizontalScroll: overflows))
     }
-    private func width(_ column: Int, result: SQLResult) -> CGFloat {
-        let font = Theme.nativeCodeFont(scale: scale)
-        let content = ([result.columns[column]] + result.rows.prefix(10).map { column < $0.count ? $0[column] ?? "NULL" : "" })
-        return min(320 * scale, max(100 * scale, content.map { ($0 as NSString).size(withAttributes: [.font: font]).width }
-            .max() ?? 0))
-    }
+
 }
 
 @MainActor final class SQLRelationMenuAction {

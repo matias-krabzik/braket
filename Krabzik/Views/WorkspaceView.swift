@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct WorkspaceView: View {
     @Bindable var controller: WorkspaceController
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var draggedTabID: URL?
     @State private var emptySQLExecution = SQLExecution()
 
@@ -33,6 +34,7 @@ struct WorkspaceView: View {
                                     if controller.database.browserShowsDatabases { DatabaseExplorer(controller: controller) }
                                     else { WorkspaceSidebar(controller: controller, workspace: workspace, url: url).id(url) }
                                 }
+                                .workspaceReveal(controller.database.browserShowsDatabases)
                                 .frame(minWidth: 230, idealWidth: controller.database.browserShowsDatabases ? 380 : 270, maxWidth: 420)
                                 .clipped()
                                 .background(SidebarWidthPersistence(databases: controller.database.browserShowsDatabases)
@@ -61,6 +63,7 @@ struct WorkspaceView: View {
                 WelcomeView(controller: controller)
             }
         }
+        .workspaceReveal(controller.workspaceURL)
         .background(Theme.background)
         .tint(Theme.accent)
         .font(Theme.interfaceFont())
@@ -175,6 +178,7 @@ struct WorkspaceView: View {
                                                    draggedTabID = document.id
                                                    return NSItemProvider(object: document.id.absoluteString as NSString)
                                                })
+                                .transition(reduceMotion ? .opacity : .offset(y: 4).combined(with: .opacity))
                                 .onDrop(of: [UTType.plainText.identifier], isTargeted: nil) { _ in
                                     guard let source = draggedTabID else { return false }
                                     controller.moveTab(source, before: document.id)
@@ -225,13 +229,14 @@ struct WorkspaceView: View {
                                 Button("Cerrar todas") { controller.closeTabs(controller.documents, closeWorkflow: true) }
                             }
                         }
-                    }.padding(.horizontal, 9).padding(.vertical, 7)
+                    }.animation(.easeOut(duration: reduceMotion ? 0.08 : 0.15), value: controller.documents.map(\.id))
+                        .padding(.horizontal, 9).padding(.vertical, 7)
                 }.background(Theme.bar)
                 Rectangle().fill(Theme.border).frame(height: 1)
             }
             if controller.workflowVisible, let url = controller.workspaceURL {
                 WorkflowView(controller: controller, workspaceURL: url)
-            } else { editor }
+            } else { editor.workspaceReveal(controller.selectedDocumentID) }
         }
         .onChange(of: controller.workspaceURL) { _, _ in
             controller.workflowVisible = false

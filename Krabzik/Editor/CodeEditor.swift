@@ -217,7 +217,7 @@ final class CodeTextView: NSTextView, NSPopoverDelegate {
         let card = SQLValueDetailCard(value: value)
         let popover = NSPopover()
         popover.behavior = .transient
-        popover.animates = false
+        popover.animates = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         popover.appearance = effectiveAppearance
         popover.delegate = self
         popover.contentViewController = card
@@ -918,12 +918,18 @@ private final class ObserverToken: @unchecked Sendable {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        let notifications = NSWorkspace.shared.notificationCenter
+        notifications.removeObserver(self, name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
+        if window != nil {
+            notifications.addObserver(self, selector: #selector(updateLoadingAnimation),
+                                      name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
+        }
         updateLoadingAnimation()
     }
 
-    func updateLoadingAnimation() {
+    @objc func updateLoadingAnimation() {
         let loading = surface?.document?.queryMarkers.values.contains { $0.status == .loading } == true
-        guard window != nil, loading else {
+        guard window != nil, loading, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
             stopLoadingAnimation()
             return
         }
@@ -982,7 +988,8 @@ private final class ObserverToken: @unchecked Sendable {
             let radius = size * 23 / 64
             color.setStroke()
             if marker.status == .loading {
-                let turn = CGFloat(Date().timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.1) / 1.1 * 360)
+                let turn = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 :
+                    CGFloat(Date().timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.1) / 1.1 * 360)
                 let arc = NSBezierPath()
                 arc.appendArc(withCenter: center, radius: radius, startAngle: turn + 32, endAngle: turn + 292)
                 arc.lineWidth = size * 4.5 / 64
