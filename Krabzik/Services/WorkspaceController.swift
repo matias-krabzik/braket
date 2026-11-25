@@ -45,6 +45,7 @@ final class WorkspaceController {
     var showingSettings = false
     var showingProjectSettings = false
     let runner = ProcessRunner()
+    let terminals: TerminalManager
     var processManager: ProcessManagerPresentation
     let workflows = WorkflowController()
     var outputVisible = false {
@@ -126,6 +127,7 @@ final class WorkspaceController {
     }
 
     init(defaults: UserDefaults = .standard, settings: AppSettings? = nil, historyRoot: URL? = nil) {
+        terminals = TerminalManager(defaults: defaults)
         processManager = ProcessManagerPresentation(defaults: defaults)
         database = DatabaseController(historyRoot: historyRoot)
         self.settings = settings ?? AppSettings(defaults: defaults)
@@ -337,6 +339,7 @@ final class WorkspaceController {
         if !openWorkspaceURLs.contains(normalized) { openWorkspaceURLs.append(normalized) }
         docs.closeAll()
         session.open(project, at: url, trust: decided)
+        terminals.openProject(url)
         database.output.configure(project: url)
         database.configureLists(project: url)
         outputVisible = false
@@ -511,6 +514,7 @@ final class WorkspaceController {
     /// Elegir «No guardar» permite cerrar sin abrir un selector de ubicación.
     func prepareToQuit(keepingManagedProcesses: Bool = false) async -> Bool {
         guard fileOperation == nil else { return false }
+        guard await terminals.prepareToQuit() else { return false }
         for document in documents {
             guard document.sqlExecution.drafts.values.allSatisfy({ !$0.sending && $0.confirmDiscard() }) else { return false }
         }

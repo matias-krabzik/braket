@@ -1,0 +1,8 @@
+Upstream: https://github.com/migueldeicaza/SwiftTerm
+Version: v1.9.0
+Commit: 8840e3596739adfe9599c0e7fff89f4fa88bedcf
+License: MIT (see LICENSE)
+
+Sources/SwiftTerm is unchanged upstream source. The local package manifest exposes
+only the macOS library and uses upstream's forkpty backend, without the optional
+swift-subprocess backend or the command-line examples and their dependencies.

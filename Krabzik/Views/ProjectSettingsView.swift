@@ -32,6 +32,7 @@ struct ProjectSettingsModal: View {
 struct ProjectSettingsView: View {
     let controller: WorkspaceController
     let url: URL
+    @State private var terminalEnvironment = false
     @State private var timeoutOverride: Bool
     @State private var timeoutSeconds: Int
     @State private var name: String
@@ -62,6 +63,11 @@ struct ProjectSettingsView: View {
                     .font(.callout).foregroundStyle(.secondary).padding()
             }
             Form {
+                Section("Terminales") {
+                    Button("Variables de entorno compartidas…") { terminalEnvironment = true }
+                    Text("Se heredan en todas las terminales de este proyecto; cada terminal puede sobrescribirlas.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
                 Section("Identidad") {
                     HStack(spacing: 20) {
                         ProjectIcon(name: name, style: icon, size: 64)
@@ -160,6 +166,9 @@ struct ProjectSettingsView: View {
             .formStyle(.grouped)
             .scrollContentBackground(.hidden)
             .disabled(controller.isReadOnly || controller.isSwitchingWorkspace)
+        }
+        .sheet(isPresented: $terminalEnvironment) {
+            TerminalEnvironmentEditor(manager: controller.terminals, projectURL: url)
         }
         .sheet(item: $editing) { project in
             SubprojectSettingsSheet(controller: controller, project: project, workspaceURL: url)

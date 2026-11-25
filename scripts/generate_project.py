@@ -26,8 +26,8 @@ import sys
 #   - el clientInfo que la app envía a Codex, que lo lee del bundle en runtime
 # El README no repite el número a propósito: así no hay nada que pueda quedar
 # desincronizado. Ver docs/specs/C10-version-unica.md.
-MARKETING_VERSION = '0.5.26'
-BUILD_NUMBER = '99'
+MARKETING_VERSION = '0.5.27'
+BUILD_NUMBER = '100'
 
 root = Path(__file__).resolve().parent.parent
 PBXPROJ = root / 'Braket.xcodeproj/project.pbxproj'
@@ -80,7 +80,7 @@ def render():
     obj('main-group', f'isa = PBXGroup; children = ({uid("source-group")}, {uid("test-group")}, {uid("products")},); sourceTree = "<group>";')
     for name, files in [('app', app_sources), ('test', test_sources)]:
         obj(name + '-sources', f'isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ({", ".join(uid("build:" + p.relative_to(root).as_posix()) for p in files)},); runOnlyForDeploymentPostprocessing = 0;')
-        framework = uid('mysql-build') + ',' + uid('sparkle-build') + ',' + uid('syntax-build') + ',' + uid('treesitter-build') + ',' if name == 'app' else ''
+        framework = uid('mysql-build') + ',' + uid('sparkle-build') + ',' + uid('syntax-build') + ',' + uid('treesitter-build') + ',' + uid('terminal-build') + ',' if name == 'app' else ''
         obj(name + '-frameworks', f'isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = ({framework}); runOnlyForDeploymentPostprocessing = 0;')
         resources = ', '.join(uid('build:' + resource) for resource in [notices, app_icon, developer_icons, sql_formatter, code_fonts]) + ',' if name == 'app' else ''
         obj(name + '-resources', f'isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ({resources}); runOnlyForDeploymentPostprocessing = 0;')
@@ -95,13 +95,16 @@ def render():
     obj('treesitter-package', 'isa = XCRemoteSwiftPackageReference; repositoryURL = "https://github.com/ChimeHQ/SwiftTreeSitter.git"; requirement = { kind = exactVersion; version = 0.9.0; };')
     obj('treesitter-product', f'isa = XCSwiftPackageProductDependency; package = {uid("treesitter-package")}; productName = SwiftTreeSitter;')
     obj('treesitter-build', f'isa = PBXBuildFile; productRef = {uid("treesitter-product")};')
+    obj('terminal-package', 'isa = XCLocalSwiftPackageReference; relativePath = Vendor/SwiftTerm;')
+    obj('terminal-product', f'isa = XCSwiftPackageProductDependency; package = {uid("terminal-package")}; productName = SwiftTerm;')
+    obj('terminal-build', f'isa = PBXBuildFile; productRef = {uid("terminal-product")};')
     obj('mysql-package', 'isa = XCLocalSwiftPackageReference; relativePath = Vendor/MySQLNIO;')
     obj('mysql-product', f'isa = XCSwiftPackageProductDependency; package = {uid("mysql-package")}; productName = MySQLNIO;')
     obj('mysql-build', f'isa = PBXBuildFile; productRef = {uid("mysql-product")};')
     for kind, name, product in [('app', 'Braket', app_product), ('test', 'KrabzikTests', test_product)]:
         product_type = 'com.apple.product-type.application' if kind == 'app' else 'com.apple.product-type.bundle.unit-test'
         dependency = '' if kind == 'app' else uid('test-dependency') + ','
-        packages = uid('mysql-product') + ',' + uid('sparkle-product') + ',' + uid('syntax-product') + ',' + uid('treesitter-product') + ',' if kind == 'app' else ''
+        packages = uid('mysql-product') + ',' + uid('sparkle-product') + ',' + uid('syntax-product') + ',' + uid('treesitter-product') + ',' + uid('terminal-product') + ',' if kind == 'app' else ''
         obj(kind + '-target', f'isa = PBXNativeTarget; buildConfigurationList = {uid(kind + "-configs")}; buildPhases = ({uid(kind + "-sources")}, {uid(kind + "-frameworks")}, {uid(kind + "-resources")},); buildRules = (); dependencies = ({dependency}); packageProductDependencies = ({packages}); name = {name}; productName = {name}; productReference = {product}; productType = "{product_type}";')
 
     for scope in ['project', 'app', 'test']:
@@ -129,7 +132,7 @@ def render():
                 settings.update({'PRODUCT_BUNDLE_IDENTIFIER': 'com.krabzik.ide.tests', 'PRODUCT_NAME': 'KrabzikTests', 'GENERATE_INFOPLIST_FILE': 'YES', 'TEST_HOST': '$(BUILT_PRODUCTS_DIR)/Braket.app/Contents/MacOS/Braket', 'BUNDLE_LOADER': '$(TEST_HOST)', 'LD_RUNPATH_SEARCH_PATHS': '$(inherited) @executable_path/../Frameworks @loader_path/../Frameworks'})
             obj(scope + '-' + config, 'isa = XCBuildConfiguration; name = ' + config + '; buildSettings = { ' + ' '.join(f'{k} = {q(v)};' for k, v in settings.items()) + ' };')
         obj(scope + '-configs', f'isa = XCConfigurationList; buildConfigurations = ({uid(scope + "-Debug")}, {uid(scope + "-Release")},); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;')
-    obj('project', f'isa = PBXProject; attributes = {{ BuildIndependentTargetsInParallel = YES; LastSwiftUpdateCheck = 1600; LastUpgradeCheck = 1600; TargetAttributes = {{ {uid("test-target")} = {{ TestTargetID = {uid("app-target")}; }}; }}; }}; buildConfigurationList = {uid("project-configs")}; compatibilityVersion = "Xcode 14.0"; developmentRegion = es; hasScannedForEncodings = 0; knownRegions = (es, en, Base,); mainGroup = {uid("main-group")}; productRefGroup = {uid("products")}; projectDirPath = ""; projectRoot = ""; packageReferences = ({uid("mysql-package")}, {uid("sparkle-package")}, {uid("syntax-package")}, {uid("treesitter-package")},); targets = ({uid("app-target")}, {uid("test-target")},);')
+    obj('project', f'isa = PBXProject; attributes = {{ BuildIndependentTargetsInParallel = YES; LastSwiftUpdateCheck = 1600; LastUpgradeCheck = 1600; TargetAttributes = {{ {uid("test-target")} = {{ TestTargetID = {uid("app-target")}; }}; }}; }}; buildConfigurationList = {uid("project-configs")}; compatibilityVersion = "Xcode 14.0"; developmentRegion = es; hasScannedForEncodings = 0; knownRegions = (es, en, Base,); mainGroup = {uid("main-group")}; productRefGroup = {uid("products")}; projectDirPath = ""; projectRoot = ""; packageReferences = ({uid("mysql-package")}, {uid("sparkle-package")}, {uid("syntax-package")}, {uid("treesitter-package")}, {uid("terminal-package")},); targets = ({uid("app-target")}, {uid("test-target")},);')
     pbxproj = ('// !$*UTF8*$!\n{ archiveVersion = 1; classes = {}; objectVersion = 56; objects = {\n'
                + '\n'.join(objects) + f'\n}}; rootObject = {uid("project")}; }}\n')
     scheme = f'''<?xml version="1.0" encoding="UTF-8"?>

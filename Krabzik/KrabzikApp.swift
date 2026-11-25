@@ -43,6 +43,8 @@ struct KrabzikApp: App {
         .windowToolbarStyle(.unifiedCompact)
         .commands {
             CommandGroup(after: .windowArrangement) {
+                Button("Terminal") { controller.toggleTerminal() }
+                    .keyboardShortcut("`", modifiers: .command).disabled(controller.workspaceURL == nil)
                 Button("Administrador de procesos") { controller.processManager.show(controller) }
                     .keyboardShortcut("p", modifiers: [.command, .option])
             }
@@ -224,6 +226,7 @@ private struct SettingsCommands: Commands {
             if allowed {
                 controller.saveSessionState(lastState)
                 controller.runner.terminateImmediately()
+                controller.terminals.stopAll()
                 await controller.database.client.shutdown()
             }
             checkingTermination = false

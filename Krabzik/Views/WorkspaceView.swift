@@ -9,7 +9,7 @@ struct WorkspaceView: View {
     @State private var emptySQLExecution = SQLExecution()
 
     private var showsSQLResults: Bool {
-        guard !controller.workflowVisible, controller.database.resultsVisible else { return false }
+        guard !controller.terminals.visible, !controller.workflowVisible, controller.database.resultsVisible else { return false }
         return true
     }
 
@@ -24,7 +24,7 @@ struct WorkspaceView: View {
                 if controller.isReadOnly { readOnlyBanner }
                 HStack(spacing: 0) {
                     WorkspaceActivityBar(controller: controller).zIndex(1)
-                    WorkspaceVerticalSplit(showsBottom: showsSQLResults,
+                    WorkspaceVerticalSplit(showsBottom: showsSQLResults || controller.terminals.visible,
                                            isResults: showsSQLResults) {
                         HSplitView {
                             if controller.sidebarVisible {
@@ -46,7 +46,9 @@ struct WorkspaceView: View {
                             }
                         }
                     } bottom: {
-                        if showsSQLResults {
+                        if controller.terminals.visible {
+                            TerminalPanel(controller: controller, projectURL: url).frame(minHeight: 180)
+                        } else if showsSQLResults {
                             SQLResultsPanel(execution: sqlExecution, controller: controller) {
                                 controller.database.resultsVisible = false
                                 controller.outputVisible = false

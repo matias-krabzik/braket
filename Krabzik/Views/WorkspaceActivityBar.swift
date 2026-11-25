@@ -15,6 +15,7 @@ struct WorkspaceActivityBar: View {
             Spacer(minLength: 12)
             activity("Resultados SQL", id: "explorer.results", icon: "tablecells",
                      selected: controller.database.resultsVisible && !controller.workflowVisible) {
+                if let url = controller.workspaceURL { controller.terminals.setVisible(false, for: url) }
                 controller.workflowVisible = false
                 controller.database.resultsVisible.toggle()
                 if controller.database.resultsVisible { controller.outputVisible = false }
@@ -23,6 +24,9 @@ struct WorkspaceActivityBar: View {
                      selected: controller.selectedProcessesVisible && !controller.processManager.isDetached) {
                 if controller.processManager.isDetached { controller.processManager.detach(controller) }
                 else { controller.toggleProcessesPanel() }
+            }
+            activity("Terminal", id: "explorer.terminal", icon: "terminal", selected: controller.terminals.visible) {
+                controller.toggleTerminal()
             }
         }
         .padding(.vertical, Theme.zoom(12)).frame(width: Theme.zoom(38)).background(Theme.bar)
