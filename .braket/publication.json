@@ -3,11 +3,11 @@
   "product": "Braket",
   "technology": "macos-swift",
   "lastPublished": {
-    "version": "0.5.26",
-    "ref": "6ca3c67",
+    "version": "0.5.27",
+    "ref": "98254ed",
     "notes": [
-      "docs/releases/0.5.26.md",
-      "docs/releases/0.5.26.en.md"
+      "docs/releases/0.5.27.md",
+      "docs/releases/0.5.27.en.md"
     ]
   },
   "languages": [
