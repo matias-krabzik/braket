@@ -208,6 +208,7 @@ struct SQLResultGrid: NSViewRepresentable {
     let draft: SQLResultDraft
     let scale: Double
     let theme: AppTheme
+    var typography = CodeTypography()
     var openRelated: ((SQLRelatedTarget) -> Void)?
     var serverNow: (@MainActor (SQLSchemaColumn) async throws -> String)?
     func makeCoordinator() -> Coordinator { Coordinator(draft: draft) }
@@ -320,7 +321,7 @@ struct SQLResultGrid: NSViewRepresentable {
             }
         }
         for (index, column) in table.tableColumns.enumerated() {
-            let font = Theme.nativeCodeFont(scale: scale, weight: .bold)
+            let font = Theme.nativeResultFont(scale: scale, weight: .bold)
             column.headerCell.font = font
             (column.headerCell as? SQLGridHeaderCell)?.leadingInset = 8 * scale
             if coordinator.editing && coordinator.editingColumn == index { continue }
@@ -422,8 +423,8 @@ struct SQLResultGrid: NSViewRepresentable {
                      ?? EditorPalette.background(for: theme))
             field.isEditable = false
             field.isSelectable = false
-            field.font = Theme.nativeCodeFont(scale: scale)
-            let pending = draft.changes[SQLCell(row: row, column: column)] != nil || row >= draft.result.rows.count
+            field.font = Theme.nativeResultFont(scale: scale)
+            let pending = !draft.sent && (draft.changes[SQLCell(row: row, column: column)] != nil || row >= draft.result.rows.count)
             field.textColor = draft.deleted.contains(row) ? .systemRed : pending ? .systemOrange
                 : value == .null || value == .serverDefault ? .tertiaryLabelColor : EditorPalette.text
             let related = !draft.relations.targets(row: row, column: column, draft: draft).isEmpty
@@ -563,7 +564,7 @@ struct SQLResultGrid: NSViewRepresentable {
             editingColumn = column
             editingOriginalWidth = tableColumn.width
             let valueWidth = (draft.value(row: row, column: column).display as NSString)
-                .size(withAttributes: [.font: Theme.nativeCodeFont(scale: scale)]).width + 24 * scale
+                .size(withAttributes: [.font: Theme.nativeResultFont(scale: scale)]).width + 24 * scale
             let required: CGFloat
             if case .temporal = metadata.cellKind { required = max(270 * scale, valueWidth + 80 * scale) }
             else { required = min(700 * scale, valueWidth) }
@@ -625,6 +626,7 @@ struct SQLResultGrid: NSViewRepresentable {
             view.grid = table
             let index = modelRow(row)
             view.configure(record: draft.relations.expanded[index], scale: scale, theme: theme,
+                           refresh: { [weak self] in self?.draft.relations.refresh(index) },
                            open: { [weak self] target in self?.openRelated?(target) },
                            close: { [weak self] in self?.draft.relations.collapse(index) })
             return view
@@ -711,7 +713,7 @@ struct SQLResultGrid: NSViewRepresentable {
                 if metadata?.canDefault == true { add("Usar DEFAULT", "default") }
                 if case .temporal = metadata?.cellKind { add("Fecha/hora actual del servidor", "now") }
                 for value in metadata?.enumValues ?? [] { add(value, "enum:" + value) }
-                add("Deshacer cambio de celda", "undo", enabled: draft.changes[SQLCell(row: row, column: column)] != nil)
+                add("Deshacer cambio de celda", "undo", enabled: draft.canEdit && draft.changes[SQLCell(row: row, column: column)] != nil)
             }
             menu.addItem(.separator())
             add("Agregar fila", "add", enabled: draft.canInsert)

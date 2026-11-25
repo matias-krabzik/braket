@@ -33,6 +33,7 @@ struct CodeEditor: NSViewRepresentable {
     let wrapsLines: Bool
     var readOnly = false
     var options = EditorOptions()
+    var typography = CodeTypography()
     var canExecuteSelection = false
     var executeSelection: (() -> Void)?
     var navigationNoBackslashEscapes = false
@@ -343,11 +344,11 @@ final class CodeTextView: NSTextView, NSPopoverDelegate {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
         let labelAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedSystemFont(ofSize: size, weight: .regular),
+            .font: Theme.settings.codeTypography.nativeFont(size: size),
             .foregroundColor: EditorPalette.muted, .paragraphStyle: paragraph
         ]
         let valueAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedSystemFont(ofSize: size, weight: .medium),
+            .font: Theme.settings.codeTypography.nativeFont(size: size, forceBold: true),
             .foregroundColor: error == nil ? (value.isList ? NSColor.systemBlue : EditorPalette.green) : NSColor.systemOrange,
             .paragraphStyle: paragraph
         ]
@@ -680,13 +681,13 @@ private final class ObserverToken: @unchecked Sendable {
     }
 
     func applyZoom(_ scale: Double) {
-        guard appliedZoom != scale else { return }
+        let font = Theme.nativeCodeFont(scale: scale)
+        guard appliedZoom != scale || textView.font != font else { return }
         textView.dismissValueDetails()
         appliedZoom = scale
         let history = textView.undoManager
         history?.disableUndoRegistration()
         defer { history?.enableUndoRegistration() }
-        let font = Theme.nativeCodeFont(scale: scale)
         let style = NSMutableParagraphStyle()
         style.minimumLineHeight = 23 * CGFloat(scale)
         style.maximumLineHeight = 23 * CGFloat(scale)
@@ -949,7 +950,7 @@ private final class ObserverToken: @unchecked Sendable {
     func updateThickness() {
         guard let surface else { return }
         let scale = surface.lineNumberScale
-        let font = NSFont.monospacedSystemFont(ofSize: 12 * scale, weight: .regular)
+        let font = Theme.settings.codeTypography.nativeFont(size: 12 * scale)
         let digitWidth = ("0" as NSString).size(withAttributes: [.font: font]).width
         let digits = CGFloat(String(max(surface.lines.count, 99)).count)
         let required = (8 + Self.statusLaneWidth + Self.numberToStatusGap + 12) * scale + digits * digitWidth
@@ -963,7 +964,7 @@ private final class ObserverToken: @unchecked Sendable {
         let scale = surface.lineNumberScale
         let rowHeight = Self.lineHeight * scale
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedSystemFont(ofSize: 12 * scale, weight: .regular),
+            .font: Theme.settings.codeTypography.nativeFont(size: 12 * scale),
             .foregroundColor: EditorPalette.muted
         ]
         let numberRight = ruleThickness - (Self.statusLaneWidth + Self.numberToStatusGap) * scale

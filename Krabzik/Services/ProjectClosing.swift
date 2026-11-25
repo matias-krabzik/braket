@@ -18,22 +18,22 @@ final class ProjectClosing {
         let model = controller.projectModel(for: url)
         name = model?.name ?? url.deletingPathExtension().lastPathComponent
         var items = model?.projects.filter { !$0.command.isEmpty } ?? []
-        for run in controller.runner.runs.values where run.workspaceURL == url && run.status.active {
-            if !items.contains(where: { $0.id == run.id }) {
-                items.append(CodeProject(id: run.id, name: run.name, path: ".", kind: .files, command: ""))
+        for run in controller.runner.runs.values where run.workspaceURL == url && (run.status.active || run.pendingRestart) {
+            if !items.contains(where: { $0.id == run.projectID }) {
+                items.append(CodeProject(id: run.projectID, name: run.name, path: ".", kind: .files, command: ""))
             }
         }
         processes = items
     }
 
     func run(for id: UUID) -> ProjectRun? {
-        guard let run = controller.runner.runs[id], run.workspaceURL == url else { return nil }
+        guard let run = controller.runner.runs.values.first(where: { $0.projectID == id && $0.workspaceURL == url }) else { return nil }
         return run
     }
 
-    var hasActiveProcesses: Bool { processes.contains { run(for: $0.id)?.status.active == true } }
+    var hasActiveProcesses: Bool { processes.contains { run(for: $0.id).map { $0.status.active || $0.pendingRestart } == true } }
 
-    func confirm() async {
+    func confirm(keepProcesses: Bool = false) async {
         guard phase == .confirmation, controller.session.beginSwitch() else { return }
         var ownsTransition = true
         defer { if ownsTransition { controller.session.endSwitch() } }
@@ -50,14 +50,21 @@ final class ProjectClosing {
             }
         }
         guard !Task.isCancelled else { return }
+        if keepProcesses {
+            controller.session.endSwitch()
+            ownsTransition = false
+            await controller.closeWorkspace(url, prepared: true)
+            phase = controller.openWorkspaceURLs.contains(url) ? .failed : .closed
+            return
+        }
         phase = .stopping
-        for run in controller.runner.runs.values where run.workspaceURL == url && run.status.active {
-            if !processes.contains(where: { $0.id == run.id }) {
-                processes.append(CodeProject(id: run.id, name: run.name, path: ".", kind: .files, command: ""))
+        for run in controller.runner.runs.values where run.workspaceURL == url && (run.status.active || run.pendingRestart) {
+            if !processes.contains(where: { $0.id == run.projectID }) {
+                processes.append(CodeProject(id: run.projectID, name: run.name, path: ".", kind: .files, command: ""))
             }
         }
-        for process in processes where run(for: process.id)?.status.active == true {
-            controller.runner.stop(process.id, automaticallyForce: false)
+        for process in processes where run(for: process.id).map({ $0.status.active || $0.pendingRestart }) == true {
+            if let run = run(for: process.id) { controller.runner.stop(run.id, automaticallyForce: false) }
         }
         let start = ContinuousClock.now
         while hasActiveProcesses {
@@ -79,6 +86,6 @@ final class ProjectClosing {
 
     func force(_ id: UUID) {
         guard phase == .stopping, canForce, run(for: id)?.status.active == true, processes.contains(where: { $0.id == id }) else { return }
-        controller.runner.forceStop(id)
+        if let run = run(for: id) { controller.runner.forceStop(run.id) }
     }
 }

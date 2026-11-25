@@ -74,13 +74,13 @@ struct EditorSearchBar: View {
                 .background(selected.wrappedValue ? Theme.accent.opacity(0.22) : .clear, in: RoundedRectangle(cornerRadius: 4))
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain).help(help).accessibilityLabel(help)
+        .buttonStyle(.fullArea).help(help).accessibilityLabel(help)
         .accessibilityAddTraits(selected.wrappedValue ? .isSelected : [])
     }
 
     private func icon(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol).frame(width: 24, height: 27).contentShape(Rectangle())
-        }.buttonStyle(.plain).help(help).accessibilityLabel(help)
+        }.buttonStyle(.fullArea).help(help).accessibilityLabel(help)
     }
 }

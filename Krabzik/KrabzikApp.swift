@@ -42,6 +42,10 @@ struct KrabzikApp: App {
         .defaultSize(width: 760, height: 420)
         .windowToolbarStyle(.unifiedCompact)
         .commands {
+            CommandGroup(after: .windowArrangement) {
+                Button("Administrador de procesos") { controller.processManager.show(controller) }
+                    .keyboardShortcut("p", modifiers: [.command, .option])
+            }
             SettingsCommands(controller: controller)
             CommandGroup(after: .appInfo) { CheckForUpdatesButton() }
             CommandGroup(replacing: .undoRedo) {
@@ -151,11 +155,17 @@ private struct SettingsCommands: Commands {
 
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     weak var controller: WorkspaceController? {
-        didSet { openPendingProject() }
+        didSet {
+            controller?.processManager.reopenWorkspace = { [weak self] in self?.showWorkspace() }
+            openPendingProject()
+        }
     }
     private var pendingDocumentURLs: [URL] = []
     private var requestingInitialWindow = false
     private var checkingTermination = false
+    private var closingWorkspace = false
+    private var allowingWorkspaceClose = false
+    private weak var workspaceWindow: NSWindow?
     func applicationWillFinishLaunching(_ notification: Notification) {
         // A single SwiftUI Window cannot create external-event scenes. Handle
         // Finder documents directly so the home screen and editor keep one window.
@@ -190,7 +200,18 @@ private struct SettingsCommands: Commands {
         for url in urls { controller.requestWorkspace(url) }
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        controller?.runner.hasActiveProcesses != true
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showWorkspace()
+        return true
+    }
+
+    func showWorkspace() {
+        workspaceWindow?.makeKeyAndOrderFront(nil)
+    }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let controller else { return .terminateNow }
@@ -212,10 +233,32 @@ private struct SettingsCommands: Commands {
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        guard !checkingTermination else { return false }
-        NSApp.terminate(nil)
+        if allowingWorkspaceClose { return true }
+        guard !checkingTermination, !closingWorkspace else { return false }
+        guard let controller, controller.runner.hasActiveProcesses else {
+            NSApp.terminate(nil)
+            return false
+        }
+        closingWorkspace = true
+        let lastState = controller.captureSessionState()
+        Task {
+            defer { closingWorkspace = false }
+            guard await controller.settingsClose.prepareToClose(),
+                  await controller.prepareToQuit(keepingManagedProcesses: true) else { return }
+            controller.saveSessionState(lastState)
+            // Recheck after the dialogs: the last process may have finished meanwhile.
+            guard controller.processManager.keepProcessesVisible(controller) else {
+                NSApp.terminate(nil)
+                return
+            }
+            workspaceWindow = sender
+            allowingWorkspaceClose = true
+            sender.performClose(nil)
+            allowingWorkspaceClose = false
+        }
         return false
     }
+
 }
 
 private struct WindowBridge: NSViewRepresentable {

@@ -59,7 +59,7 @@ final class QASettingsTests: XCTestCase {
     }
 
     /// CFG-03
-    func testBothPanelsToggleAndKeepTheirStatePerDocumentKind() async throws {
+    func testProcessManagerRemainsVisibleAcrossDocumentKinds() async throws {
         let qa = try QAHarness(self)
         let url = try qa.makeProject(name: "Paneles", folders: ["app"])
         await qa.openProject(url)
@@ -74,23 +74,22 @@ final class QASettingsTests: XCTestCase {
         XCTAssertTrue(qa.controller.sidebarVisible)
         await qa.assertScreen("explorer.files")
 
-        // El panel inferior se recuerda aparte para las imágenes: una pestaña de pixel art
-        // no arrastra el estado de las de código.
+        // El administrador conserva su visibilidad al cambiar de tipo de documento.
         let text = url.deletingLastPathComponent().appendingPathComponent("app/notas.txt")
         try Data("hola".utf8).write(to: text)
         qa.controller.files.open(text)
         await qa.settle(until: { qa.controller.selectedDocument?.url.lastPathComponent == "notas.txt" })
         try await qa.tap("menu.view.processes")
-        await qa.assertEvent("state.processesPanel", ["visible": "false", "pixel": "false"])
-        XCTAssertFalse(qa.controller.processesVisible)
+        await qa.assertEvent("state.processesPanel", ["visible": "true", "pixel": "false"])
+        XCTAssertTrue(qa.controller.processesVisible)
 
         let image = url.deletingLastPathComponent().appendingPathComponent("app/dibujo.pxa")
         _ = try await qa.controller.docs.createPixelArt(at: image, width: 8, height: 8)
         await qa.settle(until: { qa.controller.selectedDocument?.pixelArt != nil })
-        XCTAssertFalse(qa.controller.selectedProcessesVisible, "las imágenes arrancan sin panel inferior")
+        XCTAssertTrue(qa.controller.selectedProcessesVisible, "el administrador sigue abierto")
         try await qa.tap("menu.view.processes")
-        await qa.assertEvent("state.processesPanel", ["visible": "true", "pixel": "true"])
-        XCTAssertTrue(qa.controller.pixelProcessesVisible)
+        await qa.assertEvent("state.processesPanel", ["visible": "false", "pixel": "true"])
+        XCTAssertFalse(qa.controller.pixelProcessesVisible)
         XCTAssertFalse(qa.controller.processesVisible, "lo de la pestaña de código quedó como estaba")
     }
 

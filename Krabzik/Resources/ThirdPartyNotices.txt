@@ -3821,3 +3821,15 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+
+Code typography
+
+JetBrains Mono 2.304 — https://github.com/JetBrains/JetBrainsMono
+SIL Open Font License 1.1. Full license: CodeFonts/JetBrainsMono-OFL.txt.
+
+Fira Code 6.2 — https://github.com/tonsky/FiraCode
+SIL Open Font License 1.1. Full license: CodeFonts/FiraCode-OFL.txt.
+
+Source Code Pro — https://github.com/adobe-fonts/source-code-pro
+SIL Open Font License 1.1. Full license: CodeFonts/SourceCodePro-OFL.txt.

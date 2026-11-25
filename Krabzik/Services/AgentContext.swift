@@ -51,7 +51,8 @@ enum AgentContext {
         value["processes"] = .array(workspace.projects.filter {
             scope.contains($0.directory(relativeTo: url))
         }.prefix(4).compactMap { project in
-            guard let run = runner.runs[project.id], run.workspaceURL == url.standardizedFileURL else { return nil }
+            guard let run = runner.runs.values.first(where: { $0.projectID == project.id && $0.workspaceURL == url.standardizedFileURL })
+                else { return nil }
             return .object(["project": .string(project.name), "status": .string(run.status.label),
                             "recentOutput": .string(String(run.output.suffix(2_000)))])
         })

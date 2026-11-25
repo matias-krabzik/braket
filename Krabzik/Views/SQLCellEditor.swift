@@ -148,7 +148,7 @@ final class SQLCellEditorController: NSViewController, NSTextViewDelegate, NSPop
         scroll.drawsBackground = true
         textView.frame = NSRect(x: 0, y: 0, width: 260, height: 25 * scale)
         textView.autoresizingMask = [.width]
-        textView.font = Theme.nativeCodeFont(scale: scale)
+        textView.font = Theme.nativeResultFont(scale: scale)
         textView.isRichText = false
         textView.allowsUndo = true
         textView.isAutomaticQuoteSubstitutionEnabled = false
@@ -184,7 +184,7 @@ final class SQLCellEditorController: NSViewController, NSTextViewDelegate, NSPop
     private func buildChoices(_ values: [String]) {
         choices.target = self
         choices.action = #selector(choiceChanged)
-        choices.font = Theme.nativeCodeFont(scale: scale)
+        choices.font = Theme.nativeResultFont(scale: scale)
         choiceValues = values.map { .text($0) }
         for value in values { choices.addItem(withTitle: value.isEmpty ? "(texto vacío)" : value) }
         if let index = choiceValues.firstIndex(where: { $0 == original }) { choices.selectItem(at: index)

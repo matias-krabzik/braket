@@ -27,7 +27,7 @@ struct SidebarTintEditor: View {
                         Button { hex = preset } label: {
                             Circle().fill(ProjectIconStyle(hex: preset).color).frame(width: 22, height: 22)
                                 .overlay { Circle().strokeBorder(.white.opacity(hex == preset ? 0.9 : 0), lineWidth: 2) }
-                        }.buttonStyle(.plain).accessibilityLabel("Tinte " + preset)
+                        }.buttonStyle(.fullArea).accessibilityLabel("Tinte " + preset)
                     }
                     ColorPicker("Personalizado", selection: Binding(get: {
                         ProjectIconStyle(hex: hex ?? "8863D7").color

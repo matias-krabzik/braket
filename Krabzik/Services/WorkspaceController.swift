@@ -36,7 +36,7 @@ final class WorkspaceController {
     var newPixelArtDirectory: URL?
     var fileOperation: FileOperationStatus?
     var sidebarVisible = true
-    var processesVisible = true
+    var processesVisible = false
     var pixelProcessesVisible = false
     var commandProject: CodeProject?
     var closingProjectURL: URL?
@@ -45,6 +45,7 @@ final class WorkspaceController {
     var showingSettings = false
     var showingProjectSettings = false
     let runner = ProcessRunner()
+    var processManager: ProcessManagerPresentation
     let workflows = WorkflowController()
     var outputVisible = false {
         didSet { if outputVisible { workflowVisible = false } }
@@ -101,12 +102,14 @@ final class WorkspaceController {
     var mountedProjects: [CodeProject] { session.mountedProjects }
     var documents: [EditorDocument] { docs.documents }
     var selectedDocument: EditorDocument? { docs.selected }
-    var selectedProcessesVisible: Bool {
-        selectedDocument?.pixelArt == nil ? processesVisible : pixelProcessesVisible
-    }
+    var selectedProcessesVisible: Bool { processesVisible }
     func toggleProcessesPanel() {
-        if selectedDocument?.pixelArt == nil { processesVisible.toggle() }
-        else { pixelProcessesVisible.toggle() }
+        if processManager.isDetached { processManager.detach(self) }
+        else {
+            processesVisible.toggle()
+            pixelProcessesVisible = processesVisible
+            processManager.wasVisible = processesVisible
+        }
     }
     var openingFiles: Set<URL> { docs.openingFiles }
     var recentProjects: [URL] { recents.urls }
@@ -123,6 +126,7 @@ final class WorkspaceController {
     }
 
     init(defaults: UserDefaults = .standard, settings: AppSettings? = nil, historyRoot: URL? = nil) {
+        processManager = ProcessManagerPresentation(defaults: defaults)
         database = DatabaseController(historyRoot: historyRoot)
         self.settings = settings ?? AppSettings(defaults: defaults)
         restoration = SessionRestoration(defaults: defaults)
@@ -342,6 +346,12 @@ final class WorkspaceController {
         connections.install(project.connections)
         bridge.reset(for: project, at: url, trust: decided)
         projects.warmUp(project.projects)
+        if decided == .trusted {
+            for item in project.projects where item.runConfiguration?.startsAutomatically == true &&
+                trust.isApproved(command: item.commandApproval, project: item.id, workspaceURL: url) {
+                runner.start(item, workspaceURL: url)
+            }
+        }
         selectedProjectID = runnableProjects.first?.id
         recents.remember(url)
         Log.workspace.info("""
@@ -484,10 +494,9 @@ final class WorkspaceController {
             agent.shutdown()
         }
         guard await files.resolveDirty() else { return false }
-        if runner.hasActiveProcesses || workflows.isRunning {
+        if workflows.isRunning {
             guard session.dialogs.confirmStopProcesses() else { return false }
             workflows.stop()
-            runner.stopAll()
         }
         guard await database.prepareToLeave(closeIdleConnections: false) else {
             QAProbe.action("project.prepareToLeave.cancelled", ["stage": "database"])
@@ -500,12 +509,13 @@ final class WorkspaceController {
 
     /// Al salir, pregunta por cada archivo con cambios antes de intentar guardarlo.
     /// Elegir «No guardar» permite cerrar sin abrir un selector de ubicación.
-    func prepareToQuit() async -> Bool {
+    func prepareToQuit(keepingManagedProcesses: Bool = false) async -> Bool {
         guard fileOperation == nil else { return false }
         for document in documents {
             guard document.sqlExecution.drafts.values.allSatisfy({ !$0.sending && $0.confirmDiscard() }) else { return false }
         }
-        let running = runner.hasActiveProcesses || workflows.isRunning || agent.isRunning || database.hasActiveWork ||
+        let running = (!keepingManagedProcesses && runner.hasActiveProcesses) || workflows.isRunning || agent.isRunning ||
+            database.hasActiveWork ||
             documents.contains { $0.sqlExecution.isRunning }
         if running && !session.dialogs.confirmStopProcesses() { return false }
         guard await files.resolveDirty() else { return false }
@@ -520,13 +530,13 @@ final class WorkspaceController {
     /// ejecutarse es de `ProjectLibrary`.
     func startAll() {
         projects.startAll()
-        processesVisible = true
+        processManager.show(self)
     }
 
     func toggleRun(_ project: CodeProject) {
         selectedProjectID = project.id
         projects.toggleRun(project)
-        processesVisible = true
+        processManager.show(self)
     }
 
     /// Detener desde el menú: corta todos los procesos y deja el panel a la vista, que es

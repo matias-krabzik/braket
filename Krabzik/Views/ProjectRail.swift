@@ -20,7 +20,7 @@ struct ProjectPicker: View {
                 .overlay { Capsule().strokeBorder(Theme.border) }
                 .contentShape(Capsule())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.fullArea)
             .disabled(controller.isSwitchingWorkspace)
             .help("Cambiar de proyecto")
             .accessibilityLabel("Selector de proyectos")
@@ -143,7 +143,7 @@ private struct ProjectPickerMenu: View {
             .background(.primary.opacity(selected ? 0.08 : 0), in: RoundedRectangle(cornerRadius: 5))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.fullArea)
         .help(url.path)
         .accessibilityAddTraits(selected ? .isSelected : [])
         .contextMenu {
@@ -164,7 +164,7 @@ private struct ProjectPickerMenu: View {
                 .frame(maxWidth: .infinity, minHeight: 23, alignment: .leading)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.fullArea)
         .help(title)
     }
 }

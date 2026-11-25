@@ -48,7 +48,7 @@ struct WelcomeView: View {
                 .background(Theme.surfaceInk.opacity(settingsHovered ? 0.06 : 0), in: RoundedRectangle(cornerRadius: 7))
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.fullArea)
             .onHover { settingsHovered = $0 }
             .help("Configuración · ⌘,")
             .accessibilityLabel("Configuración")
@@ -169,7 +169,7 @@ private struct WelcomeAction: View {
             }
             .contentShape(RoundedRectangle(cornerRadius: 9))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.fullArea)
         .onHover { isHovered = $0 }
         .qaControl(id, title: title, action: action)
     }
@@ -201,7 +201,7 @@ private struct RecentProjectRow: View {
                 .padding(.horizontal, 8).padding(.vertical, 20)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.fullArea)
             .help(url.path)
             .accessibilityLabel("Abrir \(name)")
             .accessibilityValue(url.path)

@@ -51,7 +51,7 @@ final class ProjectLibrary {
                     // La carpeta la eligió el usuario en el panel: su comando detectado
                     // queda aprobado, para no pedirle confirmación de algo que pidió.
                     if !project.command.isEmpty {
-                        session.trustStore.approve(command: project.command, project: project.id,
+                        session.trustStore.approve(command: project.commandApproval, project: project.id,
                                                    workspaceURL: workspaceURL)
                     }
                 }
@@ -67,14 +67,16 @@ final class ProjectLibrary {
         project.projects[index] = updated
         // Lo que el usuario acaba de escribir no hace falta volver a confirmárselo.
         if let workspaceURL = session.url, !updated.command.isEmpty {
-            session.trustStore.approve(command: updated.command, project: updated.id, workspaceURL: workspaceURL)
+            session.trustStore.approve(command: updated.commandApproval, project: updated.id, workspaceURL: workspaceURL)
         }
         session.write(project)
     }
 
     func remove(_ id: UUID) {
         guard var workspace = session.workspace else { return }
-        runner.stop(id)
+        if let project = workspace.projects.first(where: { $0.id == id }), let url = session.url {
+            runner.stop(runner.state(for: project, workspaceURL: url).id)
+        }
         workspace.projects.removeAll { $0.id == id }
         session.write(workspace)
     }
@@ -82,7 +84,8 @@ final class ProjectLibrary {
     /// Le pide al runner el estado de cada subproyecto para que el panel de procesos
     /// tenga una fila desde el principio, antes de que se ejecute nada.
     func warmUp(_ projects: [CodeProject]) {
-        for project in projects { _ = runner.state(for: project.id) }
+        guard let url = session.url else { return }
+        for project in projects { _ = runner.state(for: project, workspaceURL: url, workspaceName: session.workspace?.name ?? "") }
     }
 
     /// Arranca todos los ejecutables cuyo comando esté permitido.
@@ -97,9 +100,9 @@ final class ProjectLibrary {
     /// Arranca el proyecto, o lo detiene si ya está corriendo.
     func toggleRun(_ project: CodeProject) {
         guard let workspaceURL = session.url else { return }
-        if runner.state(for: project.id).status.active {
+        if runner.state(for: project, workspaceURL: workspaceURL).status.active {
             QAProbe.action("process.stop.request", ["project": project.name])
-            runner.stop(project.id)
+            runner.stop(runner.state(for: project, workspaceURL: workspaceURL).id)
         } else if allowedToRun(project, workspaceURL: workspaceURL) {
             start(project, workspaceURL: workspaceURL)
         }
@@ -115,18 +118,20 @@ final class ProjectLibrary {
 
     /// Un comando se confirma la primera vez, y de nuevo si cambia, porque la aprobación
     /// se guarda por hash del comando.
-    private func allowedToRun(_ project: CodeProject, workspaceURL: URL) -> Bool {
-        guard session.trust == .trusted else {
+    func allowedToRun(_ project: CodeProject, workspaceURL: URL) -> Bool {
+        let trusted = session.url?.standardizedFileURL == workspaceURL.standardizedFileURL ? session.trust == .trusted
+            : session.trustStore.trust(for: workspaceURL) == .trusted
+        guard trusted else {
             QAProbe.failure("process.start.rejected", "proyecto en solo lectura", ["project": project.name])
             session.errors.report(message: "El proyecto está en solo lectura. Confiá en él para ejecutar procesos.")
             return false
         }
-        if session.trustStore.isApproved(command: project.command, project: project.id, workspaceURL: workspaceURL) {
+        if session.trustStore.isApproved(command: project.commandApproval, project: project.id, workspaceURL: workspaceURL) {
             QAProbe.action("process.command.approved", ["project": project.name, "asked": QAField.bool(false)])
             return true
         }
-        let directory = project.directory(relativeTo: workspaceURL)
-        let decision = confirmCommand(CommandPrompt(project: project.name, command: project.command,
+        let directory = project.executionDirectory(relativeTo: workspaceURL)
+        let decision = confirmCommand(CommandPrompt(project: project.name, command: project.commandApproval,
                                                     directory: directory.path))
         QAProbe.dialog("dialog.process.confirmCommand", answer: decision.qaAnswer,
                        ["project": project.name, "command": QAField.text(project.command)])
@@ -137,7 +142,7 @@ final class ProjectLibrary {
         case .once:
             return true
         case .always:
-            session.trustStore.approve(command: project.command, project: project.id, workspaceURL: workspaceURL)
+            session.trustStore.approve(command: project.commandApproval, project: project.id, workspaceURL: workspaceURL)
             return true
         }
     }

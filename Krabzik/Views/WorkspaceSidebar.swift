@@ -22,7 +22,7 @@ struct WorkspaceSidebar: View {
                 Button { controller.showingProjectSettings = true } label: {
                     Image(systemName: "gearshape").frame(width: 24, height: 24).contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.fullArea)
                 .help("Configuración del proyecto")
                 .accessibilityLabel("Configuración del proyecto")
                 .disabled(controller.isSwitchingWorkspace)

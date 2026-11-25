@@ -10,7 +10,7 @@ struct DatabaseExplorer: View {
                 Text("BASES DE DATOS").font(Theme.interfaceFont(12, weight: .semibold)).foregroundStyle(.secondary)
                 Spacer()
                 Button { controller.database.showingConnections = true } label: { Image(systemName: "plus") }
-                    .buttonStyle(.plain).help("Administrar conexiones")
+                    .buttonStyle(.fullArea).help("Administrar conexiones")
             }.padding(14)
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {

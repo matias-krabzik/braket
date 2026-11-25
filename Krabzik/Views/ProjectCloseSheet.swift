@@ -3,6 +3,7 @@ import SwiftUI
 struct ProjectCloseSheet: View {
     @State private var closing: ProjectClosing
     @State private var started = false
+    @State private var keepProcesses = false
     @State private var forceID: UUID?
     @State private var forceConfirmation = false
     @Environment(\.dismiss) private var dismiss
@@ -15,7 +16,7 @@ struct ProjectCloseSheet: View {
         VStack(alignment: .leading, spacing: 20) {
             Text(closing.phase == .confirmation ? "¿Cerrar \(closing.name)?" : "Cerrando \(closing.name)")
                 .font(.title2.weight(.semibold))
-            Text("Se detendrán los procesos de este proyecto. Los archivos se conservan y la app sigue abierta.")
+            Text("Podés conservar los procesos activos en el administrador o detenerlos al cerrar el proyecto.")
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if !closing.processes.isEmpty {
                 ScrollView {
@@ -43,6 +44,11 @@ struct ProjectCloseSheet: View {
                     .keyboardShortcut(.cancelAction)
                     .disabled(closing.phase == .closing)
                 if !started {
+                    if closing.hasActiveProcesses {
+                        Button("Conservar procesos y cerrar") { keepProcesses = true
+                            started = true
+                        }
+                    }
                     Button(closing.hasActiveProcesses ? "Detener y cerrar" : "Cerrar proyecto") { started = true }
                         .keyboardShortcut(.defaultAction)
                 }
@@ -53,7 +59,7 @@ struct ProjectCloseSheet: View {
         .interactiveDismissDisabled(started)
         .task(id: started) {
             guard started else { return }
-            await closing.confirm()
+            await closing.confirm(keepProcesses: keepProcesses)
             if closing.phase == .closed || closing.phase == .cancelled { dismiss() }
         }
         .alert("¿Forzar la detención?", isPresented: $forceConfirmation, presenting: forceID) { id in

@@ -24,9 +24,7 @@ struct WorkspaceView: View {
                 if controller.isReadOnly { readOnlyBanner }
                 HStack(spacing: 0) {
                     WorkspaceActivityBar(controller: controller).zIndex(1)
-                    WorkspaceVerticalSplit(showsBottom: showsSQLResults ||
-                                           (controller.selectedProcessesVisible && !controller.workflowVisible && !controller
-                                           .outputVisible),
+                    WorkspaceVerticalSplit(showsBottom: showsSQLResults,
                                            isResults: showsSQLResults) {
                         HSplitView {
                             if controller.sidebarVisible {
@@ -41,13 +39,17 @@ struct WorkspaceView: View {
                                     .id(controller.database.browserShowsDatabases))
                             }
                             editorArea.frame(minWidth: 420, maxWidth: .infinity, minHeight: 180, maxHeight: .infinity)
+                            if controller.selectedProcessesVisible && !controller.processManager.isDetached {
+                                ProcessManagerView(controller: controller)
+                                    .frame(minWidth: 320, idealWidth: 700, maxWidth: 700)
+                                    .background(ProcessPanelInitialWidth())
+                            }
                         }
                     } bottom: {
                         if showsSQLResults {
                             SQLResultsPanel(execution: sqlExecution, controller: controller) {
                                 controller.database.resultsVisible = false
                                 controller.outputVisible = false
-                                controller.processesVisible = false
                             }.frame(minHeight: 220, idealHeight: 360, maxHeight: .infinity)
                         } else if controller.selectedProcessesVisible && !controller.workflowVisible && !controller.outputVisible {
                             ProcessPanel(controller: controller).frame(minHeight: 150, idealHeight: 240, maxHeight: 440)
@@ -104,7 +106,14 @@ struct WorkspaceView: View {
             ProjectWizard(controller: controller)
         }
         .sheet(item: $controller.commandProject) { project in
-            CommandSheet(project: project) { controller.projects.update($0) }
+            RunConfigurationEditor(project: project,
+                                   active: controller.workspaceURL.map {
+                    controller.runner.state(for: project, workspaceURL: $0).status.active
+                } ?? false) { updated, restart in
+                guard let url = controller.workspaceURL else { return false }
+                let run = controller.runner.state(for: project, workspaceURL: url)
+                return controller.saveRunConfiguration(updated, for: run, restart: restart)
+            }
         }
         .sheet(isPresented: Binding(get: { controller.database.showingConnections },
                                     set: { controller.database.showingConnections = $0 })) {
@@ -144,7 +153,7 @@ struct WorkspaceView: View {
             Button { controller.showingSettings = true } label: {
                 Image(systemName: "gearshape").frame(width: 28, height: 28).contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.fullArea)
             .help("Configuración")
             .accessibilityLabel("Configuración")
         }
@@ -301,7 +310,7 @@ struct WorkspaceView: View {
                     } else {
                         CodeEditor(document: document, theme: Theme.settings.theme, uiScale: controller.settings.codeFontScale,
                                    wrapsLines: controller.settings.wrapLines, readOnly: controller.isReadOnly || document.isTableDefinition,
-                                   options: controller.settings.editorOptions,
+                                   options: controller.settings.editorOptions, typography: controller.settings.codeTypography,
                                    canExecuteSelection: canExecuteSelection(document),
                                    executeSelection: {
                                        guard controller.selectedDocument?.id == document.id else { return }
@@ -366,7 +375,7 @@ struct WorkspaceView: View {
                 .background(document.markdownMode == mode ? Theme.accent.opacity(0.18) : .clear,
                             in: RoundedRectangle(cornerRadius: 4))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.fullArea)
         .foregroundStyle(document.markdownMode == mode ? Theme.accent : .secondary)
         .help(title)
         .accessibilityLabel(title)
@@ -620,7 +629,7 @@ private struct PixelArtEditorView: View {
                     .stroke(selected ? Theme.accent : .clear, lineWidth: 1))
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain).help(label).accessibilityLabel(label)
+        .buttonStyle(.fullArea).help(label).accessibilityLabel(label)
         .disabled(name != "hand" && (readOnly || art?.isReadOnly == true))
     }
 
@@ -861,7 +870,7 @@ private struct PixelArtEditorView: View {
                                             Text("\(index + 1)").allowsHitTesting(false)
                                         }
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(.fullArea)
                                 .accessibilityLabel("Fotograma \(index + 1)")
                             }
                         }
@@ -878,7 +887,7 @@ private struct PixelArtEditorView: View {
                                                     .allowsHitTesting(false)
                                             }
                                     }
-                                    .buttonStyle(.plain)
+                                    .buttonStyle(.fullArea)
                                     .accessibilityLabel(layer.visible ? "Ocultar \(layer.name)" : "Mostrar \(layer.name)")
                                     .help(layer.visible ? "Ocultar capa" : "Mostrar capa")
                                     Button { toggleLayer(layer, property: "locked") } label: {
@@ -890,7 +899,7 @@ private struct PixelArtEditorView: View {
                                                     .allowsHitTesting(false)
                                             }
                                     }
-                                    .buttonStyle(.plain)
+                                    .buttonStyle(.fullArea)
                                     .accessibilityLabel(layer.locked ? "Desbloquear \(layer.name)" : "Bloquear \(layer.name)")
                                     .help(layer.locked ? "Desbloquear capa" : "Bloquear capa")
                                     Button { document.updatePixelEditor { $0.activeLayerID = layer.id } } label: {
@@ -904,7 +913,7 @@ private struct PixelArtEditorView: View {
                                                     .allowsHitTesting(false)
                                             }
                                     }
-                                    .buttonStyle(.plain)
+                                    .buttonStyle(.fullArea)
                                     .accessibilityLabel("Seleccionar \(layer.name)")
                                     Menu {
                                         layerEditActions(layer, state: art.state)
@@ -932,7 +941,7 @@ private struct PixelArtEditorView: View {
                                                 Text(occupied ? "◆" : "·").allowsHitTesting(false)
                                             }
                                     }
-                                    .buttonStyle(.plain)
+                                    .buttonStyle(.fullArea)
                                     .help("\(layer.name), fotograma \((art.state.frameIndex(frame.id) ?? 0) + 1)")
                                 }
                             }
@@ -940,7 +949,7 @@ private struct PixelArtEditorView: View {
                         }
                     }
                     .frame(minWidth: geometry.size.width, alignment: .leading)
-                    .buttonStyle(.plain)
+                    .buttonStyle(.fullArea)
                 }
                 }
             }
@@ -978,7 +987,7 @@ private struct PixelArtEditorView: View {
                                                 .stroke(art.editor.drawColor == .linked(entry.id)
                                                     ? Theme.accent : Color.primary.opacity(0.24), lineWidth: 2))
                                             .contentShape(Rectangle())
-                                    }.buttonStyle(.plain).help("\(entry.name) · ID \(entry.id)")
+                                    }.buttonStyle(.fullArea).help("\(entry.name) · ID \(entry.id)")
                                 }
                             }
                         }
@@ -992,7 +1001,7 @@ private struct PixelArtEditorView: View {
                             .frame(width: 44, height: 22)
                             .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.primary.opacity(0.45)))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.fullArea)
                     .help("Elegir color libre")
                     .accessibilityLabel("Elegir color libre")
                 }
@@ -1013,7 +1022,7 @@ private struct PixelArtEditorView: View {
                         .foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, 12).frame(height: 37).contentShape(Rectangle())
-            }.buttonStyle(.plain)
+            }.buttonStyle(.fullArea)
             Rectangle().fill(Theme.border).frame(height: 1)
             if codexExpanded {
                 VStack(alignment: .leading, spacing: 8) {
@@ -1072,7 +1081,7 @@ private struct PixelArtEditorView: View {
                                 .overlay(RoundedRectangle(cornerRadius: 4)
                                     .stroke(Color.primary.opacity(0.4)))
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.fullArea)
                         .accessibilityLabel(hex)
                     }
                 }
@@ -1520,7 +1529,7 @@ private struct EditorStatusBar: View {
                             .foregroundStyle(settings.wrapLines ? .primary : .secondary)
                             .frame(width: Theme.zoom(18), height: Theme.zoom(18))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.fullArea)
                     .help(settings.wrapLines ? "Desactivar ajuste de líneas" : "Activar ajuste de líneas")
                     .accessibilityLabel("Ajustar líneas")
                     .accessibilityValue(settings.wrapLines ? "Activado" : "Desactivado")
@@ -1567,7 +1576,7 @@ private struct WorkspaceEditorTab: View {
                 .frame(maxWidth: 240).frame(height: 32)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.fullArea)
             .onDrag { drag?() ?? NSItemProvider() }
             .accessibilityAddTraits(selected ? .isSelected : [])
             Button(action: close) {
@@ -1579,7 +1588,7 @@ private struct WorkspaceEditorTab: View {
                     .background(Theme.surfaceInk.opacity(closeHovered ? 0.07 : 0), in: RoundedRectangle(cornerRadius: 4))
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.fullArea)
             .focused($closeFocused)
             .onHover { closeHovered = $0 }
             .accessibilityLabel("Cerrar \(title)")
@@ -1587,35 +1596,11 @@ private struct WorkspaceEditorTab: View {
             .help("Cerrar \(title)" + (isDirty ? " · cambios sin guardar" : ""))
         }
         .padding(.trailing, 4).fixedSize(horizontal: true, vertical: false)
+        .tabSelectionBackground(action: select)
         .background(Theme.surfaceInk.opacity(selected ? 0.09 : hovered ? 0.025 : 0), in: RoundedRectangle(cornerRadius: 7))
         .overlay { RoundedRectangle(cornerRadius: 7).strokeBorder(Theme.surfaceInk.opacity(selected ? 0.045 : 0)) }
         .shadow(color: .black.opacity(selected ? 0.14 : 0), radius: 1, y: 1)
         .onHover { hovered = $0 }
         .help(tooltip)
-    }
-}
-
-private struct CommandSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @State var project: CodeProject
-    let save: (CodeProject) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text(project.name).font(.headline)
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Comando").foregroundStyle(.secondary)
-                TextField("npm run dev", text: $project.command)
-                    .font(Theme.codeFont())
-                    .textFieldStyle(.roundedBorder)
-            }
-            HStack {
-                Spacer()
-                Button("Cancelar") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Guardar") { save(project)
-                dismiss() }.keyboardShortcut(.defaultAction)
-            }
-        }
-        .padding(24).frame(width: 460)
     }
 }

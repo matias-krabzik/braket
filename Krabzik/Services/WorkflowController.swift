@@ -294,18 +294,18 @@ final class WorkflowController {
                 environment["BRAKET_PREVIOUS_EXIT_CODE"] = previousExitCode.map(String.init) ?? ""
                 runner.start(project, workspaceURL: workspace, environment: environment)
                 activeProcess = node.id
-                let run = runner.state(for: node.id)
+                let run = runner.state(for: project, workspaceURL: workspace)
                 let deadline = node.settings.timeoutSeconds > 0
                     ? Date().addingTimeInterval(TimeInterval(node.settings.timeoutSeconds)) : nil
                 var timedOut = false
                 while run.status.active, !cancelled {
                     if let deadline, Date() >= deadline, !timedOut {
                         timedOut = true
-                        runner.stop(node.id)
+                        runner.stop(run.id)
                     }
                     try? await Task.sleep(for: .milliseconds(100))
                 }
-                if cancelled { runner.stop(node.id)
+                if cancelled { runner.stop(run.id)
                 visited[id] = .failed("Detenido")
                 results[id] = WorkflowStepResult(summary: "Detenido", detail: run.output, successful: false)
                 break }

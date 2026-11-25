@@ -18,6 +18,8 @@ struct SettingsView: View {
         var defaultSQLTimeoutSeconds: Int
         var theme: AppTheme
         var uiScale: Double
+        var codeTypography: CodeTypography
+        var resultTypography: CodeTypography
         var codeFontSize: Double
         var resultFontSize: Double
         var editorOptions: EditorOptions
@@ -28,6 +30,8 @@ struct SettingsView: View {
             editorOptions = settings.editorOptions
             theme = settings.theme
             uiScale = settings.uiScale
+            codeTypography = settings.codeTypography
+            resultTypography = settings.resultTypography
             codeFontSize = settings.codeFontSize
             resultFontSize = settings.resultFontSize
             restoreLastState = settings.restoreLastState
@@ -41,6 +45,8 @@ struct SettingsView: View {
         settings.editorOptions = draft.editorOptions
         settings.theme = draft.theme
         settings.uiScale = draft.uiScale
+        settings.codeTypography = draft.codeTypography
+        settings.resultTypography = draft.resultTypography
         settings.codeFontSize = draft.codeFontSize
         settings.resultFontSize = draft.resultFontSize
         settings.restoreLastState = draft.restoreLastState
@@ -52,23 +58,33 @@ struct SettingsView: View {
     }
 
     private enum Page: String, CaseIterable, Identifiable {
-        case general = "Apariencia"
+        case general = "General"
+        case appearance = "Apariencia"
+        case texts = "Textos"
+        case editor = "Editor"
+        case sql = "SQL"
         case connections = "Conexiones"
         case updates = "Actualizaciones"
 
         var id: Self { self }
         var icon: String {
             switch self {
-            case .general: "paintpalette"
+            case .general: "gearshape"
+            case .appearance: "paintpalette"
+            case .editor: "curlybraces"
+            case .sql: "terminal"
+            case .texts: "textformat"
             case .connections: "externaldrive"
             case .updates: "arrow.triangle.2.circlepath"
             }
         }
         var searchTerms: String {
             switch self {
-            case .general:
-                "apariencia tema grafito fuente código resultados zoom iniciar diagnóstico mysql "
-                    + "editor paréntesis guías formato cierre sql timeout tiempo consultas"
+            case .general: "general al iniciar abrir último estado recuperar proyecto pestañas sesión"
+            case .appearance: "apariencia tema grafito claro oscuro zoom interfaz"
+            case .editor: "editor paréntesis comillas guías indentación formato cierre variables sentencia palabras clave SQL"
+            case .sql: "sql ejecución timeout tiempo consultas diagnóstico mysql exportar"
+            case .texts: "apariencia textos tipografía fuentes código resultados tamaño negrita SF Mono Menlo JetBrains Fira Source"
             case .connections: "conexiones base datos mysql"
             case .updates: "actualizaciones versión"
             }
@@ -92,17 +108,16 @@ struct SettingsView: View {
                     .textFieldStyle(.roundedBorder)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("GENERAL").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-                            .padding(.horizontal, 8).padding(.top, 4)
                         ForEach(filteredPages) { item in
                             Button { page = item } label: {
                                 Label(item.rawValue, systemImage: item.icon)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .padding(.horizontal, 9).padding(.vertical, 7)
+                                    .padding(.leading, item == .texts ? 18 : 0)
                                     .background(page == item ? Theme.accent.opacity(0.22) : .clear,
                                                 in: RoundedRectangle(cornerRadius: 6))
                                     .contentShape(Rectangle())
-                            }.buttonStyle(.plain)
+                            }.buttonStyle(.fullArea)
                                 .accessibilityAddTraits(page == item ? .isSelected : [])
                         }
                         if filteredPages.isEmpty {
@@ -117,6 +132,12 @@ struct SettingsView: View {
             Group {
                 switch page {
                 case .general: general
+                case .appearance: appearance
+                case .editor: editor
+                case .sql: sql
+                case .texts:
+                    TextAppearanceSettings(code: $draft.codeTypography, results: $draft.resultTypography,
+                                           codeSize: $draft.codeFontSize, resultSize: $draft.resultFontSize, theme: draft.theme)
                 case .connections: ConnectionsSettingsView(controller: controller)
                 case .updates: UpdatesSettingsView()
                 }
@@ -151,11 +172,17 @@ struct SettingsView: View {
     }
 
     private var general: some View {
-        Form {
-            Section {
-                Text("Apariencia").font(.title2.weight(.semibold))
-                    .listRowBackground(Color.clear)
+        settingsForm("General") {
+            Section("Al iniciar") {
+                Toggle("Abrir último estado", isOn: $draft.restoreLastState)
+                Text("Recupera el proyecto y las pestañas que dejaste abiertos al salir.")
+                    .font(.callout).foregroundStyle(.secondary)
             }
+        }
+    }
+
+    private var appearance: some View {
+        settingsForm("Apariencia") {
             Section("Apariencia") {
                 Picker("Tema", selection: $draft.theme) {
                     ForEach(AppTheme.allCases) { theme in
@@ -175,41 +202,20 @@ struct SettingsView: View {
                         .disabled(draft.uiScale == 1)
                 }
             }
-            Section("Tamaño de fuente") {
-                HStack {
-                    Slider(value: $draft.codeFontSize, in: AppSettings.fontSizeRange, step: 1) {
-                        Text("Código")
-                    }
-                    Text("\(Int(draft.codeFontSize)) pt").frame(width: 52, alignment: .trailing)
-                    Button("Restablecer") { draft.codeFontSize = 14 }.disabled(draft.codeFontSize == 14)
-                }
-                HStack {
-                    Slider(value: $draft.resultFontSize, in: AppSettings.fontSizeRange, step: 1) {
-                        Text("Resultados")
-                    }
-                    Text("\(Int(draft.resultFontSize)) pt").frame(width: 52, alignment: .trailing)
-                    Button("Restablecer") { draft.resultFontSize = 14 }.disabled(draft.resultFontSize == 14)
-                }
-            }
-            Section("SQL") {
-                HStack {
-                    Text("Timeout predeterminado por sentencia")
-                    Spacer()
-                    TextField("Segundos", value: $draft.defaultSQLTimeoutSeconds, format: .number.grouping(.never))
-                        .frame(width: 80).accessibilityLabel("Timeout SQL de la aplicación en segundos")
-                    Text("segundos")
-                }
-                Text("1–3600 segundos. Cada sentencia tiene su propio límite, incluso al ejecutar un archivo completo. "
-                     + "Se usa cuando el proyecto y el archivo no tienen un timeout propio.")
-                    .font(.callout).foregroundStyle(.secondary)
-            }
-            Section("Editor") {
+        }
+    }
+
+    private var editor: some View {
+        settingsForm("Editor") {
+            Section("Asistencia al editar") {
                 Toggle("Resaltar pares y delimitadores sin pareja", isOn: $draft.editorOptions.matchBrackets)
                 Toggle("Colorear paréntesis por profundidad", isOn: $draft.editorOptions.rainbowBrackets)
                 Toggle("Mostrar guías de indentación", isOn: $draft.editorOptions.indentationGuides)
                 Toggle("Cerrar paréntesis y comillas automáticamente", isOn: $draft.editorOptions.autoClose)
                 Toggle("Resaltar referencias de variables SQL", isOn: $draft.editorOptions.variableReferences)
                 Toggle("Marcar la sentencia SQL activa", isOn: $draft.editorOptions.activeStatement)
+            }
+            Section("Formato SQL") {
                 Picker("Indentación", selection: $draft.editorOptions.indentWidth) {
                     Text("2 espacios").tag(2)
                     Text("4 espacios").tag(4)
@@ -221,12 +227,22 @@ struct SettingsView: View {
                 }
                 Text("Formatear selección o archivo SQL: ⌥⌘L").font(.callout).foregroundStyle(.secondary)
             }
-            Section("Vista previa") {
-                typographyPreview
-            }
-            Section("Al iniciar") {
-                Toggle("Abrir último estado", isOn: $draft.restoreLastState)
-                Text("Recupera el proyecto y las pestañas que dejaste abiertos al salir.")
+        }
+    }
+
+    private var sql: some View {
+        settingsForm("SQL") {
+            Section("Ejecución") {
+                HStack {
+                    Text("Timeout predeterminado por sentencia")
+                    Spacer()
+                    TextField("Segundos", value: $draft.defaultSQLTimeoutSeconds, format: .number.grouping(.never))
+                        .labelsHidden().textFieldStyle(.roundedBorder)
+                        .frame(width: 80).accessibilityLabel("Timeout SQL de la aplicación en segundos")
+                    Text("segundos")
+                }
+                Text("1–3600 segundos. Cada sentencia tiene su propio límite, incluso al ejecutar un archivo completo. "
+                     + "Se usa cuando el proyecto y el archivo no tienen un timeout propio.")
                     .font(.callout).foregroundStyle(.secondary)
             }
             Section("Diagnóstico MySQL") {
@@ -240,6 +256,16 @@ struct SettingsView: View {
                     .font(.callout).foregroundStyle(.secondary)
             }
         }
+    }
+
+    private func settingsForm<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        Form {
+            Section {
+                Text(title).font(.title2.weight(.semibold))
+                    .listRowBackground(Color.clear)
+            }
+            content()
+        }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
         .padding(12)
@@ -247,35 +273,4 @@ struct SettingsView: View {
         .tint(Theme.accent)
         .preferredColorScheme(Theme.colorScheme)
     }
-    private var typographyPreview: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Label("consulta.sql", systemImage: "doc.text")
-                .font(.caption.weight(.medium)).padding(.horizontal, 12).padding(.vertical, 8)
-                .frame(maxWidth: .infinity, alignment: .leading).background(Theme.bar)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("SELECT id, nombre").foregroundStyle(Color(nsColor: EditorPalette.blue))
-                Text("FROM clientes")
-                Text("WHERE activo = 1;")
-            }
-            .font(.system(size: draft.codeFontSize, design: .monospaced))
-            .frame(maxWidth: .infinity, alignment: .leading).padding(12)
-            Divider()
-            Label("Resultados", systemImage: "tablecells")
-                .font(.caption.weight(.medium)).padding(.horizontal, 12).padding(.vertical, 8)
-                .frame(maxWidth: .infinity, alignment: .leading).background(Theme.bar)
-            VStack(alignment: .leading, spacing: 5) {
-                Text("id     nombre").fontWeight(.medium)
-                Text("1      María Pérez")
-                Text("2      Martín López")
-            }
-            .font(.system(size: draft.resultFontSize, design: .monospaced))
-            .frame(maxWidth: .infinity, alignment: .leading).padding(12)
-        }
-        .background(Theme.background)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .overlay { RoundedRectangle(cornerRadius: 6).stroke(Theme.border) }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Vista previa de código y resultados")
-    }
-
 }

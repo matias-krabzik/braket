@@ -21,11 +21,14 @@ import SwiftUI
     }
 
     static func codeFont(_ size: CGFloat = 14) -> Font {
-        .system(size: size * CGFloat(settings.resultFontScale), design: .monospaced)
+        Font(settings.resultTypography.nativeFont(size: size * CGFloat(settings.resultFontScale)))
     }
 
     static func nativeCodeFont(scale: Double = 1, weight: NSFont.Weight = .regular) -> NSFont {
-        .monospacedSystemFont(ofSize: 14 * CGFloat(scale), weight: weight)
+        settings.codeTypography.nativeFont(size: 14 * CGFloat(scale), forceBold: weight.rawValue >= NSFont.Weight.semibold.rawValue)
+    }
+    static func nativeResultFont(scale: Double = 1, weight: NSFont.Weight = .regular) -> NSFont {
+        settings.resultTypography.nativeFont(size: 14 * CGFloat(scale), forceBold: weight.rawValue >= NSFont.Weight.semibold.rawValue)
     }
 
     static var colorScheme: ColorScheme { settings.theme == .light ? .light : .dark }
@@ -91,6 +94,31 @@ struct WorkspaceProgress: View {
         .task {
             do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
             visible = true
+        }
+    }
+}
+
+/// The complete label, including its padding and frame, is interactive.
+struct FullAreaButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var enabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .contentShape(Rectangle())
+            .opacity(enabled ? (configuration.isPressed ? 0.75 : 1) : 0.4)
+    }
+}
+
+extension ButtonStyle where Self == FullAreaButtonStyle {
+    static var fullArea: FullAreaButtonStyle { FullAreaButtonStyle() }
+}
+
+extension View {
+    /// Covers gaps between a tab's primary button and its independent close/pin buttons.
+    func tabSelectionBackground(action: @escaping () -> Void) -> some View {
+        background {
+            Button(action: action) { Color.clear.contentShape(Rectangle()) }
+                .buttonStyle(.fullArea).focusable(false).accessibilityHidden(true)
         }
     }
 }

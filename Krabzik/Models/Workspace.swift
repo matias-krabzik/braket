@@ -108,6 +108,7 @@ struct CodeProject: Identifiable, Codable, Equatable {
     var kind: ProjectKind
     var command: String
     var icon: CodeProjectIcon?
+    var runConfiguration: RunConfiguration?
 
     func scope(relativeTo workspaceURL: URL) -> PathScope {
         pathScope(path, relativeTo: workspaceURL)
@@ -187,6 +188,7 @@ struct Workspace: Codable, Equatable {
         try checkLengths()
         try checkText()
         try checkPaths()
+        for project in projects { try project.runConfiguration?.validate() }
     }
 
     private func checkCounts() throws {

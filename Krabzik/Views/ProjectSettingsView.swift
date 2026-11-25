@@ -78,7 +78,7 @@ struct ProjectSettingsView: View {
                                 Circle().fill(ProjectIconStyle(hex: hex).color).frame(width: 24, height: 24)
                                     .overlay { Circle().strokeBorder(.white.opacity(icon.hex == hex ? 0.9 : 0), lineWidth: 2) }
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.fullArea)
                             .accessibilityLabel("Color " + hex)
                         }
                     }

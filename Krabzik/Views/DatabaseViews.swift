@@ -478,7 +478,7 @@ struct SQLToolbar: View {
                         .frame(width: selectorWidth - Theme.zoom(27), height: Theme.zoom(28))
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain).disabled(document.sqlExecution.isRunning)
+                    .buttonStyle(.fullArea).disabled(document.sqlExecution.isRunning)
                     .help(connection.map { $0.name + " · " + controller.database.state($0.id).connectionLabel
                         + " · " + controller.database.state($0.id).destination(for: $0) }
                         ?? "Elegir conexión para este archivo")
@@ -491,7 +491,7 @@ struct SQLToolbar: View {
                         Image(systemName: "gearshape").font(.system(size: Theme.zoom(13)))
                             .frame(width: Theme.zoom(27), height: Theme.zoom(28))
                     }
-                    .buttonStyle(.plain).help("Administrar conexiones").accessibilityLabel("Administrar conexiones")
+                    .buttonStyle(.fullArea).help("Administrar conexiones").accessibilityLabel("Administrar conexiones")
                     .qaControl("sql.toolbar.manageConnections", title: "Administrar conexiones") {
                         controller.database.showingConnections = true
                     }
@@ -512,7 +512,7 @@ struct SQLToolbar: View {
                         .padding(.horizontal, Theme.zoom(10))
                         .frame(width: selectorWidth, height: Theme.zoom(28))
                     }
-                    .buttonStyle(.plain).disabled(!canExecute || names.isEmpty)
+                    .buttonStyle(.fullArea).disabled(!canExecute || names.isEmpty)
                     .background(Theme.surfaceInk.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
                     .help("Base de datos del archivo: " + (state.currentDatabase.isEmpty ? "sin elegir" : state.currentDatabase))
                     .accessibilityLabel("Base de datos del archivo")
@@ -535,7 +535,7 @@ struct SQLToolbar: View {
                                         .frame(height: Theme.zoom(32))
                                         .contentShape(Rectangle())
                                     }
-                                    .buttonStyle(.plain)
+                                    .buttonStyle(.fullArea)
                                 }
                             }
                             .padding(Theme.zoom(4))
@@ -665,7 +665,7 @@ private struct SQLConnectionMenu: View {
             }
             Divider().padding(.top, 6)
             Button { openConnections() } label: { Label("Administrar", systemImage: "gearshape") }
-                .buttonStyle(.plain).font(Theme.interfaceFont(12))
+                .buttonStyle(.fullArea).font(Theme.interfaceFont(12))
                 .help("Administrar conexiones").padding(12)
         }
         .frame(width: Theme.zoom(340))
@@ -700,7 +700,7 @@ private struct SQLConnectionMenu: View {
                         in: RoundedRectangle(cornerRadius: 5))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain).help("Seleccionar \(profile.name) · \(state.connectionLabel)")
+        .buttonStyle(.fullArea).help("Seleccionar \(profile.name) · \(state.connectionLabel)")
         .accessibilityLabel("\(profile.name), \(state.connectionLabel)")
     }
 

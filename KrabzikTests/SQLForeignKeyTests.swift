@@ -60,7 +60,9 @@ import XCTest
     func testCardLoadsAndCollapsesWithoutChangingParentRows() async throws {
         let draft = draft()
         let target = try XCTUnwrap(draft.relations.targets(row: 0, draft: draft).first)
+        var calls = 0
         draft.relations.load = { _ in
+            calls += 1
             var result = SQLResult(statement: 0, line: 1)
             result.columns = ["id", "name"]
             result.rows = [["18446744073709551614", "Demo"]]
@@ -75,6 +77,15 @@ import XCTest
         XCTAssertFalse(draft.hasChanges)
         draft.relations.toggle(target, row: 0)
         XCTAssertNil(draft.relations.expanded[0])
+        draft.relations.toggle(target, row: 0)
+        let cached = try XCTUnwrap(draft.relations.expanded[0])
+        XCTAssertTrue(cached.cached)
+        XCTAssertEqual(cached.result?.rows.first?[1], "Demo")
+        XCTAssertEqual(calls, 1)
+        draft.relations.refresh(0)
+        for _ in 0..<100 where cached.loading { await Task.yield() }
+        XCTAssertFalse(cached.cached)
+        XCTAssertEqual(calls, 2)
     }
     func testNativeCardRailAndCommandClickKeepResultRowsAndKeyboardEditing() async throws {
         let draft = draft()
@@ -145,7 +156,7 @@ import XCTest
         editable.widths[1] = 120
         try await Task.sleep(for: .milliseconds(150))
         let record = try XCTUnwrap(editable.relations.expanded[0])
-        XCTAssertNotNil(record.elapsed)
+        XCTAssertTrue(record.cached)
         let layout = SQLRelationLayout(scale: 1, interfaceScale: Theme.settings.uiScale)
         XCTAssertGreaterThanOrEqual(record.cardHeight(scale: 1), layout.headerHeight + layout.footerHeight
                                     + layout.tableHeight(rows: 1) + 2 * layout.outerInset)

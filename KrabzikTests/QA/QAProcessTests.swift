@@ -110,28 +110,19 @@ final class QAProcessTests: XCTestCase {
     }
 
     /// ABR-09
-    func testLeavingAProjectWithProcessesAsksBeforeStoppingThem() async throws {
+    func testLeavingAProjectKeepsProcessesUntilExplicitlyStopped() async throws {
         let qa = try QAHarness(self)
         qa.script.command = .always
-        qa.script.stopProcesses = false
         let url = try qa.makeProject(name: "Servidor", folders: ["app"], command: "sleep 30")
         await qa.openProject(url)
         await qa.mount()
         try await qa.tap("menu.project.start")
         await qa.settle(until: { qa.controller.runner.hasActiveProcesses }, timeout: 5)
-
         await qa.controller.closeWorkspace()
-        await qa.assertEvent("dialog.process.confirmStop", ["answer": "keep"])
-        XCTAssertTrue(qa.controller.runner.hasActiveProcesses, "cancelar no detiene nada")
-        XCTAssertEqual(qa.controller.workspaceURL?.standardizedFileURL, url.standardizedFileURL,
-                       "y el proyecto sigue abierto")
-
-        qa.script.stopProcesses = true
-        await qa.controller.closeWorkspace()
-        await qa.assertEvent("dialog.process.confirmStop", ["answer": "stop"])
-        await qa.settle(until: { qa.controller.workspace == nil }, timeout: 5)
-        XCTAssertNil(qa.controller.workspace)
+        XCTAssertNil(qa.controller.workspaceURL)
+        XCTAssertTrue(qa.controller.runner.hasActiveProcesses)
+        qa.controller.stopAll()
         let stopped = await qa.settle(until: { !qa.controller.runner.hasActiveProcesses }, timeout: 8)
-        XCTAssertTrue(stopped, "al aceptar, los procesos se detienen\n" + qa.timelineText())
+        XCTAssertTrue(stopped)
     }
 }

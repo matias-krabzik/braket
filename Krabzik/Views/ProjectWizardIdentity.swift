@@ -49,7 +49,7 @@ struct ProjectWizardIdentity: View {
                         Circle().fill(ProjectIconStyle(hex: hex).color).frame(width: 24, height: 24)
                             .overlay { Circle().strokeBorder(.white.opacity(draft.icon.hex == hex ? 0.9 : 0), lineWidth: 2) }
                     }
-                    .buttonStyle(.plain).accessibilityLabel("Color " + hex)
+                    .buttonStyle(.fullArea).accessibilityLabel("Color " + hex)
                 }
             }
             ColorPicker("Color personalizado", selection: Binding(get: { draft.icon.color }, set: { draft.icon.setColor($0) }),

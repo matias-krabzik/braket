@@ -223,6 +223,33 @@ final class SQLWorkspaceTests: XCTestCase {
         XCTAssertTrue(execution.pinned.contains(pinned))
     }
 
+    @MainActor func testRefreshKeepsCommittedCellUntilServerResultArrives() throws {
+        let (result, table) = fixture()
+        let execution = SQLExecution()
+        execution.receive(result)
+        let original = try XCTUnwrap(execution.selectedResult)
+        let draft = execution.draft(for: original)
+        draft.configure(table)
+        draft.set(.text("Edited"), row: 0, column: 1)
+        draft.sent = true
+        execution.targetResultID = original.id
+        XCTAssertTrue(execution.begin(result))
+        XCTAssertFalse(draft.hasChanges)
+        XCTAssertTrue(execution.drafts[original.id] === draft)
+        XCTAssertEqual(draft.value(row: 0, column: 1), .text("Edited"))
+        execution.finish(error: "Sin conexión")
+        XCTAssertTrue(draft.reason.contains("Sin conexión"))
+        execution.targetResultID = original.id
+        XCTAssertTrue(execution.begin(result))
+        var refreshed = result
+        refreshed.rows[0][1] = "Edited on server"
+        execution.receive(refreshed)
+        execution.finish(error: nil)
+        let updated = try XCTUnwrap(execution.selectedResult)
+        XCTAssertEqual(updated.id, original.id)
+        XCTAssertEqual(execution.draft(for: updated).value(row: 0, column: 1), .text("Edited on server"))
+    }
+
     @MainActor func testResetOnlyChangesSelectedCommittedField() {
         let (result, table) = fixture()
         let draft = SQLResultDraft(result: result)

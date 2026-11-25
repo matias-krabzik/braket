@@ -7,6 +7,7 @@ final class SQLRelatedRecord {
     var result: SQLResult?
     var error: String?
     var loading = true
+    var cached = false
     var elapsed: TimeInterval?
     init(target: SQLRelatedTarget) { self.target = target }
     func cardHeight(scale: Double, availableWidth: CGFloat = .infinity) -> CGFloat {
@@ -25,6 +26,8 @@ final class SQLResultRelations {
     var error: String?
     @ObservationIgnored var load: ((SQLRelatedTarget) async throws -> SQLResult)?
     @ObservationIgnored private var tasks: [Int: Task<Void, Never>] = [:]
+
+    @ObservationIgnored private var cache: [Data: SQLResult] = [:]
 
     func targets(row: Int, draft: SQLResultDraft) -> [SQLRelatedTarget] {
         guard (0..<draft.result.rows.count).contains(row), !draft.deleted.contains(row) else { return [] }
@@ -67,6 +70,22 @@ final class SQLResultRelations {
         collapse(row)
         let record = SQLRelatedRecord(target: target)
         expanded[row] = record
+        if let cached = cache[Data(target.previewQuery.utf8)] {
+            record.result = cached
+            record.cached = true
+            record.loading = false
+            return
+        }
+        refresh(row)
+    }
+
+    func refresh(_ row: Int) {
+        guard let record = expanded[row] else { return }
+        let target = record.target
+        record.loading = true
+        record.cached = record.result != nil
+        record.error = nil
+        tasks[row]?.cancel()
         let load = load
         tasks[row] = Task { [weak self, weak record] in
             guard let record else { return }
@@ -75,6 +94,8 @@ final class SQLResultRelations {
                 guard let load else { throw DatabaseFailure("La vista relacionada no está disponible.") }
                 let result = try await load(target)
                 guard !Task.isCancelled, self?.expanded[row] === record else { return }
+                self?.cache[Data(target.previewQuery.utf8)] = result
+                record.cached = false
                 record.result = result
             } catch {
                 guard !Task.isCancelled, self?.expanded[row] === record else { return }
@@ -96,14 +117,14 @@ final class SQLResultRelations {
     var outerInset: CGFloat { 12 * interfaceScale }
     var scrollerSpace: CGFloat { NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy) + 2 }
     var rowHeight: CGFloat {
-        let font = Theme.nativeCodeFont(scale: scale)
+        let font = Theme.nativeResultFont(scale: scale)
         return ceil(font.ascender - font.descender + font.leading) + 16 * scale
     }
     func tableHeight(rows: Int, horizontalScroll: Bool = false) -> CGFloat {
         rowHeight * CGFloat(1 + max(1, rows)) + CGFloat(max(1, rows)) + (horizontalScroll ? scrollerSpace : 0)
     }
     func columnWidth(_ column: Int, result: SQLResult) -> CGFloat {
-        let font = Theme.nativeCodeFont(scale: scale)
+        let font = Theme.nativeResultFont(scale: scale)
         let content = ([result.columns[column]] + result.rows.prefix(10).map { column < $0.count ? $0[column] ?? "NULL" : "" })
         return min(320 * scale, max(100 * scale, content.map { ($0 as NSString).size(withAttributes: [.font: font]).width }
             .max() ?? 0))

@@ -266,6 +266,10 @@ final class SQLExecution {
         for previous in related {
             if let draft = drafts[previous.id], draft.sending || !draft.confirmDiscard() { return false }
         }
+        if let targetResultID, drafts[targetResultID]?.sent == true {
+            activeResultID = targetResultID
+            return true
+        }
         var pending = result
         pending.isLoading = true
         receive(pending)
@@ -275,6 +279,10 @@ final class SQLExecution {
 
     func receive(_ result: SQLResult) {
         guard result.setValues == nil else { return }
+        if let targetResultID, let draft = drafts[targetResultID], draft.sent, let error = result.error {
+            draft.reason = "Cambios enviados. Falló la actualización: " + error
+            return
+        }
         var updated = result
         if let index = matching(result) {
             updated.id = results[index].id
@@ -289,6 +297,9 @@ final class SQLExecution {
 
     func finish(error: String?) {
         runningTimeoutSeconds = nil
+        if let activeResultID, let draft = drafts[activeResultID], draft.sent, let error {
+            draft.reason = "Cambios enviados. Falló la actualización: " + error
+        }
         if let index = results.firstIndex(where: { $0.id == activeResultID && $0.isLoading }) {
             results[index].isLoading = false
             results[index].error = error

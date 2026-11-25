@@ -18,22 +18,11 @@ struct WorkspaceActivityBar: View {
                 controller.workflowVisible = false
                 controller.database.resultsVisible.toggle()
                 if controller.database.resultsVisible { controller.outputVisible = false }
-                else { controller.processesVisible = false }
             }
-            activity("Procesos y registros", id: "explorer.processes", icon: "rectangle.bottomthird.inset.filled",
-                     selected: controller.selectedProcessesVisible && !controller.database.resultsVisible
-                         && !controller.workflowVisible && !controller.outputVisible) {
-                if controller.workflowVisible || controller.outputVisible {
-                    controller.workflowVisible = false
-                    controller.outputVisible = false
-                    controller.processesVisible = true
-                    controller.pixelProcessesVisible = true
-                    controller.database.resultsVisible = false
-                } else if controller.database.resultsVisible {
-                    controller.database.resultsVisible = false
-                    controller.processesVisible = true
-                    controller.pixelProcessesVisible = true
-                } else { controller.toggleProcessesPanel() }
+            activity("Administrador de procesos", id: "explorer.processes", icon: "waveform.path.ecg",
+                     selected: controller.selectedProcessesVisible && !controller.processManager.isDetached) {
+                if controller.processManager.isDetached { controller.processManager.detach(controller) }
+                else { controller.toggleProcessesPanel() }
             }
         }
         .padding(.vertical, Theme.zoom(12)).frame(width: Theme.zoom(38)).background(Theme.bar)
@@ -45,6 +34,11 @@ struct WorkspaceActivityBar: View {
                           action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon).font(.system(size: Theme.zoom(17)))
+                .overlay(alignment: .bottomTrailing) {
+                    if id == "explorer.processes", controller.runner.hasActiveProcesses {
+                        Circle().fill(.green).frame(width: 6, height: 6).offset(x: 3, y: 3)
+                    }
+                }
                 .frame(width: Theme.zoom(30), height: Theme.zoom(30)).contentShape(Rectangle())
         }
         .buttonStyle(ActivityButtonStyle(selected: selected))

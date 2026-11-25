@@ -83,7 +83,7 @@ struct SQLOutputView: View {
                         .padding(.horizontal, 14).padding(.vertical, 10).contentShape(Rectangle())
                         .background(output.selected?.id == entry.id ? Theme.accent.opacity(0.12) : .clear)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.fullArea)
                     Divider()
                 }
                 if output.hasMore {

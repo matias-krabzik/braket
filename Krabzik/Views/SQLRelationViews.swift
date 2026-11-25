@@ -48,13 +48,14 @@ final class SQLRelationRowView: NSTableRowView {
     private var host: NSHostingView<SQLRelationCard>?
     var scale = 1.0
     func configure(record: SQLRelatedRecord?, scale: Double, theme: AppTheme,
-                   open: @escaping (SQLRelatedTarget) -> Void, close: @escaping () -> Void) {
+                   refresh: @escaping () -> Void, open: @escaping (SQLRelatedTarget) -> Void, close: @escaping () -> Void) {
         self.scale = scale
         guard let record else { host?.removeFromSuperview()
         host = nil
         return }
         let width = max(0, (grid?.enclosingScrollView?.contentView.bounds.width ?? bounds.width) - 32)
-        let card = SQLRelationCard(record: record, scale: scale, theme: theme, open: open, close: close, availableWidth: width)
+        let card = SQLRelationCard(record: record, scale: scale, theme: theme, refresh: refresh, open: open, close: close,
+                                   availableWidth: width)
         if let host { host.rootView = card }
         else {
             let host = NSHostingView(rootView: card)
@@ -82,6 +83,7 @@ struct SQLRelationCard: View {
     @Bindable var record: SQLRelatedRecord
     let scale: Double
     let theme: AppTheme
+    let refresh: () -> Void
     let open: (SQLRelatedTarget) -> Void
     let close: () -> Void
     var availableWidth: CGFloat = .infinity
@@ -93,17 +95,19 @@ struct SQLRelationCard: View {
                 Image(systemName: "link").foregroundStyle(.secondary)
                 Text(record.target.label).font(Theme.interfaceFont(12)).foregroundStyle(.secondary).lineLimit(1)
                 Spacer()
+                Button("Actualizar", systemImage: "arrow.clockwise", action: refresh)
+                    .buttonStyle(.fullArea).disabled(record.loading)
                 Button { open(record.target) } label: { Label("Abrir en pestaña", systemImage: "arrow.up.forward.square") }
-                    .buttonStyle(.plain).layoutPriority(1)
+                    .buttonStyle(.fullArea).layoutPriority(1)
                         .help("Abrir la consulta del registro relacionado en una nueva pestaña · ⌘+clic en la fila")
                 Button(action: close) { Image(systemName: "xmark").frame(width: 24, height: 24) }
-                    .buttonStyle(.plain).help("Cerrar detalle relacionado")
+                    .buttonStyle(.fullArea).help("Cerrar detalle relacionado")
             }.font(Theme.interfaceFont(12)).padding(.horizontal, 12).frame(height: layout.headerHeight)
             Divider()
-            if record.loading {
+            if record.loading && record.result == nil {
                 HStack { WorkspaceProgress().controlSize(.small)
                 Text("Cargando registro relacionado…") }.frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let error = record.error {
+            } else if let error = record.error, record.result == nil {
                 Text(error).foregroundStyle(.orange).textSelection(.enabled)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading).padding(12)
             } else if let result = record.result, !result.rows.isEmpty {
@@ -114,7 +118,11 @@ struct SQLRelationCard: View {
             }
             Divider()
             HStack(spacing: 12) {
-                if let elapsed = record.elapsed {
+                if record.cached {
+                    Text("Caché · puede estar desactualizado").foregroundStyle(.orange)
+                    if record.loading { WorkspaceProgress().controlSize(.mini) }
+                    if let error = record.error { Text(error).foregroundStyle(.orange).help(error) }
+                } else if let elapsed = record.elapsed {
                     Label("\(Int((elapsed * 1000).rounded())) ms", systemImage: "clock")
                         .help("Duración total de la consulta relacionada, incluida la conexión y la lectura")
                 } else { Text(record.loading ? "Cargando…" : "Consulta finalizada") }
@@ -141,7 +149,7 @@ struct SQLRelationCard: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 0) {
                     ForEach(result.columns.indices, id: \.self) { index in
-                        Text(result.columns[index]).font(Font(Theme.nativeCodeFont(scale: scale)).weight(.bold))
+                        Text(result.columns[index]).font(Font(Theme.nativeResultFont(scale: scale)).weight(.bold))
                             .frame(width: layout.columnWidth(index, result: result), height: layout.rowHeight, alignment: .leading)
                             .padding(.horizontal, 8 * scale)
                             .overlay(alignment: .trailing) { Divider() }
@@ -152,7 +160,7 @@ struct SQLRelationCard: View {
                     HStack(spacing: 0) {
                         ForEach(result.columns.indices, id: \.self) { column in
                             let value = column < result.rows[row].count ? result.rows[row][column] : nil
-                            Text(value ?? "NULL").font(Font(Theme.nativeCodeFont(scale: scale)))
+                            Text(value ?? "NULL").font(Font(Theme.nativeResultFont(scale: scale)))
                                 .foregroundStyle(value == nil ? .tertiary : .primary)
                                 .lineLimit(1).textSelection(.enabled)
                                 .frame(width: layout.columnWidth(column, result: result), height: layout.rowHeight, alignment: .leading)

@@ -37,9 +37,9 @@ final class QAActivityBarTests: XCTestCase {
         await qa.assertControl("explorer.git", title: "Git · Próximamente", enabled: false)
 
         try await qa.tap("explorer.processes")
-        XCTAssertFalse(qa.controller.selectedProcessesVisible)
-        try await qa.tap("explorer.processes")
         XCTAssertTrue(qa.controller.selectedProcessesVisible)
+        try await qa.tap("explorer.processes")
+        XCTAssertFalse(qa.controller.selectedProcessesVisible)
         XCTAssertEqual(qa.controller.workspaceURL, url)
     }
 
@@ -56,9 +56,8 @@ final class QAActivityBarTests: XCTestCase {
         try await qa.tap("explorer.results")
         XCTAssertTrue(qa.controller.database.resultsVisible)
         try await qa.tap("explorer.processes")
-        XCTAssertFalse(qa.controller.database.resultsVisible)
-        try await qa.tap("explorer.results")
         XCTAssertTrue(qa.controller.database.resultsVisible)
+        XCTAssertTrue(qa.controller.selectedProcessesVisible)
         XCTAssertEqual(document.sqlExecution.selectedResult?.id, result.id)
     }
 }

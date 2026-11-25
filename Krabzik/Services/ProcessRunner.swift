@@ -26,17 +26,28 @@ enum RunStatus: Equatable {
 @MainActor @Observable
 final class ProjectRun: Identifiable {
     let id: UUID
+    var projectID: UUID
+    var project: CodeProject?
+    var workspaceName = ""
+    var startedAt: Date?
+    var endedAt: Date?
+    var restartAttempts = 0
+    var ports: [Int] = []
+    var portConflict = ""
+    var pendingRestart = false
     var status: RunStatus = .idle
     var output = ""
     var capturedOutput = ""
     var revision = 0
     @ObservationIgnored var workspaceURL: URL?
     @ObservationIgnored var name = ""
-    @ObservationIgnored var processID: pid_t = 0
+    var processID: pid_t = 0
     @ObservationIgnored var generation = UUID()
     @ObservationIgnored var stopGeneration = UUID()
 
-    init(id: UUID) { self.id = id }
+    init(id: UUID) { self.id = id
+        projectID = id
+    }
 
     func append(_ text: String) {
         output += text
@@ -113,7 +124,8 @@ struct UTF8StreamDecoder {
 @MainActor @Observable
 final class ProcessRunner {
     var runs: [UUID: ProjectRun] = [:]
-    var hasActiveProcesses: Bool { runs.values.contains { $0.status.active } }
+    private var shuttingDown = false
+    var hasActiveProcesses: Bool { runs.values.contains { $0.status.active || $0.pendingRestart } }
 
     func state(for id: UUID) -> ProjectRun {
         if let run = runs[id] { return run }
@@ -122,21 +134,41 @@ final class ProcessRunner {
         return run
     }
 
+    func state(for project: CodeProject, workspaceURL: URL, workspaceName: String = "") -> ProjectRun {
+        let url = workspaceURL.standardizedFileURL
+        let existing = runs.values.first { $0.projectID == project.id && $0.workspaceURL == url }
+        let run = existing ?? state(for: runs[project.id]?.workspaceURL == nil ? project.id : UUID())
+        run.projectID = project.id
+        run.workspaceURL = url
+        run.workspaceName = workspaceName.isEmpty ? (run.workspaceName.isEmpty ? url.deletingPathExtension().lastPathComponent
+            : run.workspaceName) : workspaceName
+        if !run.status.active { run.project = project
+            run.name = project.executionName
+        }
+        return run
+    }
+
     func start(_ project: CodeProject, workspaceURL: URL, environment overrides: [String: String] = [:]) {
-        let run = state(for: project.id)
-        guard !run.status.active, !project.command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        let directory = project.directory(relativeTo: workspaceURL)
+        let run = state(for: project, workspaceURL: workspaceURL)
+        guard !shuttingDown, !run.status.active, !project.command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        run.pendingRestart = false
+        let directory = project.executionDirectory(relativeTo: workspaceURL)
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory), isDirectory.boolValue else {
             run.status = .failed("Carpeta no disponible")
             run.append("\nNo se encuentra \(directory.path)\n")
             return
         }
+        run.project = project
+        run.pendingRestart = false
+        run.startedAt = Date()
+        run.endedAt = nil
+        run.ports = []
         run.workspaceURL = workspaceURL.standardizedFileURL
-        run.name = project.name
+        run.name = project.executionName
         run.generation = UUID()
         let generation = run.generation
-        run.output = "$ \(project.command)\n"
+        run.output = "$ \(project.executionCommand)\n"
         run.capturedOutput = ""
         run.revision += 1
 
@@ -169,8 +201,9 @@ final class ProcessRunner {
         environment["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + (environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin")
         environment["NO_COLOR"] = "1"
         environment["TERM"] = "dumb"
+        environment.merge(project.runConfiguration?.environment ?? [:]) { _, new in new }
         environment.merge(overrides) { _, new in new }
-        let arguments = ["/bin/zsh", "-l", "-c", "cd -- \(Shell.quote(directory.path)) && \(project.command)"]
+        let arguments = ["/bin/zsh", "-l", "-c", "cd -- \(Shell.quote(directory.path)) && \(project.executionCommand)"]
         let argv = arguments.map { strdup($0) } + [nil]
         let envp = environment.map { strdup("\($0.key)=\($0.value)") } + [nil]
         defer {
@@ -219,15 +252,51 @@ final class ProcessRunner {
                 batch.flush()
                 guard run.generation == generation else { return }
                 run.processID = 0
+                run.endedAt = Date()
                 let wasStopped = run.status == .stopping
                 run.status = wasStopped ? .idle : .exited(exitCode)
+                if !wasStopped, exitCode != 0, project.runConfiguration?.restartPolicy == .onFailure,
+                   run.restartAttempts < 3, !self.shuttingDown {
+                    run.restartAttempts += 1
+                    self.scheduleRestart(run, project: run.project ?? project, workspaceURL: workspaceURL, environment: overrides)
+                }
                 run.append(wasStopped ? "\nProceso detenido.\n" : "\nProceso finalizado (\(exitCode)).\n")
             }
         }
     }
 
+    private func scheduleRestart(_ run: ProjectRun, project: CodeProject, workspaceURL: URL,
+                                 environment: [String: String]) {
+        let generation = run.generation
+        run.pendingRestart = true
+        Task { @MainActor [weak self, weak run] in
+            try? await Task.sleep(for: .seconds(2))
+            guard let self, let run, run.pendingRestart, run.generation == generation, !self.shuttingDown else { return }
+            self.start(project, workspaceURL: workspaceURL, environment: environment)
+        }
+    }
+
+    func restart(_ run: ProjectRun, project: CodeProject) {
+        guard let url = run.workspaceURL else { return }
+        stop(run.id)
+        let generation = run.generation
+        run.pendingRestart = true
+        Task { @MainActor [weak self, weak run] in
+            guard let self, let run else { return }
+            while run.status.active {
+                do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+                guard run.pendingRestart, run.generation == generation, !self.shuttingDown else { return }
+            }
+            guard run.pendingRestart, run.generation == generation, !self.shuttingDown else { return }
+            run.restartAttempts = 0
+            self.start(project, workspaceURL: url)
+        }
+    }
+
     func stop(_ id: UUID, automaticallyForce: Bool = true) {
-        guard let run = runs[id], run.status.active, run.processID > 0 else { return }
+        guard let run = runs[id] else { return }
+        run.pendingRestart = false
+        guard run.status.active, run.processID > 0 else { return }
         run.status = .stopping
         let pid = run.processID
         let generation = run.generation
@@ -251,6 +320,8 @@ final class ProcessRunner {
     func stopAll() { for id in runs.keys { stop(id) } }
 
     func terminateImmediately() {
+        shuttingDown = true
+        for run in runs.values { run.pendingRestart = false }
         for run in runs.values where run.processID > 0 { kill(-run.processID, SIGKILL) }
     }
 }

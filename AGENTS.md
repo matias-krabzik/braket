@@ -9,3 +9,5 @@
 - La ubicación estable de desarrollo es `/Applications/Braket Desarrollo.app`, con bundle ID `com.krabzik.ide.development`. Actualizar esa copia; no abrir las copias intermedias de `.build`.
 - Para evitar duplicados en Spotlight, `.build` está excluido de la búsqueda. Guardar los respaldos recuperables en `.build/.app-backups.noindex`, nunca dentro de `/Applications`; macOS puede volver a registrar las apps de respaldo guardadas allí.
 - Al reemplazar una app, retirar el registro de la copia anterior con `lsregister -u <ruta-del-respaldo>` y registrar solo las dos ubicaciones estables de Aplicaciones. No registrar respaldos ni compilaciones intermedias como apps de uso diario.
+
+- En pestañas, enlaces con apariencia de botón y botones personalizados, toda la superficie visible (incluidos padding y frame) debe aceptar clics. Usar `.buttonStyle(.fullArea)` y definir el `contentShape` después del tamaño y padding del label. Los botones secundarios, como cerrar o fijar, conservan sus acciones independientes. Verificar también los clics en los bordes y espacios vacíos, no solo sobre el texto o el icono.

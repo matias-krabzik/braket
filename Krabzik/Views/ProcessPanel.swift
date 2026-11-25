@@ -10,7 +10,7 @@ struct ProcessPanel: View {
                 Spacer()
                 Button { controller.processesVisible = false } label: {
                     Image(systemName: "chevron.down").font(.system(size: Theme.zoom(10))) }
-                    .buttonStyle(.plain).help("Ocultar procesos")
+                    .buttonStyle(.fullArea).help("Ocultar procesos")
             }
             .foregroundStyle(.secondary)
             .padding(.horizontal, 16).frame(height: 32)
@@ -73,13 +73,13 @@ private struct ProcessRow: View {
                     Spacer(minLength: 4)
                 }.contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.fullArea)
             Button(action: toggle) {
                 Image(systemName: run.status.active ? "stop.fill" : "play.fill")
                     .font(.system(size: Theme.zoom(10))).frame(width: 20, height: 20)
                     .foregroundStyle(.secondary)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.fullArea)
             .disabled(run.status == .stopping)
             .help(run.status.active ? "Detener \(project.name)" : "Iniciar \(project.name)")
             .accessibilityLabel(run.status.active ? "Detener \(project.name)" : "Iniciar \(project.name)")

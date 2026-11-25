@@ -37,7 +37,7 @@ struct AppMenuCommands {
     }
 
     var toggleProcesses: AppCommand {
-        AppCommand(id: "menu.view.processes", title: "Mostrar panel inferior", enabled: true) {
+        AppCommand(id: "menu.view.processes", title: "Mostrar administrador de procesos", enabled: true) {
             controller.toggleProcessesPanel()
             QAProbe.state("state.processesPanel",
                           ["visible": QAField.bool(controller.selectedProcessesVisible),

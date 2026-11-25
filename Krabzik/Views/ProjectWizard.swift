@@ -69,7 +69,7 @@ struct ProjectWizard: View {
                     .background(index == step ? Theme.accent.opacity(0.2) : .clear, in: RoundedRectangle(cornerRadius: 9))
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.fullArea)
                 .disabled(detecting || (index > 0 && draft.validationMessage != nil))
                 .qaControl("wizard.step.\(index)", title: steps[index],
                            enabled: !detecting && !(index > 0 && draft.validationMessage != nil)) {
@@ -251,7 +251,7 @@ private struct ProjectWizardSubproject: View {
                 }
                 .labelsHidden().frame(width: 115)
                 Button(action: remove) { Image(systemName: "xmark.circle.fill") }
-                    .buttonStyle(.plain).accessibilityLabel("Quitar " + project.name)
+                    .buttonStyle(.fullArea).accessibilityLabel("Quitar " + project.name)
             }
             Text(project.path).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             TextField("Comando de inicio (opcional)", text: $project.command)

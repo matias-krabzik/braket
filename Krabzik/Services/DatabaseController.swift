@@ -464,7 +464,7 @@ final class DatabaseController {
         }
     }
 
-    func submit(_ draft: SQLResultDraft, profiles: [DatabaseConnection]) {
+    func submit(_ draft: SQLResultDraft, profiles: [DatabaseConnection], document: EditorDocument? = nil) {
         QAProbe.action("grid.submit.request", draft.qaFields)
         guard let connection = draft.result.connection, profiles.contains(connection), let table = draft.table else {
             draft.error = "La conexión cambió. Ejecutá la consulta nuevamente antes de enviar."
@@ -488,17 +488,25 @@ final class DatabaseController {
             draft.sending = true
             state.busy = true
             Task {
-                defer { draft.sending = false
-                state.busy = false }
                 do {
                     let password = try CredentialStore.read(for: connection)
                     try await client.apply(mutations, table: table, configuration: connection, password: password)
-                    draft.discard()
+                    draft.error = nil
                     draft.sent = true
-                    draft.reason = "Cambios enviados. Volvé a ejecutar la consulta para actualizar los datos."
+                    draft.reason = document == nil
+                        ? "Cambios enviados. Volvé a ejecutar la consulta para actualizar los datos." : "Cambios enviados."
                     draft.showingReview = false
                     QAProbe.sql("grid.submit.ok", draft.qaFields)
+                    draft.sending = false
+                    state.busy = false
+                    if let document, document.sqlExecution.drafts[draft.result.id] === draft {
+                        let result = draft.result
+                        execute(document, connection: connection, queryOverride: result.sql, databaseOverride: result.database,
+                                pageIndex: result.page?.index ?? 0, targetResultID: result.id, startingLineOverride: result.line)
+                    }
                 } catch {
+                    draft.sending = false
+                    state.busy = false
                     draft.error = MySQLClient.message(error)
                     if draft.error?.contains("COMMIT") == true { draft.reason = draft.error ?? "" }
                     QAProbe.failure("grid.submit.failed", draft.error ?? "", ["table": table.qualified])

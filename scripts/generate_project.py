@@ -65,6 +65,9 @@ def render():
     sql_formatter = 'Krabzik/Resources/SQLFormatter'
     obj(sql_formatter, f'isa = PBXFileReference; lastKnownFileType = folder; path = {q(sql_formatter)}; sourceTree = SOURCE_ROOT;')
     obj('build:' + sql_formatter, f'isa = PBXBuildFile; fileRef = {uid(sql_formatter)};')
+    code_fonts = 'Krabzik/Resources/CodeFonts'
+    obj(code_fonts, f'isa = PBXFileReference; lastKnownFileType = folder; path = {q(code_fonts)}; sourceTree = SOURCE_ROOT;')
+    obj('build:' + code_fonts, f'isa = PBXBuildFile; fileRef = {uid(code_fonts)};')
     for path in app_sources + test_sources:
         rel = path.relative_to(root).as_posix()
         obj(rel, f'isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = {q(rel)}; sourceTree = SOURCE_ROOT;')
@@ -79,7 +82,7 @@ def render():
         obj(name + '-sources', f'isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ({", ".join(uid("build:" + p.relative_to(root).as_posix()) for p in files)},); runOnlyForDeploymentPostprocessing = 0;')
         framework = uid('mysql-build') + ',' + uid('sparkle-build') + ',' + uid('syntax-build') + ',' + uid('treesitter-build') + ',' if name == 'app' else ''
         obj(name + '-frameworks', f'isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = ({framework}); runOnlyForDeploymentPostprocessing = 0;')
-        resources = ', '.join(uid('build:' + resource) for resource in [notices, app_icon, developer_icons, sql_formatter]) + ',' if name == 'app' else ''
+        resources = ', '.join(uid('build:' + resource) for resource in [notices, app_icon, developer_icons, sql_formatter, code_fonts]) + ',' if name == 'app' else ''
         obj(name + '-resources', f'isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ({resources}); runOnlyForDeploymentPostprocessing = 0;')
     obj('test-proxy', f'isa = PBXContainerItemProxy; containerPortal = {uid("project")}; proxyType = 1; remoteGlobalIDString = {uid("app-target")}; remoteInfo = Braket;')
     obj('test-dependency', f'isa = PBXTargetDependency; target = {uid("app-target")}; targetProxy = {uid("test-proxy")};')

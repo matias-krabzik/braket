@@ -53,6 +53,15 @@ final class AppSettings {
     var resultFontSize: Double {
         didSet { defaults.set(resultFontSize, forKey: "resultFontSize") }
     }
+    var codeTypography: CodeTypography {
+        didSet { persistTypography(codeTypography, key: "codeTypography") }
+    }
+    var resultTypography: CodeTypography {
+        didSet { persistTypography(resultTypography, key: "resultTypography") }
+    }
+    private func persistTypography(_ value: CodeTypography, key: String) {
+        if let data = try? JSONEncoder().encode(value) { defaults.set(data, forKey: key) }
+    }
     var wrapLines: Bool {
         didSet { defaults.set(wrapLines, forKey: "editorWrapLines") }
     }
@@ -67,6 +76,10 @@ final class AppSettings {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        codeTypography = defaults.data(forKey: "codeTypography")
+            .flatMap { try? JSONDecoder().decode(CodeTypography.self, from: $0) } ?? CodeTypography()
+        resultTypography = defaults.data(forKey: "resultTypography")
+            .flatMap { try? JSONDecoder().decode(CodeTypography.self, from: $0) } ?? CodeTypography()
         let timeout = defaults.object(forKey: "defaultSQLTimeoutSeconds") as? Int ?? 60
         defaultSQLTimeoutSeconds = (1...3600).contains(timeout) ? timeout : 60
         var savedEditorOptions = defaults.data(forKey: "editorOptions")

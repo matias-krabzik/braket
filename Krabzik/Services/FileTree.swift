@@ -366,7 +366,7 @@ struct FileTree: NSViewRepresentable {
                 menu.addItem(.separator())
             }
             if let project = node.project, selection.count == 1 {
-                add("Comando…", to: menu, action: #selector(editCommand(_:)), represented: project)
+                add("Editar configuración de ejecución…", to: menu, action: #selector(editCommand(_:)), represented: project)
                 add("Mostrar en Finder", to: menu, action: #selector(reveal(_:)), represented: node)
                 menu.addItem(.separator())
                 add("Quitar del proyecto", to: menu, action: #selector(removeRoot(_:)), represented: project)
@@ -738,7 +738,7 @@ struct FileTree: NSViewRepresentable {
         private func activeProjects(affectedBy urls: [URL]) -> [CodeProject] {
             guard let workspaceURL = controller.workspaceURL else { return [] }
             return controller.runnableProjects.filter { project in
-                guard controller.runner.runs[project.id]?.status.active == true else { return false }
+                guard controller.runner.state(for: project, workspaceURL: workspaceURL).status.active == true else { return false }
                 let root = project.directory(relativeTo: workspaceURL)
                 return urls.contains { ExplorerFileSystem.contains($0, in: root) || ExplorerFileSystem.contains(root, in: $0) }
             }
@@ -758,12 +758,14 @@ struct FileTree: NSViewRepresentable {
 
         private func stop(_ projects: [CodeProject]) async -> Bool {
             guard !projects.isEmpty else { return true }
-            for project in projects { controller.runner.stop(project.id) }
+            guard let workspaceURL = controller.workspaceURL else { return false }
+            for project in projects { controller.runner.stop(controller.runner.state(for: project, workspaceURL: workspaceURL).id) }
             let deadline = Date().addingTimeInterval(5)
-            while projects.contains(where: { controller.runner.runs[$0.id]?.status.active == true }), Date() < deadline {
+            while projects.contains(where: { controller.runner.state(for: $0, workspaceURL: workspaceURL).status.active == true }),
+                  Date() < deadline {
                 try? await Task.sleep(for: .milliseconds(80))
             }
-            if projects.contains(where: { controller.runner.runs[$0.id]?.status.active == true }) {
+            if projects.contains(where: { controller.runner.state(for: $0, workspaceURL: workspaceURL).status.active == true }) {
                 report(ExplorerFileError.processStillRunning)
                 return false
             }

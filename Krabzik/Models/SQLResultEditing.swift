@@ -111,7 +111,7 @@ final class SQLResultDraft {
     var sent = false
     var error: String?
     var widths: [Int: CGFloat] = [:]
-    var hasChanges: Bool { !changes.isEmpty || !inserted.isEmpty || !deleted.isEmpty }
+    var hasChanges: Bool { !sent && (!changes.isEmpty || !inserted.isEmpty || !deleted.isEmpty) }
     var rowCount: Int { result.rows.count + inserted.count }
     var canEdit: Bool { table != nil && reason.isEmpty && !sending && !sent }
     var canInsert: Bool {

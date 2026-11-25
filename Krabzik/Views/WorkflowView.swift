@@ -515,7 +515,7 @@ private struct WorkflowNodePicker: View {
                             .background(Theme.background, in: RoundedRectangle(cornerRadius: 9))
                             .overlay(RoundedRectangle(cornerRadius: 9).stroke(Theme.border))
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.fullArea)
                     }
                 }
                 .padding(20)
@@ -544,7 +544,7 @@ private struct WorkflowExecutionPanel: View {
                 if model.isRunning { WorkspaceProgress().controlSize(.mini) }
                 Spacer()
                 if focusedStep != nil {
-                    Button("Registro completo") { focusedStep = nil }.buttonStyle(.plain)
+                    Button("Registro completo") { focusedStep = nil }.buttonStyle(.fullArea)
                 }
             }
             .padding(.horizontal, 12).frame(height: 31)
@@ -571,7 +571,7 @@ private struct WorkflowExecutionPanel: View {
                                     .background(focusedStep == id ? Theme.accent.opacity(0.15) : .clear,
                                                 in: RoundedRectangle(cornerRadius: 5))
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(.fullArea)
                             }
                         }
                     }
@@ -976,7 +976,7 @@ private struct WorkflowInspector: View {
                                         Button {
                                             node.settings.environment.removeAll { $0.id == variable.id }
                                         } label: { Image(systemName: "minus.circle") }
-                                            .buttonStyle(.plain)
+                                            .buttonStyle(.fullArea)
                                             .accessibilityLabel("Quitar variable \(variable.name)")
                                     }
                                 }.disabled(!canEdit)
@@ -985,7 +985,7 @@ private struct WorkflowInspector: View {
                                 Button {
                                     node.settings.environment.append(WorkflowEnvironmentVariable())
                                 } label: { Label("Variable", systemImage: "plus") }
-                                    .buttonStyle(.plain)
+                                    .buttonStyle(.fullArea)
                                     .disabled(node.settings.environment.count >= 50)
                             }
                             Text("Se guardan en el archivo del flujo, que Git puede commitear: no pongas contraseñas ni tokens.")
@@ -1031,7 +1031,7 @@ private struct WorkflowInspector: View {
                                         Button {
                                             node.ai.requiredFiles.removeAll { $0.id == file.id }
                                         } label: { Image(systemName: "minus.circle") }
-                                            .buttonStyle(.plain)
+                                            .buttonStyle(.fullArea)
                                             .accessibilityLabel("Quitar archivo requerido \(file.name)")
                                     }
                                 }.font(.system(size: Theme.zoom(11))).disabled(!canEdit)
@@ -1040,7 +1040,7 @@ private struct WorkflowInspector: View {
                                 Button {
                                     node.ai.requiredFiles.append(WorkflowAIRequiredFile())
                                 } label: { Label("Archivo requerido", systemImage: "plus") }
-                                    .buttonStyle(.plain)
+                                    .buttonStyle(.fullArea)
                                     .disabled(node.ai.requiredFiles.count >= 20)
                             }
                             Text("""
@@ -1241,7 +1241,7 @@ private struct WorkflowSettingsCard<Content: View>: View {
                     Text(title).font(.system(size: Theme.zoom(11), weight: .semibold))
                     Spacer()
                 }.contentShape(Rectangle())
-            }.buttonStyle(.plain).padding(10)
+            }.buttonStyle(.fullArea).padding(10)
             if expanded {
                 Divider()
                 VStack(alignment: .leading, spacing: 7) { content }

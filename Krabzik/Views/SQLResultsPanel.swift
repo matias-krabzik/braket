@@ -40,7 +40,7 @@ struct SQLResultsPanel: View {
                             Label("Logs", systemImage: "text.alignleft")
                                 .padding(.vertical, 5).padding(.horizontal, 10)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.fullArea)
                         .background(Theme.surfaceInk.opacity(showingLogs ? 0.1 : 0.025),
                                     in: RoundedRectangle(cornerRadius: 5))
                         .accessibilityAddTraits(showingLogs ? .isSelected : [])
@@ -55,7 +55,7 @@ struct SQLResultsPanel: View {
                                         else { Image(systemName: "tablecells") }
                                         Text("Consulta \(index + 1)" + (draft.hasChanges ? " •" : ""))
                                     }.padding(.vertical, 5).padding(.leading, 9)
-                                }.buttonStyle(.plain)
+                                }.buttonStyle(.fullArea)
                                     .help("Consulta \(index + 1) · \(result.connection?.name ?? "Sin conexión") · "
                                           + "\(result.database)\n\(result.sql)")
                                 SQLResultTabIcon(symbol: execution.pinned.contains(result.id) ? "pin.fill" : "pin",
@@ -72,6 +72,7 @@ struct SQLResultsPanel: View {
                                     .qaControl("sql.result.close.\(index)", title: "Cerrar resultado",
                                                enabled: execution.canCloseTabs(.current, relativeTo: result.id)) { closeResult(result) }
                             }
+                            .tabSelectionBackground { selectResult(result) }
                             .background(Theme.surfaceInk.opacity(!showingLogs && execution.selectedResult?.id == result.id ? 0.1 : 0.025),
                                         in: RoundedRectangle(cornerRadius: 5))
                             .transition(reduceMotion ? .opacity : .offset(y: 4).combined(with: .opacity))
@@ -90,7 +91,7 @@ struct SQLResultsPanel: View {
                 } label: { Image(systemName: "ellipsis") }
                     .menuStyle(.borderlessButton).fixedSize().help("Acciones de las pestañas de resultados")
                 if !showingLogs { SQLTimeoutControl(execution: execution) }
-                Button(action: hide) { Image(systemName: "chevron.down") }.buttonStyle(.plain)
+                Button(action: hide) { Image(systemName: "chevron.down") }.buttonStyle(.fullArea)
                     .padding(.horizontal, 12).help("Ocultar resultados").accessibilityLabel("Ocultar resultados")
             }.font(Theme.interfaceFont(13)).background(Theme.bar).qaScreen("sql.results")
             if showingLogs {
@@ -105,7 +106,8 @@ struct SQLResultsPanel: View {
                     }.frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     SQLResultToolbar(execution: execution, draft: execution.draft(for: result), controller: controller)
-                    SQLResultContent(draft: execution.draft(for: result), controller: controller).id(result.id)
+                    SQLResultContent(draft: execution.draft(for: result), controller: controller)
+                        .id(ObjectIdentifier(execution.draft(for: result)))
                         .workspaceReveal(result.id)
                 }
             } else {
@@ -135,7 +137,7 @@ private struct SQLResultTabIcon: View {
                 .frame(width: Theme.zoom(22), height: Theme.zoom(22))
                 .contentShape(Rectangle())
                 .background(Theme.surfaceInk.opacity(hovering && enabled ? 0.1 : 0), in: RoundedRectangle(cornerRadius: 4))
-        }.buttonStyle(.plain).onHover { hovering = $0 }
+        }.buttonStyle(.fullArea).onHover { hovering = $0 }
     }
 }
 
@@ -153,6 +155,7 @@ private struct SQLResultContent: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(16)
             } else {
                 SQLResultGrid(draft: draft, scale: controller.settings.resultFontScale, theme: controller.settings.theme,
+                              typography: controller.settings.resultTypography,
                               openRelated: { target in
                                   guard let connection = draft.result.connection else { return }
                                   controller.openRelatedRecord(target, connection: connection)
@@ -257,7 +260,7 @@ private struct SQLResultContent: View {
     }
 
     private func submit() {
-        controller.database.submit(draft, profiles: controller.connections.profiles)
+        controller.database.submit(draft, profiles: controller.connections.profiles, document: controller.sqlResultsDocument)
     }
 
     private var preview: String {
@@ -286,7 +289,7 @@ struct SQLTimeoutControl: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.fullArea)
         .font(Theme.interfaceFont(12))
         .disabled(execution.isRunning)
         .help("Timeout por sentencia · \(execution.timeoutSource). El ajuste de este archivo se recuerda.")
@@ -453,7 +456,7 @@ private struct SQLResultToolbar: View {
                 else { Image(systemName: icon).font(.system(size: Theme.zoom(14))) }
             }
                 .frame(width: Theme.zoom(26), height: Theme.zoom(24)).contentShape(Rectangle())
-        }.buttonStyle(.plain).disabled(!enabled)
+        }.buttonStyle(.fullArea).disabled(!enabled)
             .help(enabled ? tooltip : tooltip + " · No disponible")
             .accessibilityLabel(title)
             .qaControl(id, title: title, enabled: enabled, action: perform)
