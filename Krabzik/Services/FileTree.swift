@@ -30,6 +30,12 @@ import SwiftUI
     deinit { watcher?.cancel() }
 }
 
+private struct FileCreationChoice {
+    let folder: URL
+    let type: NewFileType
+    let workspace: URL
+}
+
 /// El explorador de archivos: un `NSOutlineView` nativo dentro de SwiftUI.
 ///
 /// Es AppKit y no una `List` de SwiftUI porque la carga perezosa, el menú contextual y
@@ -355,7 +361,9 @@ struct FileTree: NSViewRepresentable {
             guard let outline, outline.clickedRow >= 0, let node = outline.item(atRow: outline.clickedRow) as? FileNode else { return }
             let selection = selectedNodes(clicked: node)
             if selection.count == 1, node.isDirectory, (try? fileSystem.checkedFolder(node.url)) != nil {
-                add("Nuevo archivo…", to: menu, action: #selector(newFile(_:)), represented: node)
+                let newFile = NSMenuItem(title: "Nuevo archivo", action: nil, keyEquivalent: "")
+                newFile.submenu = fileTypesMenu(in: node.url)
+                menu.addItem(newFile)
                 add("Nueva imagen pixel art…", to: menu, action: #selector(newPixelArt(_:)), represented: node)
                 add("Nueva carpeta…", to: menu, action: #selector(newFolder(_:)), represented: node)
                 add("Pegar", to: menu, action: #selector(pasteHere(_:)), represented: node)
@@ -394,9 +402,6 @@ struct FileTree: NSViewRepresentable {
             }
         }
 
-        @objc func newFile(_ item: NSMenuItem) {
-            if let node = item.representedObject as? FileNode { create(in: node, directory: false) }
-        }
         @objc func newPixelArt(_ item: NSMenuItem) {
             if let node = item.representedObject as? FileNode { createPixelArt(in: node.url) }
         }
@@ -516,11 +521,35 @@ struct FileTree: NSViewRepresentable {
             let selected = selectedNodes().first
             let folder = directory ?? selected.map { $0.isDirectory ? $0.url : $0.url.deletingLastPathComponent() }
                 ?? roots.first(where: \.isDirectory)?.url ?? workspaceURL.deletingLastPathComponent()
+            guard let outline else { return }
+            let row = outline.selectedRow
+            let point = row >= 0 ? NSPoint(x: 32, y: outline.rect(ofRow: row).maxY) : outline.visibleRect.origin
+            fileTypesMenu(in: folder).popUp(positioning: nil, at: point, in: outline)
+        }
+
+        private func fileTypesMenu(in folder: URL) -> NSMenu {
+            let menu = NSMenu(title: "Nuevo archivo")
+            guard let workspace = controller.workspaceURL else { return menu }
+            let root = roots.filter { $0.isDirectory && ExplorerFileSystem.contains(folder, in: $0.url) }
+                .max { $0.url.pathComponents.count < $1.url.pathComponents.count }?.url ?? folder
+            for type in NewFileType.suggestions(in: folder, root: root) {
+                let item = NSMenuItem(title: type.title, action: #selector(createTypedFile(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = FileCreationChoice(folder: folder, type: type, workspace: workspace)
+                menu.addItem(item)
+            }
+            return menu
+        }
+
+        @objc private func createTypedFile(_ item: NSMenuItem) {
+            guard let choice = item.representedObject as? FileCreationChoice,
+                  controller.workspaceURL == choice.workspace, !controller.isReadOnly,
+                  controller.fileOperation == nil else { return }
+            let folder = choice.folder, workspaceURL = choice.workspace
             do {
+                let name = try choice.type.availableName(in: folder)
                 let fs = ExplorerFileSystem(roots: [folder])
-                let name = FileManager.default.fileExists(atPath: folder.appendingPathComponent("nuevo.txt").path)
-                    ? try fs.availableName(for: "nuevo.txt", in: folder) : "nuevo.txt"
-                let url = try fs.create(name: name, in: folder, directory: false)
+                let url = try fs.create(name: name, in: folder, directory: false, contents: NewFileType.contents(for: name))
                 if !roots.contains(where: { $0.isDirectory && ExplorerFileSystem.contains(folder, in: $0.url) }),
                    var workspace = controller.workspace {
                     let base = workspaceURL.deletingLastPathComponent()
@@ -535,7 +564,7 @@ struct FileTree: NSViewRepresentable {
                         try await controller.docs.open(url) { self.controller.workspaceURL == workspaceURL }
                         guard controller.workspaceURL == workspaceURL else { return }
                         controller.docs.selected?.focusEditorOnOpen = false
-                        showCreatedFile(url, in: folder)
+                        showCreatedFile(url, in: folder, suffix: choice.type.suffix)
                         QAProbe.action("file.new.ok", ["file": QAField.path(url),
                                                        "selected": QAField.bool(controller.selectedDocumentID?
                                                            .standardizedFileURL == url.standardizedFileURL)])
@@ -544,7 +573,7 @@ struct FileTree: NSViewRepresentable {
             } catch { report(error) }
         }
 
-        private func showCreatedFile(_ url: URL, in folder: URL, rename: Bool = true) {
+        private func showCreatedFile(_ url: URL, in folder: URL, rename: Bool = true, suffix: String? = nil) {
             guard let parent = findNode(at: folder), let outline else { return }
             let child = parent.children?.first { $0.url.resolvingSymlinksInPath() == url.resolvingSymlinksInPath() }
                 ?? FileNode(url: url, isDirectory: false)
@@ -574,13 +603,11 @@ struct FileTree: NSViewRepresentable {
                 let row = self.outline?.row(forItem: current) ?? -1
                 guard row >= 0 else { return }
                 self.outline?.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-                self.beginRename(current, selectStem: true)
+                self.beginRename(current, selectStem: true, suffix: suffix)
             }
         }
 
         private func create(in node: FileNode, directory: Bool) {
-            if !directory { createFileInline(in: node.url)
-                return }
             guard controller.fileOperation == nil, !controller.isReadOnly else { return }
             let title = directory ? "Nueva carpeta" : "Nuevo archivo"
             guard let name = WorkspacePrompts.nameForNewItem(title, suggested: directory ? "Nueva carpeta" : "nuevo.txt") else { return }
@@ -598,7 +625,7 @@ struct FileTree: NSViewRepresentable {
             else { controller.renameFile(node.url) }
         }
 
-        private func beginRename(_ node: FileNode, selectStem: Bool = false) {
+        private func beginRename(_ node: FileNode, selectStem: Bool = false, suffix: String? = nil) {
             guard !controller.isReadOnly, canChange(node) else { return }
             guard let outline, outline.row(forItem: node) >= 0,
                   let cell = outline.view(atColumn: 0, row: outline.row(forItem: node), makeIfNecessary: true)
@@ -610,7 +637,9 @@ struct FileTree: NSViewRepresentable {
             field.delegate = self
             field.selectText(nil)
             if selectStem, let editor = field.currentEditor() as? NSTextView {
-                editor.setSelectedRange(NSRange(location: 0, length: node.url.deletingPathExtension().lastPathComponent.utf16.count))
+                let stem = suffix.map { $0.isEmpty ? node.name : String(node.name.dropLast($0.count + 1)) }
+                    ?? node.url.deletingPathExtension().lastPathComponent
+                editor.setSelectedRange(NSRange(location: 0, length: stem.utf16.count))
             }
         }
 

@@ -90,11 +90,11 @@ struct ExplorerFileSystem {
         return try checkedFolder(folder).appendingPathComponent(name).standardizedFileURL
     }
 
-    func create(name: String, in folder: URL, directory: Bool) throws -> URL {
+    func create(name: String, in folder: URL, directory: Bool, contents: Data = Data()) throws -> URL {
         let target = try destination(name: name, in: folder)
         guard !files.fileExists(atPath: target.path) else { throw ExplorerFileError.alreadyExists }
         if directory { try files.createDirectory(at: target, withIntermediateDirectories: false) }
-        else { try Data().write(to: target, options: .withoutOverwriting) }
+        else { try contents.write(to: target, options: .withoutOverwriting) }
         return target
     }
 

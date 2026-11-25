@@ -1,3 +1,4 @@
+import AppKit
 @testable import Krabzik
 import XCTest
 
@@ -131,6 +132,17 @@ final class QAFileTests: XCTestCase {
         XCTAssertEqual(qa.controller.workspaceURL?.standardizedFileURL, first.standardizedFileURL)
     }
 
+    @objc private func chooseSQLFileType(_ notification: Notification) {
+        guard let menu = notification.object as? NSMenu, menu.title == "Nuevo archivo" else { return }
+        XCTAssertEqual(Array(menu.items.prefix(2).map(\.title)), ["Archivo sin extensión", "SQL (.sql)"])
+        perform(#selector(finishFileTypeSelection(_:)), with: menu, afterDelay: 0.01, inModes: [.eventTracking])
+    }
+
+    @objc private func finishFileTypeSelection(_ menu: NSMenu) {
+        menu.cancelTrackingWithoutAnimation()
+        menu.performActionForItem(at: 1)
+    }
+
     /// ARC-01
     func testNewFileAsksForTheNameInTheExplorerAndOpensTheTab() async throws {
         let qa = try QAHarness(self)
@@ -141,6 +153,9 @@ final class QAFileTests: XCTestCase {
         await qa.assertScreen("explorer.databases")
         await qa.assertControl("menu.file.new", title: "Nuevo archivo", enabled: true)
 
+        NotificationCenter.default.addObserver(self, selector: #selector(chooseSQLFileType(_:)),
+                                               name: NSMenu.didBeginTrackingNotification, object: nil)
+        defer { NotificationCenter.default.removeObserver(self, name: NSMenu.didBeginTrackingNotification, object: nil) }
         try await qa.tap("menu.file.new")
         await qa.assertEvent("file.new.request", ["readOnly": "false", "project": "true"])
         // El explorador de archivos vuelve a la vista: es donde aparece el campo del nombre.
@@ -150,11 +165,11 @@ final class QAFileTests: XCTestCase {
 
         let created = await qa.settle(forEvent: "file.new.ok", timeout: 5)
         XCTAssertTrue(created, "el archivo nuevo tiene que abrirse en una pestaña\n" + qa.timelineText())
-        await qa.assertEvent("file.new.created", ["name": "nuevo.txt"])
+        await qa.assertEvent("file.new.created", ["name": "nuevo.sql"])
         await qa.assertEvent("file.new.ok", ["selected": "true"])
         await qa.assertEvent("file.new.naming")
         let document = try XCTUnwrap(qa.controller.selectedDocument)
-        XCTAssertEqual(document.url.lastPathComponent, "nuevo.txt")
+        XCTAssertEqual(document.url.lastPathComponent, "nuevo.sql")
         XCTAssertTrue(FileManager.default.fileExists(atPath: document.url.path))
     }
 

@@ -31,7 +31,12 @@ struct KrabzikApp: App {
 
     var body: some Scene {
         Window("Braket", id: "workspace") {
-            WorkspaceView(controller: controller)
+            GeometryReader { geometry in
+                WorkspaceView(controller: controller)
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+            }
+                .frame(minWidth: controller.workspace == nil && controller.documents.isEmpty ? 760 : 900,
+                       minHeight: controller.workspace == nil && controller.documents.isEmpty ? 420 : 580)
                 .background(WindowBridge(delegate: delegate, projectURL: controller.workspaceURL,
                                          theme: controller.settings.theme, scale: controller.settings.uiScale))
                 .onAppear {
