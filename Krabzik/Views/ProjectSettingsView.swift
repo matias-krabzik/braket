@@ -32,6 +32,7 @@ struct ProjectSettingsModal: View {
 struct ProjectSettingsView: View {
     let controller: WorkspaceController
     let url: URL
+    @State private var configuringServices = false
     @State private var terminalEnvironment = false
     @State private var timeoutOverride: Bool
     @State private var timeoutSeconds: Int
@@ -63,6 +64,11 @@ struct ProjectSettingsView: View {
                     .font(.callout).foregroundStyle(.secondary).padding()
             }
             Form {
+                Section("Servicios") {
+                    Button("Configurar servicios…", systemImage: "gearshape.2") { configuringServices = true }
+                    Text("Comandos, pasos previos, variables, puertos y dependencias de todos los subproyectos.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
                 Section("Terminales") {
                     Button("Variables de entorno compartidas…") { terminalEnvironment = true }
                     Text("Se heredan en todas las terminales de este proyecto; cada terminal puede sobrescribirlas.")
@@ -167,6 +173,9 @@ struct ProjectSettingsView: View {
             .scrollContentBackground(.hidden)
             .disabled(controller.isReadOnly || controller.isSwitchingWorkspace)
         }
+        .sheet(isPresented: $configuringServices) {
+            ServicesConfigurationView(controller: controller, workspaceURL: url)
+        }
         .sheet(isPresented: $terminalEnvironment) {
             TerminalEnvironmentEditor(manager: controller.terminals, projectURL: url)
         }
@@ -209,7 +218,7 @@ private struct SubprojectSettingsSheet: View {
                 Picker("Tipo", selection: $project.kind) {
                     ForEach(ProjectKind.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }
-                TextField("Comando", text: $project.command)
+                Text("Los comandos se configuran en Servicios.").font(.caption).foregroundStyle(.secondary)
             }
             Divider()
             SubprojectIconEditor(project: $project, workspaceURL: workspaceURL,

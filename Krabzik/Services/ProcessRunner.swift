@@ -203,7 +203,9 @@ final class ProcessRunner {
         environment["TERM"] = "dumb"
         environment.merge(project.runConfiguration?.environment ?? [:]) { _, new in new }
         environment.merge(overrides) { _, new in new }
-        let arguments = ["/bin/zsh", "-l", "-c", "cd -- \(Shell.quote(directory.path)) && \(project.executionCommand)"]
+        let shell = project.runConfiguration?.shellPath ?? "/bin/zsh"
+        let profile = project.runConfiguration?.loadShellProfile ?? true
+        let arguments = [shell] + (profile ? ["-l"] : []) + ["-c", project.executionScript(directory: directory)]
         let argv = arguments.map { strdup($0) } + [nil]
         let envp = environment.map { strdup("\($0.key)=\($0.value)") } + [nil]
         defer {
@@ -211,7 +213,7 @@ final class ProcessRunner {
             envp.forEach { free($0) }
         }
         var pid: pid_t = 0
-        let result = posix_spawn(&pid, "/bin/zsh", &actions, &attributes, argv, envp)
+        let result = posix_spawn(&pid, shell, &actions, &attributes, argv, envp)
         Darwin.close(writeFD)
         guard result == 0 else {
             Darwin.close(readFD)

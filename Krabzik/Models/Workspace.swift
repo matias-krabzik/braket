@@ -109,6 +109,13 @@ struct CodeProject: Identifiable, Codable, Equatable {
     var command: String
     var icon: CodeProjectIcon?
     var runConfiguration: RunConfiguration?
+    var services: [ServiceConfiguration]?
+    // Runtime context for a service; it is never serialized as a separate subproject.
+    var serviceParentID: UUID?
+    var serviceParentName: String?
+    var serviceDependencyIDs: [UUID]?
+    var servicePHP: PHPServiceConfiguration?
+    private enum CodingKeys: String, CodingKey { case id, name, path, kind, command, icon, runConfiguration, services }
 
     func scope(relativeTo workspaceURL: URL) -> PathScope {
         pathScope(path, relativeTo: workspaceURL)
@@ -188,7 +195,20 @@ struct Workspace: Codable, Equatable {
         try checkLengths()
         try checkText()
         try checkPaths()
-        for project in projects { try project.runConfiguration?.validate() }
+        var serviceIDs: Set<UUID> = []
+        for project in projects {
+            try project.runConfiguration?.validate()
+            let services = project.configuredServices
+            guard services.count <= 32 else { throw WorkspaceError.tooManyEntries("servicios (32 como máximo por subproyecto)") }
+            for service in services {
+                try service.validate()
+                guard serviceIDs.insert(service.id).inserted,
+                      !projects.contains(where: { $0.id == service.id && $0.id != project.id }) else {
+                    throw WorkspaceError.invalidText("identificadores de servicios duplicados")
+                }
+            }
+            _ = try ServicePlan.order(services, targets: services.map(\.id))
+        }
     }
 
     private func checkCounts() throws {

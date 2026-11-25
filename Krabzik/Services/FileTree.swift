@@ -366,7 +366,7 @@ struct FileTree: NSViewRepresentable {
                 menu.addItem(.separator())
             }
             if let project = node.project, selection.count == 1 {
-                add("Editar configuración de ejecución…", to: menu, action: #selector(editCommand(_:)), represented: project)
+                add("Configurar servicios…", to: menu, action: #selector(editCommand(_:)), represented: project)
                 add("Mostrar en Finder", to: menu, action: #selector(reveal(_:)), represented: node)
                 menu.addItem(.separator())
                 add("Quitar del proyecto", to: menu, action: #selector(removeRoot(_:)), represented: project)
@@ -737,7 +737,7 @@ struct FileTree: NSViewRepresentable {
 
         private func activeProjects(affectedBy urls: [URL]) -> [CodeProject] {
             guard let workspaceURL = controller.workspaceURL else { return [] }
-            return controller.runnableProjects.filter { project in
+            return controller.runnableProjects.flatMap(\.executionProjects).filter { project in
                 guard controller.runner.state(for: project, workspaceURL: workspaceURL).status.active == true else { return false }
                 let root = project.directory(relativeTo: workspaceURL)
                 return urls.contains { ExplorerFileSystem.contains($0, in: root) || ExplorerFileSystem.contains(root, in: $0) }

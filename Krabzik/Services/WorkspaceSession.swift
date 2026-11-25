@@ -52,7 +52,7 @@ final class WorkspaceSession {
     /// sin tener que repetir la condición en cada vista.
     var runnableProjects: [CodeProject] {
         guard trust == .trusted else { return [] }
-        return workspace?.projects.filter { !$0.command.isEmpty } ?? []
+        return workspace?.projects.filter { !$0.executionProjects.isEmpty } ?? []
     }
 
     /// Subproyectos que el explorador monta. En solo lectura se omiten los externos.

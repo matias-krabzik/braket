@@ -11,6 +11,7 @@ struct ProcessManagerTable: View {
     let toggle: (ProjectRun) -> Void
     let edit: (ProjectRun) -> Void
     let openPort: (Int) -> Void
+    let startGroup: (URL) -> Void
     @State private var collapsed: Set<URL> = []
 
     private var groups: [URL] {
@@ -18,8 +19,7 @@ struct ProcessManagerTable: View {
     }
     var body: some View {
         GeometryReader { geometry in
-            let width = max(Theme.zoom(960), geometry.size.width)
-            ScrollView(.horizontal) {
+            let width = geometry.size.width
                 VStack(spacing: 0) {
                     columns(width)
                     ScrollView {
@@ -37,7 +37,6 @@ struct ProcessManagerTable: View {
                         }
                     }
                 }.frame(width: width, height: geometry.size.height)
-            }
         }
         .background(ProcessManagerAppearance.background)
         .clipShape(RoundedRectangle(cornerRadius: 4))
@@ -45,42 +44,54 @@ struct ProcessManagerTable: View {
     }
     private func column<Content: View>(_ fraction: CGFloat, width: CGFloat,
                                        @ViewBuilder content: () -> Content) -> some View {
-        content().lineLimit(1).frame(width: width * fraction - 24, alignment: .leading)
-            .padding(.horizontal, 12)
+        content().lineLimit(1).frame(width: max(0, width * fraction - 16), alignment: .leading)
+            .padding(.horizontal, 8).clipped()
+    }
+    private var actionsWidth: CGFloat { Theme.zoom(154) }
+    private func fractions(_ width: CGFloat) -> [CGFloat] {
+        width >= Theme.zoom(1000) ? [0.30, 0.18, 0.20, 0.17, 0.15] : [0.32, 0.20, 0.24, 0.24]
     }
     private func columns(_ width: CGFloat) -> some View {
-        HStack(spacing: 0) {
-            column(0.27, width: width) { Text("Proceso").padding(.leading, 12) }
-            column(0.16, width: width) { Text("Proyecto") }
-            column(0.14, width: width) { Text("Estado") }
-            column(0.14, width: width) { Text("Puertos") }
-            column(0.13, width: width) { Text("Tiempo activo") }
-            column(0.16, width: width) { Text("Acciones") }
+        let available = max(0, width - actionsWidth)
+        let sizes = fractions(width)
+        return HStack(spacing: 0) {
+            column(sizes[0], width: available) { Text("Servicio").padding(.leading, 12) }
+            column(sizes[1], width: available) { Text("Subproyecto") }
+            column(sizes[2], width: available) { Text("Estado") }
+            column(sizes[3], width: available) { Text("Puertos") }
+            if sizes.count == 5 { column(sizes[4], width: available) { Text("Tiempo activo") } }
+            Text("Acciones").frame(width: actionsWidth, alignment: .center)
         }.font(Theme.interfaceFont(13, weight: .semibold)).foregroundStyle(.secondary)
             .frame(height: Theme.zoom(38)).background(ProcessManagerAppearance.bar)
             .overlay(alignment: .bottom) { Divider() }
     }
     private func groupHeader(_ url: URL) -> some View {
-        Button {
-            if collapsed.contains(url) { collapsed.remove(url) } else { collapsed.insert(url) }
-        } label: {
-            HStack(spacing: 14) {
-                Image(systemName: collapsed.contains(url) ? "chevron.right" : "chevron.down")
-                    .font(Theme.interfaceFont(12))
-                Text(runs.first(where: { $0.workspaceURL == url })?.workspaceName ?? url.deletingPathExtension().lastPathComponent)
-                    .font(Theme.interfaceFont(16, weight: .semibold))
-                Text(url == workspaceURL ? "Proyecto actual" : "En segundo plano")
-                    .font(Theme.interfaceFont(13)).italic().foregroundStyle(.secondary)
-                Spacer()
-            }.padding(.horizontal, 12).frame(height: Theme.zoom(40)).contentShape(Rectangle())
-        }.buttonStyle(.fullArea).background(Theme.surfaceInk.opacity(0.035))
-            .overlay(alignment: .bottom) { Divider() }
-            .help(collapsed.contains(url) ? "Mostrar procesos del proyecto" : "Contraer procesos del proyecto")
-            .accessibilityLabel(runs.first(where: { $0.workspaceURL == url })?.workspaceName ?? url.lastPathComponent)
+        HStack(spacing: 8) {
+            Button {
+                if collapsed.contains(url) { collapsed.remove(url) } else { collapsed.insert(url) }
+            } label: {
+                HStack(spacing: 14) {
+                    Image(systemName: collapsed.contains(url) ? "chevron.right" : "chevron.down")
+                        .font(Theme.interfaceFont(12))
+                    Text(runs.first(where: { $0.workspaceURL == url })?.workspaceName ?? url.deletingPathExtension().lastPathComponent)
+                        .font(Theme.interfaceFont(16, weight: .semibold))
+                    Text(url == workspaceURL ? "Proyecto actual" : "En segundo plano")
+                        .font(Theme.interfaceFont(13)).italic().foregroundStyle(.secondary)
+                    Spacer()
+                }.frame(maxWidth: .infinity).padding(.leading, 12).frame(height: Theme.zoom(40)).contentShape(Rectangle())
+            }.buttonStyle(.fullArea).help("Mostrar o contraer servicios del proyecto")
+            Button { startGroup(url) } label: {
+                Label("Iniciar todos", systemImage: "play.fill").foregroundStyle(.green)
+                    .padding(.horizontal, 8).frame(height: Theme.zoom(40)).contentShape(Rectangle())
+            }.buttonStyle(.fullArea).help("Iniciar los servicios de este proyecto").padding(.trailing, 8)
+        }
+        .background(Theme.surfaceInk.opacity(0.035)).overlay(alignment: .bottom) { Divider() }
     }
     private func row(_ run: ProjectRun, width: CGFloat) -> some View {
-        HStack(spacing: 0) {
-            column(0.27, width: width) {
+        let available = max(0, width - actionsWidth)
+        let sizes = fractions(width)
+        return HStack(spacing: 0) {
+            column(sizes[0], width: available) {
                 HStack(spacing: 12) {
                     if let project = run.project {
                         Image(nsImage: FileIcons.project(project)).resizable().scaledToFit()
@@ -89,46 +100,45 @@ struct ProcessManagerTable: View {
                     Text(run.name)
                 }.padding(.leading, 12).help(run.name)
             }
-            column(0.16, width: width) { Text(run.workspaceName).help(run.workspaceName) }
-            column(0.14, width: width) {
+            column(sizes[1], width: available) { Text(run.project?.serviceParentName ?? run.name).help(run.workspaceName) }
+            column(sizes[2], width: available) {
                 HStack(spacing: 8) {
                     Circle().fill(ProcessManagerAppearance.statusColor(run)).frame(width: 9, height: 9)
-                    Text(run.pendingRestart ? "Reiniciando…" : run.status == .running ? "Activo" : run.status.label)
+                    Text(run.pendingRestart ? "Iniciando…" : run.status == .running ? "Activo" : run.status.label)
                     if !run.portConflict.isEmpty {
                         Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange).help(run.portConflict)
                     }
                 }
             }
-            column(0.14, width: width) {
+            column(sizes[3], width: available) {
                 HStack(spacing: 5) {
                     if run.ports.isEmpty { Text("—").foregroundStyle(.secondary) }
                     ForEach(run.ports, id: \.self) { port in
                         Button { openPort(port) } label: {
-                            Text(":\(port) ↗").foregroundStyle(ProcessManagerAppearance.link)
+                            Text(":\(String(port)) ↗").foregroundStyle(ProcessManagerAppearance.link)
                                 .padding(.horizontal, 7).padding(.vertical, 3)
                                 .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(ProcessManagerAppearance.link.opacity(0.65)))
-                        }.buttonStyle(.fullArea).help("Abrir http://localhost:\(port)")
+                        }.buttonStyle(.fullArea).help("Abrir http://localhost:\(String(port))")
                     }
                 }
             }
-            column(0.13, width: width) {
+            if sizes.count == 5 { column(sizes[4], width: available) {
                 if let start = run.startedAt {
                     TimelineView(.periodic(from: .now, by: 30)) { context in
                         Text(ProcessManagerAppearance.elapsed(from: start, to: run.endedAt ?? context.date)).monospacedDigit()
                     }
                 } else { Text("—").foregroundStyle(.secondary) }
-            }
-            column(0.16, width: width) {
-                HStack(spacing: 10) {
+            } }
+                HStack(spacing: Theme.zoom(6)) {
                     ProcessManagerIconButton(icon: "text.alignleft", help: "Ver logs") { showLogs(run) }
+                    ProcessManagerIconButton(icon: "gearshape", help: "Configurar servicio") { edit(run) }
                     ProcessManagerIconButton(icon: "arrow.counterclockwise", help: "Reiniciar") { restart(run) }
                         .disabled(run.status == .stopping || run.project?.command.isEmpty != false)
                     ProcessManagerIconButton(icon: run.status.active || run.pendingRestart ? "stop.fill" : "play.fill",
                                              help: run.status.active || run.pendingRestart ? "Detener" : "Iniciar",
                                              tint: run.status.active || run.pendingRestart ? .red : .green) { toggle(run) }
                         .disabled(run.status == .stopping || run.project?.command.isEmpty != false)
-                }
-            }
+                }.frame(width: actionsWidth)
         }
         .font(Theme.interfaceFont(14)).frame(height: Theme.zoom(44))
         .background(selectedID == run.id ? ProcessManagerAppearance.selection : .clear)

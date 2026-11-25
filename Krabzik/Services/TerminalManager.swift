@@ -24,6 +24,10 @@ final class TerminalManager {
         visible = configuration(for: url).visible
         startMonitoring()
     }
+    func sharedEnvironment(for url: URL) throws -> [String: String] {
+        let config = try configurations[url.standardizedFileURL] ?? preferences.load(url)
+        return Dictionary(uniqueKeysWithValues: config.variables.map { ($0.name, $0.value) })
+    }
     func setVisible(_ value: Bool, for url: URL) {
         visible = value
         var config = configuration(for: url)

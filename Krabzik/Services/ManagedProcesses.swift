@@ -6,12 +6,23 @@ extension WorkspaceController {
         guard let url = run.workspaceURL else { return }
         do {
             let model = try Workspace.read(from: url)
-            guard let project = model.projects.first(where: { $0.id == run.projectID }),
-                  projects.allowedToRun(project, workspaceURL: url) else { return }
-            if restart { runner.restart(run, project: project) }
-            else { run.restartAttempts = 0
-                runner.start(project, workspaceURL: url)
-            }
+            guard let project = model.projects.first(where: {
+                $0.id == (run.project?.serviceParentID ?? run.projectID) || $0.configuredServices.contains { $0.id == run.projectID }
+            }) else { return }
+            if restart {
+                runner.stop(run.id)
+                run.pendingRestart = true
+                let generation = run.generation
+                Task { @MainActor in
+                    while run.status.active {
+                        try? await Task.sleep(for: .milliseconds(100))
+                        guard run.pendingRestart, run.generation == generation else { return }
+                    }
+                    guard run.pendingRestart, run.generation == generation else { return }
+                    run.pendingRestart = false
+                    projects.startServices(project, workspaceURL: url, serviceID: run.projectID)
+                }
+            } else { projects.startServices(project, workspaceURL: url, serviceID: run.projectID) }
         } catch { errors.report(error) }
     }
 
@@ -42,6 +53,13 @@ extension WorkspaceController {
         guard !Task.isCancelled else { return }
         processManager.listeners = listeners
         for run in runner.runs.values {
+            if let php = run.project?.servicePHP, php.environment != .local, php.servesHTTP,
+               run.status.active, let project = run.project, let url = run.workspaceURL,
+               await PHPServiceProbe.ready(php, directory: project.executionDirectory(relativeTo: url)) {
+                run.ports = [php.publishedPort]
+                run.portConflict = ""
+                continue
+            }
             run.ports = run.processID > 0 ? Array(Set(listeners.filter { $0.group == run.processID }.map(\.port))).sorted() : []
             if let port = run.project?.runConfiguration?.expectedPort,
                let owner = listeners.first(where: { $0.port == port && $0.group != run.processID }) {

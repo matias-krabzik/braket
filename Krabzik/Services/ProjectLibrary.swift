@@ -20,8 +20,9 @@ final class ProjectLibrary {
     /// sin interfaz —pruebas, CI— nunca queda esperando un modal y, si alguien olvida
     /// inyectarlo, el comando no se ejecuta en vez de ejecutarse sin preguntar.
     var confirmCommand: @MainActor (CommandPrompt) -> CommandDecision = { _ in .cancel }
-    private let session: WorkspaceSession
-    private let runner: ProcessRunner
+    let session: WorkspaceSession
+    let runner: ProcessRunner
+    var inheritedEnvironment: (URL) throws -> [String: String] = { _ in [:] }
 
     init(session: WorkspaceSession, runner: ProcessRunner) {
         self.session = session
@@ -75,7 +76,7 @@ final class ProjectLibrary {
     func remove(_ id: UUID) {
         guard var workspace = session.workspace else { return }
         if let project = workspace.projects.first(where: { $0.id == id }), let url = session.url {
-            runner.stop(runner.state(for: project, workspaceURL: url).id)
+            for execution in project.executionProjects { runner.stop(runner.state(for: execution, workspaceURL: url).id) }
         }
         workspace.projects.removeAll { $0.id == id }
         session.write(workspace)
@@ -85,35 +86,24 @@ final class ProjectLibrary {
     /// tenga una fila desde el principio, antes de que se ejecute nada.
     func warmUp(_ projects: [CodeProject]) {
         guard let url = session.url else { return }
-        for project in projects { _ = runner.state(for: project, workspaceURL: url, workspaceName: session.workspace?.name ?? "") }
+        for project in projects.flatMap(\.executionProjects) {
+            _ = runner.state(for: project, workspaceURL: url, workspaceName: session.workspace?.name ?? "")
+        }
     }
 
     /// Arranca todos los ejecutables cuyo comando esté permitido.
     func startAll() {
         QAProbe.action("process.startAll.request", ["projects": QAField.count(session.runnableProjects.count)])
         guard let workspaceURL = session.url else { return }
-        for project in session.runnableProjects where allowedToRun(project, workspaceURL: workspaceURL) {
-            start(project, workspaceURL: workspaceURL)
-        }
+        for project in session.runnableProjects { startServices(project, workspaceURL: workspaceURL) }
     }
 
-    /// Arranca el proyecto, o lo detiene si ya está corriendo.
     func toggleRun(_ project: CodeProject) {
         guard let workspaceURL = session.url else { return }
-        if runner.state(for: project, workspaceURL: workspaceURL).status.active {
-            QAProbe.action("process.stop.request", ["project": project.name])
-            runner.stop(runner.state(for: project, workspaceURL: workspaceURL).id)
-        } else if allowedToRun(project, workspaceURL: workspaceURL) {
-            start(project, workspaceURL: workspaceURL)
-        }
-    }
-
-    /// El único sitio que le pide un proceso al runner, para que la línea de tiempo diga
-    /// siempre qué subproyecto arrancó y con qué comando.
-    private func start(_ project: CodeProject, workspaceURL: URL) {
-        QAProbe.action("process.start.ok", ["project": project.name,
-                                            "command": QAField.text(project.command)])
-        runner.start(project, workspaceURL: workspaceURL)
+        let states = project.executionProjects.map { runner.state(for: $0, workspaceURL: workspaceURL) }
+        if states.contains(where: { $0.status.active || $0.pendingRestart }) {
+            for state in states { runner.stop(state.id) }
+        } else { startServices(project, workspaceURL: workspaceURL) }
     }
 
     /// Un comando se confirma la primera vez, y de nuevo si cambia, porque la aprobación

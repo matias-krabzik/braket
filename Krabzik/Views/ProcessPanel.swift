@@ -24,7 +24,7 @@ struct ProcessPanel: View {
                                 ProcessRow(project: project, run: run, selected: controller.selectedProject?.id == project.id,
                                            select: { controller.selectedProjectID = project.id },
                                            toggle: { controller.toggleRun(project) })
-                                .contextMenu { Button("Comando…") { controller.commandProject = project } }
+                                .contextMenu { Button("Configurar servicios…") { controller.commandProject = project } }
                             }
                         }
                     }.padding(7)

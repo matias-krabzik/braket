@@ -17,7 +17,7 @@ final class ProjectClosing {
         self.url = url
         let model = controller.projectModel(for: url)
         name = model?.name ?? url.deletingPathExtension().lastPathComponent
-        var items = model?.projects.filter { !$0.command.isEmpty } ?? []
+        var items = model?.projects.flatMap(\.executionProjects) ?? []
         for run in controller.runner.runs.values where run.workspaceURL == url && (run.status.active || run.pendingRestart) {
             if !items.contains(where: { $0.id == run.projectID }) {
                 items.append(CodeProject(id: run.projectID, name: run.name, path: ".", kind: .files, command: ""))

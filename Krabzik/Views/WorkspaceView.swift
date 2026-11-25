@@ -108,13 +108,9 @@ struct WorkspaceView: View {
             ProjectWizard(controller: controller)
         }
         .sheet(item: $controller.commandProject) { project in
-            RunConfigurationEditor(project: project,
-                                   active: controller.workspaceURL.map {
-                    controller.runner.state(for: project, workspaceURL: $0).status.active
-                } ?? false) { updated, restart in
-                guard let url = controller.workspaceURL else { return false }
-                let run = controller.runner.state(for: project, workspaceURL: url)
-                return controller.saveRunConfiguration(updated, for: run, restart: restart)
+            if let url = controller.workspaceURL {
+                ServicesConfigurationView(controller: controller, workspaceURL: url,
+                                          selectedID: project.configuredServices.first?.id)
             }
         }
         .sheet(isPresented: Binding(get: { controller.database.showingConnections },

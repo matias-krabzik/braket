@@ -5,6 +5,7 @@ struct ProcessManagerView: View {
     @Bindable var controller: WorkspaceController
     var detached = false
     @State private var editing: ProjectRun?
+    @State private var configuringServices = false
     @State private var detail = "Logs"
     @State private var logQuery = ""
     @State private var follow = true
@@ -20,7 +21,8 @@ struct ProcessManagerView: View {
             guard run.project != nil else { return false }
             if manager.currentProjectOnly && run.workspaceURL != controller.workspaceURL { return false }
             if let workspaceFilter, run.workspaceURL != workspaceFilter { return false }
-            let text = "\(run.name) \(run.workspaceName) \(run.ports.map(String.init).joined(separator: " "))"
+            let text = "\(run.name) \(run.workspaceName) \(run.project?.serviceParentName ?? "") " +
+                run.ports.map(String.init).joined(separator: " ")
             return manager.query.isEmpty || text.localizedStandardContains(manager.query)
         }.sorted { ($0.workspaceName, $0.name, $0.id.uuidString) < ($1.workspaceName, $1.name, $1.id.uuidString) }
     }
@@ -40,14 +42,19 @@ struct ProcessManagerView: View {
                                     toggle: { run in
                         if run.status.active || run.pendingRestart { controller.runner.stop(run.id) }
                         else { controller.startManagedProcess(run) }
-                    }, edit: { editing = $0 }, openPort: { open("http://localhost:\($0)") })
+                    }, edit: { editing = $0 }, openPort: { open("http://localhost:\($0)") },
+                                    startGroup: { url in
+                           if let model = try? Workspace.read(from: url) {
+                               for parent in model.projects { controller.projects.startServices(parent, workspaceURL: url) }
+                           }
+                       })
                     .padding(.horizontal, detached ? 20 : 12).padding(.bottom, 20)
                     .frame(minHeight: 180, idealHeight: detached ? 340 : 230)
                 if let run = selected { processDetail(run).frame(minHeight: 180, maxHeight: .infinity) }
             }
             Divider()
             HStack {
-                Text("\(controller.runner.runs.values.filter { $0.status.active }.count) procesos activos")
+                Text("\(controller.runner.runs.values.filter { $0.status.active }.count) servicios activos")
                 Spacer()
                 if detached { Text("Continúan activos al cambiar de proyecto") }
             }.font(Theme.interfaceFont(11)).foregroundStyle(.secondary).padding(10)
@@ -56,11 +63,12 @@ struct ProcessManagerView: View {
         .preferredColorScheme(Theme.colorScheme)
         .onChange(of: controller.settings.theme) { _, theme in manager.updateTheme(theme) }
         .sheet(item: $editing) { run in
-            if let project = run.project {
-                RunConfigurationEditor(project: project, active: run.status.active) { updated, restart in
-                    controller.saveRunConfiguration(updated, for: run, restart: restart)
-                }
+            if let url = run.workspaceURL {
+                ServicesConfigurationView(controller: controller, workspaceURL: url, selectedID: run.projectID)
             }
+        }
+        .sheet(isPresented: $configuringServices) {
+            if let url = controller.workspaceURL { ServicesConfigurationView(controller: controller, workspaceURL: url) }
         }
         .task {
             while !Task.isCancelled {
@@ -99,7 +107,7 @@ struct ProcessManagerView: View {
     private var search: some View {
         HStack(spacing: 9) {
             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField("Buscar proceso, proyecto o puerto", text: Binding(get: { manager.query }, set: { manager.query = $0 }))
+            TextField("Buscar servicio, subproyecto o puerto", text: Binding(get: { manager.query }, set: { manager.query = $0 }))
                 .textFieldStyle(.plain)
         }.padding(.horizontal, 10).frame(height: 32)
             .background(Theme.surfaceInk.opacity(0.025), in: RoundedRectangle(cornerRadius: 5))
@@ -157,6 +165,11 @@ struct ProcessManagerView: View {
     }
     private var presentationControls: some View {
         HStack(spacing: 10) {
+            Button { configuringServices = true } label: {
+                Label("Configurar servicios…", systemImage: "gearshape").padding(.horizontal, 10).padding(.vertical, 7)
+                    .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Theme.border)).contentShape(Rectangle())
+            }.buttonStyle(.fullArea).help("Abrir la configuración unificada de servicios")
+                .disabled(controller.workspaceURL == nil)
             if detached {
                 action(manager.staysOnTop ? "pin.fill" : "pin", "Mantener ventana por encima") { manager.staysOnTop.toggle() }
             }
@@ -178,12 +191,13 @@ struct ProcessManagerView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(run.name).font(Theme.interfaceFont(20, weight: .semibold))
-                    Text(run.workspaceName).foregroundStyle(.secondary).font(Theme.interfaceFont(13))
+                    Text("\(run.workspaceName) › \(run.project?.serviceParentName ?? run.name)")
+                        .foregroundStyle(.secondary).font(Theme.interfaceFont(13))
                 }
                 Spacer()
-                action("gearshape", "Editar configuración de ejecución") { editing = run }
+                Button("Editar servicio…", systemImage: "gearshape") { editing = run }
                 Button { openProject(run) } label: {
-                    HStack(spacing: 8) { Text("Abrir proyecto")
+                    HStack(spacing: 8) { Text("Abrir subproyecto")
                         Image(systemName: "arrow.up.right") }
                         .padding(.horizontal, 12).padding(.vertical, 7)
                         .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Theme.surfaceInk.opacity(0.3)))

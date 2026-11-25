@@ -138,6 +138,7 @@ final class WorkspaceController {
         session = WorkspaceSession(trustStore: trust, errors: errors)
         sqlTimeouts = SQLTimeoutPreferences(defaults: defaults, settings: self.settings, session: session)
         projects = ProjectLibrary(session: session, runner: runner)
+        projects.inheritedEnvironment = { [terminals] url in try terminals.sharedEnvironment(for: url) }
         connections = ConnectionStore(session: session, database: database, defaults: defaults)
         files = FileCommands(session: session, docs: docs, defaults: defaults)
         files.didSaveDraft = { [connections] document in
@@ -350,9 +351,10 @@ final class WorkspaceController {
         bridge.reset(for: project, at: url, trust: decided)
         projects.warmUp(project.projects)
         if decided == .trusted {
-            for item in project.projects where item.runConfiguration?.startsAutomatically == true &&
-                trust.isApproved(command: item.commandApproval, project: item.id, workspaceURL: url) {
-                runner.start(item, workspaceURL: url)
+            for parent in project.projects {
+                for service in parent.configuredServices where service.configuration.startsAutomatically {
+                    projects.startServices(parent, workspaceURL: url, serviceID: service.id, automatic: true)
+                }
             }
         }
         selectedProjectID = runnableProjects.first?.id

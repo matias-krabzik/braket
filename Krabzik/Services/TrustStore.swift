@@ -102,13 +102,14 @@ extension TrustPrompt {
     /// carpeta y los comandos que podría ejecutar. El resto no se muestra porque no ayuda
     /// a decidir.
     init(for project: Workspace, at url: URL) {
-        let external = project.projects
-            .filter { $0.scope(relativeTo: url) == .external }
-            .map { $0.directory(relativeTo: url).path }
-        let commands = project.projects
+        let executions = project.projects.flatMap(\.executionProjects)
+        let directories = project.projects.map { $0.directory(relativeTo: url) }
+            + executions.map { $0.executionDirectory(relativeTo: url) }
+        let external = directories.filter { pathScope($0.path, relativeTo: url) == .external }.map(\.path)
+        let commands = executions
             .filter { !$0.command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .map { "\($0.name): \($0.command)" }
-        self.init(name: project.name, path: url.path, externalFolders: external,
+            .map { "\($0.serviceParentName.map { $0 + " › " } ?? "")\($0.name): \($0.commandApproval)" }
+        self.init(name: project.name, path: url.path, externalFolders: Array(Set(external)).sorted(),
                   commands: commands, connectionCount: project.connections.count)
     }
 }
