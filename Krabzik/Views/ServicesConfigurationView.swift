@@ -12,7 +12,7 @@ struct ServicesConfigurationView: View {
     @State private var query = ""
     @State private var failure = ""
     @State private var loaded = false
-    @State private var allowsRemoval = false
+    @State private var confirmsRemoval = false
 
     init(controller: WorkspaceController, workspaceURL: URL, selectedID: UUID? = nil) {
         self.controller = controller
@@ -43,7 +43,7 @@ struct ServicesConfigurationView: View {
                                           set: { draft[parent].services?[service] = $0 })
                     ServiceConfigurationForm(service: binding, parent: draft[parent], workspaceURL: workspaceURL,
                                              sharedNames: sharedNames, controller: controller, hasChanges: changed,
-                                             deleteService: { allowsRemoval = true })
+                                             deleteService: { confirmsRemoval = true })
                         .id(definition.id).disabled(!editable)
                 } else {
                     ContentUnavailableView("Configurá los servicios del proyecto", systemImage: "gearshape.2",
@@ -64,14 +64,35 @@ struct ServicesConfigurationView: View {
         .frame(width: 1100, height: 830).background(Theme.background).tint(Theme.accent)
         .preferredColorScheme(Theme.colorScheme)
         .onAppear { load() }
-        .alert("¿Eliminar «\(selectedServiceName)»?", isPresented: $allowsRemoval) {
-            Button("Cancelar", role: .cancel) {}
-            Button(removalStopsProcess ? "Detener y eliminar" : "Eliminar", role: .destructive) { removeSelected() }
-        } message: {
+        .sheet(isPresented: $confirmsRemoval) { removalConfirmation }
+
+    }
+    private var removalConfirmation: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("¿Eliminar «\(selectedServiceName)»?").font(.headline)
             Text(removalStopsProcess
                  ? "El servicio se eliminará y su proceso se detendrá cuando apliques o guardes los cambios."
                  : "El servicio se eliminará de este subproyecto cuando apliques o guardes los cambios.")
+                .foregroundStyle(Theme.surfaceInk.opacity(0.85)).fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 12) {
+                Spacer()
+                Button("Cancelar") { confirmsRemoval = false }
+                    .keyboardShortcut(.defaultAction)
+                Button(role: .destructive) {
+                    confirmsRemoval = false
+                    removeSelected()
+                } label: {
+                    Text(removalStopsProcess ? "Detener y eliminar" : "Eliminar")
+                        .foregroundStyle(.white).fontWeight(.medium)
+                        .padding(.horizontal, 18).frame(height: 30)
+                        .background(Color(red: 0.65, green: 0.12, blue: 0.12), in: RoundedRectangle(cornerRadius: 6))
+                        .contentShape(Rectangle())
+                }.buttonStyle(.fullArea)
+            }
         }
+        .padding(24).frame(width: 420).background(Theme.background)
+        .foregroundStyle(Theme.surfaceInk).preferredColorScheme(Theme.colorScheme)
+        .onExitCommand { confirmsRemoval = false }
     }
     private var sharedNames: [String] {
         (try? controller.terminals.sharedEnvironment(for: workspaceURL).keys.sorted()) ?? []
