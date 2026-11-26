@@ -31,6 +31,7 @@ struct ConsoleView: NSViewRepresentable {
         let _ = run.revision
         guard let text = scroll.documentView as? NSTextView else { return }
         text.backgroundColor = EditorPalette.background(for: theme)
+        text.textColor = theme.palette.text
         let font = Theme.nativeResultFont(scale: uiScale)
         if text.font != font {
             text.font = font

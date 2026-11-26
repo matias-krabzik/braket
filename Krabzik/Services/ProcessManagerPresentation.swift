@@ -47,7 +47,7 @@ final class ProcessManagerPresentation: NSObject, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         window.minSize = NSSize(width: 650, height: 450)
         window.delegate = self
-        window.appearance = NSAppearance(named: controller.settings.theme == .light ? .aqua : .darkAqua)
+        window.appearance = NSAppearance(named: controller.settings.resolvedTheme.isLight ? .aqua : .darkAqua)
         window.backgroundColor = EditorPalette.background
         window.contentView = NSHostingView(rootView: ProcessManagerView(controller: controller, detached: true))
         if !window.setFrameUsingName("BraketProcessManager") { window.center() }
@@ -65,7 +65,7 @@ final class ProcessManagerPresentation: NSObject, NSWindowDelegate {
         return true
     }
     func updateTheme(_ theme: AppTheme) {
-        windowController?.window?.appearance = NSAppearance(named: theme == .light ? .aqua : .darkAqua)
+        windowController?.window?.appearance = NSAppearance(named: theme.isLight ? .aqua : .darkAqua)
         windowController?.window?.backgroundColor = EditorPalette.background
     }
     func dock(_ controller: WorkspaceController) {

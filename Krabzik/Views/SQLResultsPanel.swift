@@ -154,7 +154,7 @@ private struct SQLResultContent: View {
                 Text(draft.result.error ?? draft.result.summary).textSelection(.enabled)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(16)
             } else {
-                SQLResultGrid(draft: draft, scale: controller.settings.resultFontScale, theme: controller.settings.theme,
+                SQLResultGrid(draft: draft, scale: controller.settings.resultFontScale, theme: controller.settings.resolvedTheme,
                               typography: controller.settings.resultTypography,
                               openRelated: { target in
                                   guard let connection = draft.result.connection else { return }

@@ -156,7 +156,7 @@ struct ProcessManagerTable: View {
 @MainActor enum ProcessManagerAppearance {
     static var background: Color { Theme.background }
     static var bar: Color { Theme.bar }
-    static var link: Color { Theme.settings.theme == .light ? .blue : Theme.accent }
+    static var link: Color { Theme.settings.resolvedTheme.isLight ? .blue : Theme.accent }
     static var selection: Color { Theme.accent.opacity(0.18) }
     static func statusColor(_ run: ProjectRun) -> Color {
         if run.status == .running { return .green }

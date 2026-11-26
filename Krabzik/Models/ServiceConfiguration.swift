@@ -10,6 +10,7 @@ struct ServiceConfiguration: Codable, Equatable, Identifiable {
     var dependencyTimeout = 30
     var waitForPort = true
     var php: PHPServiceConfiguration?
+    var node: NodeServiceConfiguration?
 
     func executionProject(in parent: CodeProject) -> CodeProject {
         var config = configuration
@@ -19,8 +20,10 @@ struct ServiceConfiguration: Codable, Equatable, Identifiable {
             config.expectedPort = php.effectivePort
             if let port = php.effectivePort { config.launchURL = "http://localhost:\(port)" }
         }
+        if node != nil { config.arguments = [] }
         var project = CodeProject(id: id, name: name, path: parent.path, kind: parent.kind,
-                                  command: php?.command(id: id, environmentKeys: variables.map(\.name)) ?? command, icon: parent.icon,
+                                  command: node?.command ?? php?.command(id: id, environmentKeys: variables.map(\.name)) ?? command,
+                                  icon: parent.icon,
                                   runConfiguration: config)
         project.serviceParentID = parent.id
         project.serviceParentName = parent.name
@@ -30,13 +33,15 @@ struct ServiceConfiguration: Codable, Equatable, Identifiable {
     }
     func validate() throws {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, name.count <= 200,
-              (php != nil || !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty),
+              (php != nil || node != nil || !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty),
               command.count <= WorkspaceLimits.commandLength,
               command.isValidProjectText(newlines: true),
               name.isValidProjectText(), (1...300).contains(dependencyTimeout), dependencies.count <= 32,
               Set(dependencies).count == dependencies.count else {
             throw WorkspaceError.invalidText("el servicio o sus dependencias")
         }
+        guard php == nil || node == nil else { throw WorkspaceError.invalidText("el tipo de servicio") }
+        try node?.validate()
         try php?.validate()
         try configuration.validate()
         try TerminalEnvironment.validate(variables)

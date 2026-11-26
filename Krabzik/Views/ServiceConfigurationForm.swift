@@ -30,9 +30,9 @@ struct ServiceConfigurationForm: View {
                        "Iniciar o detener servicio", tint: run?.status.active == true ? .red : .green) {
                     if let run, run.status.active || run.pendingRestart { controller.runner.stop(run.id) }
                     else { start(restart: false) }
-                }.disabled(hasChanges || (service.php == nil && service.command.isEmpty))
+                }.disabled(hasChanges || (service.php == nil && service.node == nil && service.command.isEmpty))
                 action("arrow.counterclockwise", "Reiniciar con la configuración guardada") { start(restart: true) }
-                    .disabled(hasChanges || (service.php == nil && service.command.isEmpty))
+                    .disabled(hasChanges || (service.php == nil && service.node == nil && service.command.isEmpty))
             }.padding(20)
             Divider()
             Form {
@@ -42,7 +42,7 @@ struct ServiceConfigurationForm: View {
                         TextField("Carpeta", text: $service.configuration.workingDirectory, prompt: Text("Carpeta del subproyecto"))
                         action("folder", "Elegir carpeta", perform: chooseFolder)
                     }
-                    if service.php == nil { TextField("Comando", text: $service.command).font(Theme.codeFont(12))
+                    if service.php == nil && service.node == nil { TextField("Comando", text: $service.command).font(Theme.codeFont(12))
                     TextField("Argumentos · uno por línea", text: arguments, axis: .vertical).lineLimit(1...4)
                     Text("Carpeta relativa al subproyecto \(parent.name). Los argumentos se pasan como valores literales.")
                         .font(.caption).foregroundStyle(.secondary)
@@ -51,6 +51,7 @@ struct ServiceConfigurationForm: View {
                     Toggle("Cargar perfil del shell", isOn: option(\.loadShellProfile, default: true))
                 }
                 PHPServiceForm(service: $service, parent: parent, workspaceURL: workspaceURL)
+                NodeServiceForm(service: $service, parent: parent, workspaceURL: workspaceURL)
                 Section(service.php?.environment != .local && service.php != nil ? "Pasos previos en esta Mac" : "Pasos previos") {
                     Toggle("Inicializar nvm antes de los pasos previos", isOn: option(\.initializeNVM, default: false))
                     ForEach(Array((service.configuration.preScripts ?? []).indices), id: \.self) { index in

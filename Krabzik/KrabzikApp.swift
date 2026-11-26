@@ -38,7 +38,7 @@ struct KrabzikApp: App {
                 .frame(minWidth: controller.workspace == nil && controller.documents.isEmpty ? 760 : 900,
                        minHeight: controller.workspace == nil && controller.documents.isEmpty ? 420 : 580)
                 .background(WindowBridge(delegate: delegate, projectURL: controller.workspaceURL,
-                                         theme: controller.settings.theme, scale: controller.settings.uiScale))
+                                         theme: controller.settings.resolvedTheme, scale: controller.settings.uiScale))
                 .onAppear {
                     delegate.controller = controller
                     _ = AppUpdater.shared
@@ -278,7 +278,7 @@ private struct WindowBridge: NSViewRepresentable {
     func makeNSView(context: Context) -> WindowView { WindowView() }
 
     func updateNSView(_ view: WindowView, context: Context) {
-        NSApp.appearance = NSAppearance(named: theme == .light ? .aqua : .darkAqua)
+        NSApp.appearance = NSAppearance(named: theme.isLight ? .aqua : .darkAqua)
         view.window?.backgroundColor = EditorPalette.background
         view.appDelegate = delegate
         view.projectURL = projectURL

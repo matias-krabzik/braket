@@ -61,7 +61,7 @@ struct ProcessManagerView: View {
         }
         .background(ProcessManagerAppearance.background).font(Theme.interfaceFont(12)).tint(Theme.accent)
         .preferredColorScheme(Theme.colorScheme)
-        .onChange(of: controller.settings.theme) { _, theme in manager.updateTheme(theme) }
+        .onChange(of: controller.settings.resolvedTheme) { _, theme in manager.updateTheme(theme) }
         .sheet(item: $editing) { run in
             if let url = run.workspaceURL {
                 ServicesConfigurationView(controller: controller, workspaceURL: url, selectedID: run.projectID)

@@ -417,7 +417,7 @@ struct SQLResultGrid: NSViewRepresentable {
             field.isBordered = false
             field.drawsBackground = false
             field.gridFillColor = draft.selectedCell == SQLCell(row: row, column: column)
-                ? NSColor.controlAccentColor.withAlphaComponent(0.23)
+                ? theme.palette.selection
                 : (visibleRow(row).isMultiple(of: 2) ? EditorPalette.background(for: theme)
                    : EditorPalette.background(for: theme).blended(withFraction: 0.04, of: .labelColor)
                      ?? EditorPalette.background(for: theme))

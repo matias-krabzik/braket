@@ -15,14 +15,24 @@ struct PHPServiceForm: View {
     private var base: URL { service.executionProject(in: parent).executionDirectory(relativeTo: workspaceURL) }
     var body: some View {
         Section("Tipo de ejecución") {
-            Picker("Tipo", selection: Binding(get: { service.php?.kind }, set: { kind in
-                if let kind { var value = service.php ?? PHPServiceConfiguration()
-                value.kind = kind
-                service.php = value }
-                else { service.php = nil }
+            Picker("Tipo", selection: Binding(get: { service.node?.kind.rawValue ?? service.php?.kind.rawValue ?? "Comando personalizado" },
+                                              set: { type in
+                if let kind = NodeServiceConfiguration.Kind(rawValue: type) {
+                    var value = service.node ?? NodeServiceConfiguration()
+                    value.kind = kind
+                    service.node = value
+                    service.php = nil
+                } else if let kind = PHPServiceConfiguration.Kind(rawValue: type) {
+                    var value = service.php ?? PHPServiceConfiguration()
+                    value.kind = kind
+                    service.php = value
+                    service.node = nil
+                } else { service.php = nil
+                service.node = nil }
             })) {
-                Text("Comando personalizado").tag(Optional<PHPServiceConfiguration.Kind>.none)
-                ForEach(PHPServiceConfiguration.Kind.allCases, id: \.self) { Text($0.rawValue).tag(Optional($0)) }
+                Text("Comando personalizado").tag("Comando personalizado")
+                ForEach(PHPServiceConfiguration.Kind.allCases, id: \.self) { Text($0.rawValue).tag($0.rawValue) }
+                ForEach(NodeServiceConfiguration.Kind.allCases, id: \.self) { Text($0.rawValue).tag($0.rawValue) }
             }
             if service.php != nil {
                 Picker("Entorno", selection: php.environment) {

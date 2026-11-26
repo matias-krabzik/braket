@@ -148,12 +148,15 @@ struct WorkspaceView: View {
 
     private var settingsToolbarItem: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
-            Button { controller.showingSettings = true } label: {
-                Image(systemName: "gearshape").frame(width: 28, height: 28).contentShape(Rectangle())
+            HStack(spacing: 3) {
+                QuickThemePicker(settings: controller.settings)
+                Button { controller.showingSettings = true } label: {
+                    Image(systemName: "gearshape").frame(width: 28, height: 28).contentShape(Rectangle())
+                }
+                .buttonStyle(.fullArea)
+                .help("Configuración")
+                .accessibilityLabel("Configuración")
             }
-            .buttonStyle(.fullArea)
-            .help("Configuración")
-            .accessibilityLabel("Configuración")
         }
     }
 
@@ -306,7 +309,7 @@ struct WorkspaceView: View {
                     } else if isMarkdown(document) {
                         markdownContent(document)
                     } else {
-                        CodeEditor(document: document, theme: Theme.settings.theme, uiScale: controller.settings.codeFontScale,
+                        CodeEditor(document: document, theme: Theme.settings.resolvedTheme, uiScale: controller.settings.codeFontScale,
                                    wrapsLines: controller.settings.wrapLines, readOnly: controller.isReadOnly || document.isTableDefinition,
                                    options: controller.settings.editorOptions, typography: controller.settings.codeTypography,
                                    canExecuteSelection: canExecuteSelection(document),
@@ -386,7 +389,7 @@ struct WorkspaceView: View {
         } ?? []
         switch document.markdownMode {
         case .edit:
-            CodeEditor(document: document, theme: Theme.settings.theme, uiScale: controller.settings.codeFontScale,
+            CodeEditor(document: document, theme: Theme.settings.resolvedTheme, uiScale: controller.settings.codeFontScale,
                        wrapsLines: controller.settings.wrapLines, readOnly: controller.isReadOnly,
                        options: controller.settings.editorOptions).id(document.id)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -395,7 +398,7 @@ struct WorkspaceView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .split:
             HSplitView {
-                CodeEditor(document: document, theme: Theme.settings.theme, uiScale: controller.settings.codeFontScale,
+                CodeEditor(document: document, theme: Theme.settings.resolvedTheme, uiScale: controller.settings.codeFontScale,
                            wrapsLines: controller.settings.wrapLines, readOnly: controller.isReadOnly,
                            options: controller.settings.editorOptions).id(document.id)
                     .frame(minWidth: 230, maxWidth: .infinity, maxHeight: .infinity)

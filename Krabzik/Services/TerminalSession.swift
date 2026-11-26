@@ -45,7 +45,7 @@ final class TerminalSession: NSObject, Identifiable, LocalProcessTerminalViewDel
         let font = Theme.nativeCodeFont(scale: Theme.settings.codeFontScale)
         if view?.font != font { view?.font = font }
         view?.nativeBackgroundColor = EditorPalette.background
-        view?.nativeForegroundColor = Theme.settings.theme == .light ? .black : .white
+        view?.nativeForegroundColor = Theme.palette.text
     }
     func stop() {
         guard let terminal = view else { return }

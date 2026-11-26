@@ -66,10 +66,10 @@ private struct CodeFontCard: View {
                             Text("42   María")
                             Text("108  Martín")
                         } else {
-                            Text("SELECT ").foregroundColor(Color(nsColor: EditorPalette.purple)) + Text("id, email")
-                            Text("FROM ").foregroundColor(Color(nsColor: EditorPalette.purple)) + Text("clientes")
-                            Text("WHERE ").foregroundColor(Color(nsColor: EditorPalette.purple)) + Text("id = ") +
-                                Text("42;").foregroundColor(Color(nsColor: EditorPalette.orange))
+                            Text("SELECT ").foregroundColor(Color(nsColor: theme.palette.keyword)) + Text("id, email")
+                            Text("FROM ").foregroundColor(Color(nsColor: theme.palette.keyword)) + Text("clientes")
+                            Text("WHERE ").foregroundColor(Color(nsColor: theme.palette.keyword)) + Text("id = ") +
+                                Text("42;").foregroundColor(Color(nsColor: theme.palette.number))
                         }
                     }
                     .font(Font(family.nativeFont(size: size, bold: selected && typography.bold)))
@@ -85,9 +85,10 @@ private struct CodeFontCard: View {
                 .accessibilityLabel("Negrita en \(family.title)").padding(.horizontal, 14).padding(.vertical, 10)
         }
         .tabSelectionBackground { typography.family = family }
+        .foregroundStyle(Color(nsColor: theme.palette.text))
         .background(Color(nsColor: EditorPalette.background(for: theme)))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(selected ? Color.blue : Theme.border, lineWidth: selected ? 2 : 1))
-        .environment(\.colorScheme, theme == .light ? .light : .dark)
+        .environment(\.colorScheme, theme.isLight ? .light : .dark)
     }
 }

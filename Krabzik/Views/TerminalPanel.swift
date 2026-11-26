@@ -31,7 +31,7 @@ struct TerminalPanel: View {
                     ContentUnavailableView("Terminal deshabilitada", systemImage: "lock",
                                            description: Text("Confiá en este proyecto para iniciar una sesión de shell."))
                 } else if let session = manager.sessions[selected.id], session.view != nil {
-                    NativeTerminal(session: session, theme: controller.settings.theme,
+                    NativeTerminal(session: session, theme: controller.settings.resolvedTheme,
                                    typography: controller.settings.codeTypography, size: controller.settings.codeFontSize)
                         .id(session.id).frame(maxWidth: .infinity, maxHeight: .infinity)
                     HStack(spacing: 8) {

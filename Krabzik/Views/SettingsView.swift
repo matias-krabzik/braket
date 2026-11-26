@@ -17,6 +17,7 @@ struct SettingsView: View {
     @MainActor private struct GeneralDraft: Equatable {
         var defaultSQLTimeoutSeconds: Int
         var theme: AppTheme
+        var appearanceMode: AppearanceMode
         var uiScale: Double
         var codeTypography: CodeTypography
         var resultTypography: CodeTypography
@@ -29,6 +30,7 @@ struct SettingsView: View {
             defaultSQLTimeoutSeconds = settings.defaultSQLTimeoutSeconds
             editorOptions = settings.editorOptions
             theme = settings.theme
+            appearanceMode = settings.appearanceMode
             uiScale = settings.uiScale
             codeTypography = settings.codeTypography
             resultTypography = settings.resultTypography
@@ -38,12 +40,17 @@ struct SettingsView: View {
         }
     }
 
+    private var previewTheme: AppTheme {
+        draft.theme.variant(light: draft.appearanceMode.isLight(systemIsDark: settings.systemIsDark))
+    }
+    private var preview: ThemePalette { previewTheme.palette }
     private var hasChanges: Bool { draft != GeneralDraft(settings: settings) }
 
     private func apply() {
         settings.defaultSQLTimeoutSeconds = min(3600, max(1, draft.defaultSQLTimeoutSeconds))
         settings.editorOptions = draft.editorOptions
         settings.theme = draft.theme
+        settings.appearanceMode = draft.appearanceMode
         settings.uiScale = draft.uiScale
         settings.codeTypography = draft.codeTypography
         settings.resultTypography = draft.resultTypography
@@ -114,7 +121,7 @@ struct SettingsView: View {
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .padding(.horizontal, 9).padding(.vertical, 7)
                                     .padding(.leading, item == .texts ? 18 : 0)
-                                    .background(page == item ? Theme.accent.opacity(0.22) : .clear,
+                                    .background(page == item ? Color(nsColor: preview.accent).opacity(0.22) : .clear,
                                                 in: RoundedRectangle(cornerRadius: 6))
                                     .contentShape(Rectangle())
                             }.buttonStyle(.fullArea)
@@ -127,7 +134,7 @@ struct SettingsView: View {
                 }
                 Spacer(minLength: 0)
             }
-            .padding(14).frame(width: 210).background(Theme.sidebar)
+            .padding(14).frame(width: 210).background(Color(nsColor: preview.sidebar))
             Divider()
             Group {
                 switch page {
@@ -137,7 +144,7 @@ struct SettingsView: View {
                 case .sql: sql
                 case .texts:
                     TextAppearanceSettings(code: $draft.codeTypography, results: $draft.resultTypography,
-                                           codeSize: $draft.codeFontSize, resultSize: $draft.resultFontSize, theme: draft.theme)
+                                           codeSize: $draft.codeFontSize, resultSize: $draft.resultFontSize, theme: previewTheme)
                 case .connections: ConnectionsSettingsView(controller: controller)
                 case .updates: UpdatesSettingsView()
                 }
@@ -159,16 +166,17 @@ struct SettingsView: View {
                 .disabled(!hasChanges)
             }
             .padding(.horizontal, 18).padding(.vertical, 12)
-            .background(Theme.bar)
+            .background(Color(nsColor: preview.bar))
         }
         .frame(width: 930, height: 700)
-        .background(Theme.background)
+        .background(Color(nsColor: preview.background))
+        .foregroundStyle(Color(nsColor: preview.text))
         .background(SettingsTerminationBridge(coordinator: controller.settingsClose,
                                               hasChanges: { hasChanges }, save: apply,
                                               discard: { draft = GeneralDraft(settings: settings) },
                                               dismiss: { dismiss() }))
-        .tint(Theme.accent)
-        .preferredColorScheme(Theme.colorScheme)
+        .tint(Color(nsColor: preview.accent))
+        .preferredColorScheme(previewTheme.isLight ? .light : .dark)
     }
 
     private var general: some View {
@@ -184,13 +192,13 @@ struct SettingsView: View {
     private var appearance: some View {
         settingsForm("Apariencia") {
             Section("Apariencia") {
-                Picker("Tema", selection: $draft.theme) {
-                    ForEach(AppTheme.allCases) { theme in
-                        Text(theme.title).tag(theme)
-                    }
+                ThemeModeControls(mode: $draft.appearanceMode, systemIsDark: settings.systemIsDark)
+                ThemeGallery(family: $draft.theme, light: previewTheme.isLight)
+                if draft.theme == .midnight {
+                    Text("Azul noche · Tema heredado seleccionado").font(.callout).foregroundStyle(.secondary)
                 }
-                Text(draft.theme.detail)
-                    .font(.callout).foregroundStyle(.secondary)
+            }
+            Section("Interfaz") {
                 HStack {
                     Slider(value: $draft.uiScale, in: AppSettings.uiScaleRange, step: 0.1) {
                         Text("Zoom de interfaz")
@@ -269,8 +277,8 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
         .padding(12)
-        .background(Theme.background)
-        .tint(Theme.accent)
-        .preferredColorScheme(Theme.colorScheme)
+        .background(Color(nsColor: preview.background))
+        .tint(Color(nsColor: preview.accent))
+        .preferredColorScheme(previewTheme.isLight ? .light : .dark)
     }
 }

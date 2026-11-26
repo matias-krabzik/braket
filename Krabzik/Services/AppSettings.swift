@@ -1,30 +1,9 @@
+import AppKit
 import Foundation
 import Observation
 
-enum AppTheme: String, CaseIterable, Identifiable, Codable {
-    case graphite
-    case midnight
-    case light
-
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .graphite: "Grafito"
-        case .midnight: "Azul noche"
-        case .light: "Claro"
-        }
-    }
-    var detail: String {
-        switch self {
-        case .graphite: "Inspirado en el icono de Krabzik."
-        case .midnight: "El tema azul oscuro original."
-        case .light: "Fondos claros y colores de sintaxis con contraste para trabajar de día."
-        }
-    }
-}
-
 @MainActor @Observable
-final class AppSettings {
+final class AppSettings: NSObject {
     static let shared = AppSettings()
     static let uiScaleRange = 0.8...1.5
     static let fontSizeRange = 10.0...24.0
@@ -33,8 +12,18 @@ final class AppSettings {
         didSet { defaults.set(min(3600, max(1, defaultSQLTimeoutSeconds)), forKey: "defaultSQLTimeoutSeconds") }
     }
     var theme: AppTheme {
-        didSet { defaults.set(theme.rawValue, forKey: "appearanceTheme") }
+        didSet {
+            defaults.set(theme.rawValue, forKey: "appearanceTheme")
+            if theme.isLight { appearanceMode = .light }
+            else if oldValue.isLight { appearanceMode = .dark }
+        }
     }
+    var appearanceMode: AppearanceMode {
+        didSet { defaults.set(appearanceMode.rawValue, forKey: "appearanceMode") }
+    }
+    var systemIsDark: Bool
+    var resolvedTheme: AppTheme { theme.variant(light: appearanceMode.isLight(systemIsDark: systemIsDark)) }
+
     var restoreLastState: Bool {
         didSet {
             defaults.set(restoreLastState, forKey: "restoreLastState")
@@ -92,14 +81,31 @@ final class AppSettings {
         codeFontSize = savedCodeSize.isFinite ? min(24, max(10, savedCodeSize)) : 14
         resultFontSize = savedResultSize.isFinite ? min(24, max(10, savedResultSize)) : 14
         wrapLines = defaults.object(forKey: "editorWrapLines") as? Bool ?? true
-        theme = AppTheme(rawValue: defaults.string(forKey: "appearanceTheme") ?? "") ?? .graphite
+        let savedTheme = AppTheme(rawValue: defaults.string(forKey: "appearanceTheme") ?? "") ?? .graphite
+        theme = savedTheme.family
+        let legacyTheme = defaults.string(forKey: "appearanceTheme")
+        appearanceMode = defaults.string(forKey: "appearanceMode").flatMap(AppearanceMode.init(rawValue:))
+            ?? (legacyTheme == nil ? .system : (savedTheme.isLight ? .light : .dark))
+        systemIsDark = UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
         restoreLastState = defaults.object(forKey: "restoreLastState") as? Bool ?? true
         let savedZoom = defaults.object(forKey: "markdownPreviewZoom") as? Double ?? 1
         markdownPreviewZoom = savedZoom.isFinite ? min(2, max(0.7, savedZoom)) : 1
         let savedScale = defaults.object(forKey: "uiScale") as? Double ?? 1
         uiScale = savedScale.isFinite ? min(Self.uiScaleRange.upperBound,
                                             max(Self.uiScaleRange.lowerBound, savedScale)) : 1
+        super.init()
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(appearanceChanged),
+                                                            name: NSNotification.Name("AppleInterfaceThemeChangedNotification"),
+                                                            object: nil)
     }
+
+    @objc nonisolated private func appearanceChanged() {
+        Task { @MainActor [weak self] in
+            self?.systemIsDark = UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
+        }
+    }
+
+    deinit { DistributedNotificationCenter.default().removeObserver(self) }
 
     func zoomIn() { uiScale = min(Self.uiScaleRange.upperBound, (uiScale * 10).rounded() / 10 + 0.1) }
     func zoomOut() { uiScale = max(Self.uiScaleRange.lowerBound, (uiScale * 10).rounded() / 10 - 0.1) }
