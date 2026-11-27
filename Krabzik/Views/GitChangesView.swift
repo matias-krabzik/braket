@@ -51,18 +51,41 @@ struct GitChangesSidebar: View {
                                                 .lineLimit(1).truncationMode(.middle)
                                         }
                                         Spacer(minLength: 3)
-                                        Text(file.kind).font(Theme.interfaceFont(11, weight: .semibold))
+                                        Image(systemName: statusSymbol(file.kind))
+                                            .font(Theme.interfaceFont(14, weight: .medium))
                                             .foregroundStyle(color(file.kind))
+                                            .help(statusLabel(file.kind))
+                                            .accessibilityHidden(true)
                                     }.padding(.horizontal, 10).padding(.vertical, 6).frame(maxWidth: .infinity, alignment: .leading)
                                         .background(git.selected?.id == file.id ? Theme.accent.opacity(0.18) : .clear)
                                         .contentShape(Rectangle())
-                                }.buttonStyle(.fullArea).help(file.path)
+                                }.buttonStyle(.fullArea)
+                                    .help("\(file.path) · \(statusLabel(file.kind))")
+                                    .accessibilityLabel("\(file.path), \(statusLabel(file.kind))")
                             }
                         }
                     }.padding(.vertical, 4)
                 }
             }
         }.background(Theme.sidebar).font(Theme.interfaceFont(12))
+    }
+    private func statusSymbol(_ kind: String) -> String {
+        switch kind {
+        case "A": "plus.circle"
+        case "D": "minus.circle"
+        case "R": "arrow.right.circle"
+        case "U": "exclamationmark.circle"
+        default: "pencil.circle"
+        }
+    }
+    private func statusLabel(_ kind: String) -> String {
+        switch kind {
+        case "A": "Nuevo"
+        case "D": "Eliminado"
+        case "R": "Renombrado"
+        case "U": "Conflicto"
+        default: "Modificado"
+        }
     }
     private func color(_ kind: String) -> Color {
         switch kind {
