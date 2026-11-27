@@ -7,11 +7,18 @@ struct WorkspaceActivityBar: View {
     var body: some View {
         VStack(spacing: Theme.zoom(8)) {
             activity("Archivos", id: "explorer.mode.files", icon: "folder",
-                     selected: controller.sidebarVisible && !controller.database.browserShowsDatabases) { show(false) }
+                     selected: controller.sidebarVisible && !controller.database.browserShowsDatabases && !controller.gitChanges
+                     .sidebarVisible) { show(false) }
             activity("Bases de datos", id: "explorer.mode.databases", icon: "cylinder",
-                     selected: controller.sidebarVisible && controller.database.browserShowsDatabases) { show(true) }
+                     selected: controller.sidebarVisible && controller.database.browserShowsDatabases && !controller.gitChanges
+                     .sidebarVisible) { show(true) }
             activity("Búsqueda · Próximamente", id: "explorer.search", icon: "magnifyingglass", enabled: false) {}
-            activity("Git · Próximamente", id: "explorer.git", icon: "arrow.triangle.branch", enabled: false) {}
+            activity("Cambios Git", id: "explorer.git", icon: "arrow.triangle.branch",
+                     selected: controller.sidebarVisible && controller.gitChanges.sidebarVisible) {
+                if controller.sidebarVisible && controller.gitChanges.sidebarVisible { controller.sidebarVisible = false }
+                else { controller.gitChanges.sidebarVisible = true
+                    controller.sidebarVisible = true }
+            }
             Spacer(minLength: 12)
             activity("Resultados SQL", id: "explorer.results", icon: "tablecells",
                      selected: controller.database.resultsVisible && !controller.workflowVisible) {
@@ -42,6 +49,13 @@ struct WorkspaceActivityBar: View {
         Button(action: action) {
             Image(systemName: icon).font(.system(size: Theme.zoom(17)))
                 .overlay(alignment: .bottomTrailing) {
+                    if id == "explorer.git", !controller.gitChanges.files.isEmpty {
+                        Text(controller.gitChanges.count > 99 ? "99+" : "\(controller.gitChanges.count)")
+                            .font(.system(size: Theme.zoom(9), weight: .bold)).foregroundStyle(.white)
+                            .padding(.horizontal, 3).frame(minWidth: 15, minHeight: 15)
+                            .background(Color.accentColor, in: Capsule()).offset(x: 6, y: 5)
+                            .accessibilityLabel("\(controller.gitChanges.count) archivos cambiados")
+                    }
                     if id == "explorer.processes", controller.runner.hasActiveProcesses {
                         Circle().fill(.green).frame(width: 6, height: 6).offset(x: 3, y: 3)
                     }
@@ -56,9 +70,10 @@ struct WorkspaceActivityBar: View {
     }
 
     private func show(_ databases: Bool) {
-        if controller.sidebarVisible && controller.database.browserShowsDatabases == databases {
+        if controller.sidebarVisible && !controller.gitChanges.sidebarVisible && controller.database.browserShowsDatabases == databases {
             controller.sidebarVisible = false
         } else {
+            controller.gitChanges.sidebarVisible = false
             controller.database.browserShowsDatabases = databases
             controller.sidebarVisible = true
         }

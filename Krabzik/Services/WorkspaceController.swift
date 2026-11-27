@@ -58,7 +58,15 @@ final class WorkspaceController {
         return documents.first { $0.id == sqlResultsDocumentID } ?? documents.last { $0.language == "SQL" }
     }
     var workflowVisible = false {
-        didSet { if workflowVisible { outputVisible = false } }
+        didSet { if workflowVisible {
+            gitChanges.tabVisible = false
+            outputVisible = false
+        } }
+    }
+    func refreshGitChanges() async {
+        guard let workspaceURL else { return }
+        let directories = mountedProjects.map { $0.directory(relativeTo: workspaceURL) }
+        await gitChanges.refresh(directories: directories + [workspaceURL.deletingLastPathComponent()])
     }
     func showOutput() {
         database.resultsVisible = true
@@ -75,6 +83,7 @@ final class WorkspaceController {
         workflowVisible = true
     }
 
+    let gitChanges = GitChangesController()
     let database: DatabaseController
     let agent: AgentController
     @ObservationIgnored let errors = ErrorCenter()
@@ -103,7 +112,7 @@ final class WorkspaceController {
     var runnableProjects: [CodeProject] { session.runnableProjects }
     var mountedProjects: [CodeProject] { session.mountedProjects }
     var documents: [EditorDocument] { docs.documents }
-    var selectedDocument: EditorDocument? { docs.selected }
+    var selectedDocument: EditorDocument? { gitChanges.tabVisible ? nil : docs.selected }
     var selectedProcessesVisible: Bool { processesVisible }
     func toggleProcessesPanel() {
         if processManager.isDetached { processManager.detach(self) }
@@ -136,7 +145,8 @@ final class WorkspaceController {
         get { docs.selectedID }
         set { docs.selectedID = newValue
             if let document = docs.selected, document.language == "SQL" { sqlResultsDocumentID = document.id }
-            if newValue != nil { workflowVisible = false
+            if newValue != nil { gitChanges.tabVisible = false
+                workflowVisible = false
                 outputVisible = false } }
     }
 
@@ -182,6 +192,7 @@ final class WorkspaceController {
             for document in self.documents { self.sqlTimeouts.bind(document) }
         }
         files.onOpen = { [weak self] in
+            self?.gitChanges.tabVisible = false
             self?.workflowVisible = false
             self?.outputVisible = false
         }
@@ -345,6 +356,7 @@ final class WorkspaceController {
         workspaceStates.removeValue(forKey: closing)
         openWorkspaceModels.removeValue(forKey: closing)
         docs.closeAll()
+        gitChanges.reset()
         agent.clearConversation()
         selectedProjectID = nil
         commandProject = nil
@@ -369,6 +381,7 @@ final class WorkspaceController {
             workspaceStates[state.workspaceURL] = state
             openWorkspaceModels[state.workspaceURL] = workspace
         }
+        gitChanges.reset()
         let normalized = url.standardizedFileURL
         if !openWorkspaceURLs.contains(normalized) { openWorkspaceURLs.append(normalized) }
         if let current = workspaceURL {

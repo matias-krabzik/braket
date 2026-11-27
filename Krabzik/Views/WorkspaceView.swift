@@ -33,7 +33,8 @@ struct WorkspaceView: View {
                         HSplitView {
                             if controller.sidebarVisible {
                                 Group {
-                                    if controller.database.browserShowsDatabases { DatabaseExplorer(controller: controller) }
+                                    if controller.gitChanges.sidebarVisible { GitChangesSidebar(controller: controller) }
+                                    else if controller.database.browserShowsDatabases { DatabaseExplorer(controller: controller) }
                                     else { WorkspaceSidebar(controller: controller, workspace: workspace, url: url).id(url) }
                                 }
                                 .workspaceReveal(controller.database.browserShowsDatabases)
@@ -76,6 +77,14 @@ struct WorkspaceView: View {
         }
         .onChange(of: controller.database.resultsVisible) { _, visible in
             if visible && showsBottomProcesses { controller.processesVisible = false }
+        }
+        .task(id: controller.workspaceURL) {
+            while controller.workspaceURL != nil && !Task.isCancelled {
+                await controller.refreshGitChanges()
+                if let selected = controller.gitChanges.selected, selected.kind != "D", controller.gitChanges.tabVisible,
+                   !controller.gitChanges.diffLoading { controller.gitChanges.loadDiff(selected, showProgress: false) }
+                do { try await Task.sleep(for: .seconds(5)) } catch { return }
+            }
         }
         .workspaceReveal(controller.workspaceURL)
         .background(Theme.background)
@@ -181,7 +190,7 @@ struct WorkspaceView: View {
 
     private var editorArea: some View {
         VStack(spacing: 0) {
-            if !controller.documents.isEmpty || controller.workflowTabOpen {
+            if !controller.documents.isEmpty || controller.workflowTabOpen || controller.gitChanges.tabOpen {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 4) {
                         ForEach(controller.documents) { document in
@@ -190,7 +199,7 @@ struct WorkspaceView: View {
                                                tooltip: document.isTableDefinition ? "Definición de tabla · solo lectura"
                                                    : document.isDraft ? "Borrador · sin guardar" : document.url.path,
                                                isDirty: document.isDirty,
-                                               selected: !controller.workflowVisible && controller
+                                               selected: !controller.workflowVisible && !controller.gitChanges.tabVisible && controller
                                                .selectedDocumentID == document.id,
                                                select: { controller.selectedDocumentID = document.id },
                                                close: { controller.closeDocument(document) },
@@ -229,12 +238,21 @@ struct WorkspaceView: View {
                                         .disabled(controller.isReadOnly)
                                 }
                         }
+                        if controller.gitChanges.tabOpen {
+                            WorkspaceEditorTab(title: "Cambios", icon: Image(systemName: "arrow.triangle.branch"),
+                                               tooltip: "Cambios Git", selected: controller.gitChanges.tabVisible,
+                                               select: { controller.workflowVisible = false
+                                                   controller.gitChanges.tabVisible = true },
+                                               close: { controller.gitChanges.tabVisible = false
+                                                   controller.gitChanges.tabOpen = false })
+                        }
                         if controller.workflowTabOpen {
                             WorkspaceEditorTab(title: controller.workflows.selected?.name ?? "Automatización",
                                                icon: Image(systemName: "point.3.connected.trianglepath.dotted"),
                                                tooltip: controller.workflows.selected?.name ?? "Automatización",
                                                selected: controller.workflowVisible,
-                                               select: { controller.workflowVisible = true },
+                                               select: { controller.gitChanges.tabVisible = false
+                                                   controller.workflowVisible = true },
                                                close: {
                                                    controller.workflowVisible = false
                                                    controller.workflowTabOpen = false
@@ -254,7 +272,9 @@ struct WorkspaceView: View {
                 }.background(Theme.bar)
                 Rectangle().fill(Theme.border).frame(height: 1)
             }
-            if controller.workflowVisible, let url = controller.workspaceURL {
+            if controller.gitChanges.tabVisible {
+                GitChangesDiffView(git: controller.gitChanges)
+            } else if controller.workflowVisible, let url = controller.workspaceURL {
                 WorkflowView(controller: controller, workspaceURL: url)
             } else { editor.workspaceReveal(controller.selectedDocumentID) }
         }
