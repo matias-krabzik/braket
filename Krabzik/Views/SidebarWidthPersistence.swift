@@ -15,7 +15,7 @@ struct SidebarWidthPersistence: NSViewRepresentable {
     final class Probe: NSView {
         private weak var split: NSSplitView?
         var databases = false
-        private var key: String { databases ? "workspace.databaseSidebarWidth" : "workspace.sidebarWidth" }
+        private var key: String { "workspace.sidebarWidth" }
         private var defaultWidth: CGFloat { databases ? 380 : 270 }
 
         override func viewDidMoveToWindow() {
@@ -68,7 +68,7 @@ struct ProcessPanelInitialWidth: NSViewRepresentable {
         private func applyWidth() {
             var ancestor = superview
             while let view = ancestor {
-                if let split = view as? NSSplitView, split.isVertical, split.arrangedSubviews.count > 1 {
+                if let split = view as? NSSplitView, split.isVertical, split.arrangedSubviews.count > 2 {
                     split.keepDividersBelowHeader()
                     split.layoutSubtreeIfNeeded()
                     let divider = split.arrangedSubviews.count - 2

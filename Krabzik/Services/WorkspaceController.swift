@@ -28,6 +28,7 @@ final class WorkspaceController {
     @ObservationIgnored private var requestedPixelArtURLs: [URL] = []
     private(set) var openWorkspaceURLs: [URL] = []
     var openWorkspaceModels: [URL: Workspace] = [:]
+    @ObservationIgnored var suspendedDocuments: [URL: DocumentStore.OpenDocuments] = [:]
     @ObservationIgnored var workspaceStates: [URL: SavedWorkspaceState] = [:]
     var selectedProjectID: UUID?
     var newFileRequest: UUID?
@@ -230,7 +231,7 @@ final class WorkspaceController {
         }
         guard session.beginSwitch() else { return false }
         defer { session.endSwitch() }
-        if draft.openWhenCreated { guard await prepareToLeave() else { return false } }
+        if draft.openWhenCreated { guard await prepareToLeave(preserveDocuments: workspaceURL != nil) else { return false } }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         let data = try encoder.encode(project)
@@ -265,13 +266,19 @@ final class WorkspaceController {
                 return
             }
             if !prepared {
-                guard await prepareToLeave() else {
+                guard await prepareToLeave(preserveDocuments: workspaceURL != nil) else {
                     QAProbe.action("project.open.cancelled", ["url": QAField.path(url), "stage": "prepareToLeave"])
                     return
                 }
             }
             install(project, at: url, trust: decided)
-            if let state = workspaceStates[url.standardizedFileURL] { await restoreTabs(state) }
+            if let parked = suspendedDocuments.removeValue(forKey: url.standardizedFileURL) {
+                docs.resume(parked)
+                if let state = workspaceStates[url.standardizedFileURL] {
+                    await restoreTabs(state)
+                    docs.selectedID = parked.selectedID
+                }
+            } else if let state = workspaceStates[url.standardizedFileURL] { await restoreTabs(state) }
             QAProbe.action("project.open.ok", ["url": QAField.path(url), "name": project.name,
                                                "readOnly": QAField.bool(decided == .untrusted)])
         } catch {
@@ -292,16 +299,25 @@ final class WorkspaceController {
         guard !session.isSwitching, let closing = (requestedURL ?? workspaceURL)?.standardizedFileURL else { return }
         guard openWorkspaceURLs.contains(closing) else { return }
         if closing != workspaceURL {
+            if !prepared, suspendedDocuments[closing] != nil {
+                await openWorkspace(closing)
+                guard workspaceURL == closing else { return }
+                await closeWorkspace(closing)
+                return
+            }
             openWorkspaceURLs.removeAll { $0 == closing }
             workspaceStates.removeValue(forKey: closing)
+            suspendedDocuments.removeValue(forKey: closing)
             openWorkspaceModels.removeValue(forKey: closing)
             return
         }
         if let next = openWorkspaceURLs.first(where: { $0 != closing }) {
-            await openWorkspace(next, prepared: prepared)
+            if !prepared { guard await prepareToLeave() else { return } }
+            await openWorkspace(next, prepared: true)
             guard workspaceURL == next else { return }
             openWorkspaceURLs.removeAll { $0 == closing }
             workspaceStates.removeValue(forKey: closing)
+            suspendedDocuments.removeValue(forKey: closing)
             openWorkspaceModels.removeValue(forKey: closing)
             return
         }
@@ -338,7 +354,11 @@ final class WorkspaceController {
         }
         let normalized = url.standardizedFileURL
         if !openWorkspaceURLs.contains(normalized) { openWorkspaceURLs.append(normalized) }
-        docs.closeAll()
+        if let current = workspaceURL {
+            suspendedDocuments[current] = docs.suspend()
+        } else {
+            docs.closeAll()
+        }
         session.open(project, at: url, trust: decided)
         terminals.openProject(url)
         database.output.configure(project: url)
@@ -477,6 +497,7 @@ final class WorkspaceController {
         openWorkspaceModels.removeValue(forKey: old)
         openWorkspaceModels[url] = updated
         workspaceStates.removeValue(forKey: old)
+        if let parked = suspendedDocuments.removeValue(forKey: old) { suspendedDocuments[url] = parked }
         session.open(updated, at: url, trust: .trusted)
         for document in documents { sqlTimeouts.bind(document) }
         connections.install(updated.connections)
@@ -489,7 +510,7 @@ final class WorkspaceController {
 
     /// El orden en que se le pregunta al usuario antes de dejar lo que está abierto:
     /// Codex, los archivos sin guardar, los procesos, la base. Cualquiera cancela todo.
-    func prepareToLeave() async -> Bool {
+    func prepareToLeave(preserveDocuments: Bool = false) async -> Bool {
         QAProbe.action("project.prepareToLeave.begin", ["agent": QAField.bool(agent.isRunning),
                                                         "processes": QAField.bool(runner.hasActiveProcesses),
                                                         "dirty": QAField.count(docs.dirty.count)])
@@ -498,7 +519,7 @@ final class WorkspaceController {
             guard session.dialogs.confirmStopAgent() else { return false }
             agent.shutdown()
         }
-        guard await files.resolveDirty() else { return false }
+        if !preserveDocuments { guard await files.resolveDirty() else { return false } }
         if workflows.isRunning {
             guard session.dialogs.confirmStopProcesses() else { return false }
             workflows.stop()
@@ -525,6 +546,12 @@ final class WorkspaceController {
             documents.contains { $0.sqlExecution.isRunning }
         if running && !session.dialogs.confirmStopProcesses() { return false }
         guard await files.resolveDirty() else { return false }
+        let initialWorkspace = workspaceURL
+        for url in openWorkspaceURLs where url != workspaceURL {
+            await openWorkspace(url)
+            guard workspaceURL == url, await files.resolveDirty() else { return false }
+        }
+        if let initialWorkspace, workspaceURL != initialWorkspace { await openWorkspace(initialWorkspace) }
         workflows.stop()
         agent.shutdown()
         return await database.prepareToLeave(confirmActivity: false)

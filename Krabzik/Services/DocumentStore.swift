@@ -282,6 +282,23 @@ final class DocumentStore {
         }
     }
 
+    struct OpenDocuments {
+        let documents: [EditorDocument]
+        let selectedID: URL?
+    }
+
+    func suspend() -> OpenDocuments {
+        let state = OpenDocuments(documents: documents, selectedID: selectedID)
+        documents = []
+        selectedID = nil
+        return state
+    }
+
+    func resume(_ state: OpenDocuments) {
+        documents = state.documents
+        selectedID = state.selectedID
+    }
+
     /// Cierra todo y suelta las vistas nativas. Se llama al cambiar de proyecto.
     func closeAll() {
         for document in documents { document.releaseEditor() }

@@ -143,3 +143,29 @@ final class OpenWorkspacesTests: XCTestCase {
         XCTAssertEqual(try Workspace.read(from: a).name, "A")
     }
 }
+
+extension OpenWorkspacesTests {
+    func testSwitchKeepsUnsavedDocumentsAndDraftsUntilQuit() async throws {
+        let (controller, first, second, _) = try setup()
+        await controller.openWorkspace(first)
+        let file = first.deletingLastPathComponent().appendingPathComponent("unsaved.sql")
+        try Data("SELECT 1;".utf8).write(to: file)
+        try await controller.docs.open(file)
+        let document = try XCTUnwrap(controller.selectedDocument)
+        document.text = "SELECT 2;"
+        document.isDirty = true
+        let draft = try controller.docs.createDraft(name: "draft.sql", text: "SELECT 3;")
+        controller.session.dialogs.confirmSave = { _ in .cancel }
+        await controller.openWorkspace(second)
+        XCTAssertEqual(controller.workspaceURL, second)
+        await controller.openWorkspace(first)
+        XCTAssertTrue(controller.documents.contains { $0 === document })
+        XCTAssertTrue(controller.selectedDocument === draft)
+        XCTAssertEqual(document.text, "SELECT 2;")
+        XCTAssertTrue(document.isDirty)
+        await controller.openWorkspace(second)
+        let canQuit = await controller.prepareToQuit()
+        XCTAssertFalse(canQuit)
+        XCTAssertTrue(controller.documents.contains { $0 === document })
+    }
+}

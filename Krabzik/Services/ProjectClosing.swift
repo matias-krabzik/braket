@@ -34,7 +34,13 @@ final class ProjectClosing {
     var hasActiveProcesses: Bool { processes.contains { run(for: $0.id).map { $0.status.active || $0.pendingRestart } == true } }
 
     func confirm(keepProcesses: Bool = false) async {
-        guard phase == .confirmation, controller.session.beginSwitch() else { return }
+        guard phase == .confirmation else { return }
+        if controller.workspaceURL != url {
+            await controller.openWorkspace(url)
+            guard controller.workspaceURL == url else { phase = .cancelled
+            return }
+        }
+        guard controller.session.beginSwitch() else { return }
         var ownsTransition = true
         defer { if ownsTransition { controller.session.endSwitch() } }
         phase = .preparing
