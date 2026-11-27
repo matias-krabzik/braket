@@ -13,6 +13,26 @@ final class ManagedProcessTests: XCTestCase {
         XCTAssertFalse(manager.isDetached)
     }
 
+    func testDockPositionDefaultsToBottomAndIsRemembered() throws {
+        let suite = "braket-process-dock-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let controller = WorkspaceController(defaults: defaults)
+        XCTAssertEqual(controller.processManager.dockPosition, .bottom)
+        controller.database.resultsVisible = true
+        controller.showProcessesPanel()
+        XCTAssertTrue(controller.processesVisible)
+        XCTAssertFalse(controller.database.resultsVisible)
+        controller.moveProcessesPanel(to: .right)
+        XCTAssertEqual(ProcessManagerPresentation(defaults: defaults).dockPosition, .right)
+        controller.database.resultsVisible = true
+        controller.showProcessesPanel()
+        XCTAssertTrue(controller.database.resultsVisible)
+        controller.moveProcessesPanel(to: .bottom)
+        XCTAssertFalse(controller.database.resultsVisible)
+        XCTAssertEqual(ProcessManagerPresentation(defaults: defaults).dockPosition, .bottom)
+    }
+
     func testClosingWorkspaceOnlyOpensManagerForActiveProcesses() throws {
         let suite = "braket-manager-\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

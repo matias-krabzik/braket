@@ -108,10 +108,27 @@ final class WorkspaceController {
     func toggleProcessesPanel() {
         if processManager.isDetached { processManager.detach(self) }
         else {
-            processesVisible.toggle()
-            pixelProcessesVisible = processesVisible
-            processManager.wasVisible = processesVisible
+            if processesVisible {
+                processesVisible = false
+                pixelProcessesVisible = false
+                processManager.wasVisible = false
+            } else { showProcessesPanel() }
         }
+    }
+    func showProcessesPanel() {
+        if processManager.dockPosition == .bottom {
+            if let url = workspaceURL { terminals.setVisible(false, for: url) }
+            database.resultsVisible = false
+            workflowVisible = false
+            outputVisible = false
+        }
+        processesVisible = true
+        pixelProcessesVisible = true
+        processManager.wasVisible = true
+    }
+    func moveProcessesPanel(to position: ProcessManagerPresentation.DockPosition) {
+        processManager.dockPosition = position
+        showProcessesPanel()
     }
     var openingFiles: Set<URL> { docs.openingFiles }
     var recentProjects: [URL] { recents.urls }
@@ -577,7 +594,7 @@ final class WorkspaceController {
     func stopAll() {
         QAProbe.action("process.stopAll.request", ["active": QAField.bool(runner.hasActiveProcesses)])
         runner.stopAll()
-        processesVisible = true
+        processManager.show(self)
     }
 
     func executeSQL() {

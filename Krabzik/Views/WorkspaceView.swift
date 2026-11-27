@@ -13,6 +13,10 @@ struct WorkspaceView: View {
         return true
     }
 
+    private var showsBottomProcesses: Bool {
+        controller.processesVisible && !controller.processManager.isDetached && controller.processManager.dockPosition == .bottom
+    }
+
     private var sqlExecution: SQLExecution {
         guard let document = controller.sqlResultsDocument else { return emptySQLExecution }
         return document.sqlExecution
@@ -24,8 +28,8 @@ struct WorkspaceView: View {
                 if controller.isReadOnly { readOnlyBanner }
                 HStack(spacing: 0) {
                     WorkspaceActivityBar(controller: controller).zIndex(1)
-                    WorkspaceVerticalSplit(showsBottom: showsSQLResults || controller.terminals.visible,
-                                           isResults: showsSQLResults) {
+                    WorkspaceVerticalSplit(showsBottom: showsSQLResults || controller.terminals.visible || showsBottomProcesses,
+                                           isResults: showsSQLResults, isProcesses: showsBottomProcesses) {
                         HSplitView {
                             if controller.sidebarVisible {
                                 Group {
@@ -39,14 +43,17 @@ struct WorkspaceView: View {
                                     .id(controller.database.browserShowsDatabases))
                             }
                             editorArea.frame(minWidth: 420, maxWidth: .infinity, minHeight: 180, maxHeight: .infinity)
-                            if controller.selectedProcessesVisible && !controller.processManager.isDetached {
+                            if controller.selectedProcessesVisible && !controller.processManager.isDetached &&
+                                controller.processManager.dockPosition == .right {
                                 ProcessManagerView(controller: controller)
                                     .frame(minWidth: 320, idealWidth: 700, maxWidth: 700)
                                     .background(ProcessPanelInitialWidth())
                             }
                         }
                     } bottom: {
-                        if controller.terminals.visible {
+                        if showsBottomProcesses {
+                            ProcessManagerView(controller: controller, bottom: true)
+                        } else if controller.terminals.visible {
                             TerminalPanel(controller: controller, projectURL: url).frame(minHeight: 180)
                         } else if showsSQLResults {
                             SQLResultsPanel(execution: sqlExecution, controller: controller) {
@@ -66,6 +73,9 @@ struct WorkspaceView: View {
             } else {
                 WelcomeView(controller: controller)
             }
+        }
+        .onChange(of: controller.database.resultsVisible) { _, visible in
+            if visible && showsBottomProcesses { controller.processesVisible = false }
         }
         .workspaceReveal(controller.workspaceURL)
         .background(Theme.background)

@@ -4,6 +4,10 @@ import SwiftUI
 
 @MainActor @Observable
 final class ProcessManagerPresentation: NSObject, NSWindowDelegate {
+    enum DockPosition: String { case bottom, right }
+    var dockPosition: DockPosition {
+        didSet { defaults.set(dockPosition.rawValue, forKey: "processManager.dockPosition") }
+    }
     var isDetached: Bool
     var wasVisible: Bool {
         didSet { defaults.set(wasVisible, forKey: "processManager.visible") }
@@ -25,6 +29,7 @@ final class ProcessManagerPresentation: NSObject, NSWindowDelegate {
         self.defaults = defaults
         // Each IDE session starts with the manager integrated; detaching is an explicit action.
         isDetached = false
+        dockPosition = defaults.string(forKey: "processManager.dockPosition").flatMap(DockPosition.init(rawValue:)) ?? .bottom
         wasVisible = defaults.bool(forKey: "processManager.visible")
         staysOnTop = defaults.bool(forKey: "processManager.onTop")
         super.init()
@@ -75,8 +80,7 @@ final class ProcessManagerPresentation: NSObject, NSWindowDelegate {
         windowController = nil
         wasVisible = true
         defaults.set(true, forKey: "processManager.visible")
-        controller.processesVisible = true
-        controller.pixelProcessesVisible = true
+        controller.showProcessesPanel()
         reopenWorkspace?()
     }
     func windowWillClose(_ notification: Notification) {
@@ -87,8 +91,7 @@ final class ProcessManagerPresentation: NSObject, NSWindowDelegate {
     func show(_ controller: WorkspaceController) {
         if isDetached { detach(controller) }
         else { wasVisible = true
-            controller.processesVisible = true
-            controller.pixelProcessesVisible = true
+            controller.showProcessesPanel()
         }
     }
 }

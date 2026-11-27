@@ -5,6 +5,7 @@ struct ProcessManagerTable: View {
     let runs: [ProjectRun]
     let selectedID: UUID?
     let workspaceURL: URL?
+    var compact = false
     let select: (ProjectRun) -> Void
     let showLogs: (ProjectRun) -> Void
     let restart: (ProjectRun) -> Void
@@ -21,13 +22,15 @@ struct ProcessManagerTable: View {
         GeometryReader { geometry in
             let width = geometry.size.width
                 VStack(spacing: 0) {
-                    columns(width)
+                    if !compact { columns(width) }
                     ScrollView {
                         LazyVStack(spacing: 0) {
                             ForEach(groups, id: \.self) { url in
                                 groupHeader(url)
                                 if !collapsed.contains(url) {
-                                    ForEach(runs.filter { $0.workspaceURL == url }) { run in row(run, width: width) }
+                                    ForEach(runs.filter { $0.workspaceURL == url }) { run in
+                                        if compact { compactRow(run) } else { row(run, width: width) }
+                                    }
                                 }
                             }
                             if runs.isEmpty {
@@ -74,18 +77,56 @@ struct ProcessManagerTable: View {
                     Image(systemName: collapsed.contains(url) ? "chevron.right" : "chevron.down")
                         .font(Theme.interfaceFont(12))
                     Text(runs.first(where: { $0.workspaceURL == url })?.workspaceName ?? url.deletingPathExtension().lastPathComponent)
-                        .font(Theme.interfaceFont(16, weight: .semibold))
-                    Text(url == workspaceURL ? "Proyecto actual" : "En segundo plano")
-                        .font(Theme.interfaceFont(13)).italic().foregroundStyle(.secondary)
+                        .font(Theme.interfaceFont(16, weight: .semibold)).lineLimit(1).truncationMode(.tail)
+                    if !compact {
+                        Text(url == workspaceURL ? "Proyecto actual" : "En segundo plano")
+                            .font(Theme.interfaceFont(13)).italic().foregroundStyle(.secondary)
+                    }
                     Spacer()
                 }.frame(maxWidth: .infinity).padding(.leading, 12).frame(height: Theme.zoom(40)).contentShape(Rectangle())
             }.buttonStyle(.fullArea).help("Mostrar o contraer servicios del proyecto")
             Button { startGroup(url) } label: {
-                Label("Iniciar todos", systemImage: "play.fill").foregroundStyle(.green)
+                Group {
+                    if compact { Image(systemName: "play.fill") }
+                    else { Label("Iniciar todos", systemImage: "play.fill") }
+                }.foregroundStyle(.green)
                     .padding(.horizontal, 8).frame(height: Theme.zoom(40)).contentShape(Rectangle())
             }.buttonStyle(.fullArea).help("Iniciar los servicios de este proyecto").padding(.trailing, 8)
         }
         .background(Theme.surfaceInk.opacity(0.035)).overlay(alignment: .bottom) { Divider() }
+    }
+    private func compactRow(_ run: ProjectRun) -> some View {
+        HStack(spacing: 10) {
+            Button { select(run) } label: {
+                HStack(spacing: 10) {
+                    if let project = run.project {
+                        Image(nsImage: FileIcons.project(project)).resizable().scaledToFit()
+                            .frame(width: Theme.zoom(23), height: Theme.zoom(23))
+                    }
+                    Text(run.name).lineLimit(1).truncationMode(.tail)
+                    Spacer(minLength: 0)
+                    Circle().fill(ProcessManagerAppearance.statusColor(run)).frame(width: 9, height: 9)
+                        .help(run.pendingRestart ? "Iniciando…" : run.status.label)
+                }.frame(maxWidth: .infinity).frame(height: Theme.zoom(44)).contentShape(Rectangle())
+            }.buttonStyle(.fullArea).help(run.name)
+            Menu {
+                Button("Ver logs", systemImage: "text.alignleft") { showLogs(run) }
+                Button("Configurar servicio…", systemImage: "gearshape") { edit(run) }
+                Button("Reiniciar", systemImage: "arrow.counterclockwise") { restart(run) }
+                    .disabled(run.status == .stopping || run.project?.command.isEmpty != false)
+                Divider()
+                Button(run.status.active || run.pendingRestart ? "Detener" : "Iniciar",
+                       systemImage: run.status.active || run.pendingRestart ? "stop.fill" : "play.fill") { toggle(run) }
+                    .disabled(run.status == .stopping || run.project?.command.isEmpty != false)
+            } label: {
+                Text("⋮").font(Theme.interfaceFont(18, weight: .medium))
+                    .frame(width: Theme.zoom(32), height: Theme.zoom(32)).contentShape(Rectangle())
+            }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Acciones de \(run.name)")
+                .accessibilityLabel("Acciones de \(run.name)")
+        }
+        .padding(.horizontal, 12)
+        .background(selectedID == run.id ? ProcessManagerAppearance.selection : .clear)
+        .overlay(alignment: .bottom) { Divider() }
     }
     private func row(_ run: ProjectRun, width: CGFloat) -> some View {
         let available = max(0, width - actionsWidth)

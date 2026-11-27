@@ -4,6 +4,7 @@ import SwiftUI
 struct ProcessManagerView: View {
     @Bindable var controller: WorkspaceController
     var detached = false
+    var bottom = false
     @State private var editing: ProjectRun?
     @State private var configuringServices = false
     @State private var detail = "Logs"
@@ -30,27 +31,21 @@ struct ProcessManagerView: View {
         runs.first { $0.id == manager.selectedID } ?? runs.first
     }
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            VSplitView {
-                ProcessManagerTable(runs: runs, selectedID: selected?.id, workspaceURL: controller.workspaceURL,
-                                    select: { manager.selectedID = $0.id },
-                                    showLogs: { manager.selectedID = $0.id
-                        detail = "Logs"
-                    },
-                                    restart: { controller.startManagedProcess($0, restart: true) },
-                                    toggle: { run in
-                        if run.status.active || run.pendingRestart { controller.runner.stop(run.id) }
-                        else { controller.startManagedProcess(run) }
-                    }, edit: { editing = $0 }, openPort: { open("http://localhost:\($0)") },
-                                    startGroup: { url in
-                           if let model = try? Workspace.read(from: url) {
-                               for parent in model.projects { controller.projects.startServices(parent, workspaceURL: url) }
-                           }
-                       })
-                    .padding(.horizontal, detached ? 20 : 12).padding(.bottom, 20)
-                    .frame(minHeight: 180, idealHeight: detached ? 340 : 230)
-                if let run = selected { processDetail(run).frame(minHeight: 180, maxHeight: .infinity) }
+        GeometryReader { geometry in
+            let compact = geometry.size.width < Theme.zoom(650)
+            VStack(spacing: 0) {
+            header(compact: compact)
+            if bottom {
+                HSplitView {
+                    processTable(compact: true).frame(minWidth: 250, idealWidth: 400)
+                    if let run = selected { processDetail(run, compact: true).frame(minWidth: 250) }
+                }.frame(maxHeight: .infinity)
+            } else {
+                VSplitView {
+                    processTable(compact: compact)
+                        .frame(minHeight: 180, idealHeight: detached ? 340 : 230)
+                    if let run = selected { processDetail(run, compact: compact).frame(minHeight: 180, maxHeight: .infinity) }
+                }
             }
             Divider()
             HStack {
@@ -58,6 +53,7 @@ struct ProcessManagerView: View {
                 Spacer()
                 if detached { Text("Continúan activos al cambiar de proyecto") }
             }.font(Theme.interfaceFont(11)).foregroundStyle(.secondary).padding(10)
+            }
         }
         .background(ProcessManagerAppearance.background).font(Theme.interfaceFont(12)).tint(Theme.accent)
         .preferredColorScheme(Theme.colorScheme)
@@ -77,31 +73,69 @@ struct ProcessManagerView: View {
             }
         }
     }
-    private var header: some View {
+    private func processTable(compact: Bool) -> some View {
+        ProcessManagerTable(runs: runs, selectedID: selected?.id, workspaceURL: controller.workspaceURL,
+                            compact: compact, select: { manager.selectedID = $0.id },
+                            showLogs: { manager.selectedID = $0.id
+                        detail = "Logs"
+                    },
+                            restart: { controller.startManagedProcess($0, restart: true) },
+                            toggle: { run in
+                        if run.status.active || run.pendingRestart { controller.runner.stop(run.id) }
+                        else { controller.startManagedProcess(run) }
+                    }, edit: { editing = $0 }, openPort: { open("http://localhost:\($0)") },
+                            startGroup: { url in
+                           if let model = try? Workspace.read(from: url) {
+                               for parent in model.projects { controller.projects.startServices(parent, workspaceURL: url) }
+                           }
+                       })
+
+            .padding(.horizontal, detached ? 20 : 12).padding(.bottom, bottom ? 6 : 20)
+    }
+    private func header(compact: Bool) -> some View {
+        Group {
+        if compact {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 3) { titleText
+                        summaryText }
+                    Spacer(minLength: 4)
+                    presentationControls(compact: true)
+                }
+                search
+                projectFilter.frame(maxWidth: .infinity, alignment: .leading)
+            }
+        } else {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 16) {
                 title
                 Spacer(minLength: 20)
                 search.frame(width: 300)
                 projectFilter
-                presentationControls
+                presentationControls(compact: false)
             }
             VStack(alignment: .leading, spacing: 12) {
                 HStack { title
                     Spacer()
-                    presentationControls }
+                    presentationControls(compact: false) }
                 HStack { search
                     projectFilter }
             }
-        }.padding(.horizontal, detached ? 20 : 12).padding(.vertical, 18)
+        }
+        }
+        }.padding(.horizontal, detached ? 20 : 12).padding(.vertical, compact ? 12 : 18)
+    }
+    private var titleText: some View { Text("Procesos").font(Theme.interfaceFont(22, weight: .semibold)) }
+    private var summaryText: some View {
+        let active = controller.runner.runs.values.filter { $0.status.active }.count
+        let projects = Set(controller.runner.runs.values.compactMap(\.workspaceURL)).count
+        return Text("\(active) activos · \(projects) " + (projects == 1 ? "proyecto" : "proyectos"))
+            .foregroundStyle(.secondary).font(Theme.interfaceFont(13)).lineLimit(1)
     }
     private var title: some View {
         HStack(alignment: .firstTextBaseline, spacing: 14) {
-            Text("Procesos").font(Theme.interfaceFont(22, weight: .semibold))
-            let active = controller.runner.runs.values.filter { $0.status.active }.count
-            let projects = Set(controller.runner.runs.values.compactMap(\.workspaceURL)).count
-            Text("\(active) activos · \(projects) " + (projects == 1 ? "proyecto" : "proyectos")).foregroundStyle(.secondary)
-                .font(Theme.interfaceFont(13))
+            titleText
+            summaryText
         }.fixedSize(horizontal: true, vertical: false)
     }
     private var search: some View {
@@ -163,11 +197,13 @@ struct ProcessManagerView: View {
         }
         return "Todos los proyectos"
     }
-    private var presentationControls: some View {
+    private func presentationControls(compact: Bool) -> some View {
         HStack(spacing: 10) {
             Button { configuringServices = true } label: {
-                Label("Configurar servicios…", systemImage: "gearshape").padding(.horizontal, 10).padding(.vertical, 7)
-                    .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Theme.border)).contentShape(Rectangle())
+                Group {
+                    if compact { Image(systemName: "gearshape").frame(width: 28, height: 28) }
+                    else { Label("Configurar servicios…", systemImage: "gearshape").padding(.horizontal, 10).padding(.vertical, 7) }
+                }.overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Theme.border)).contentShape(Rectangle())
             }.buttonStyle(.fullArea).help("Abrir la configuración unificada de servicios")
                 .disabled(controller.workspaceURL == nil)
             if detached {
@@ -178,6 +214,10 @@ struct ProcessManagerView: View {
                 if detached { manager.dock(controller) } else { manager.detach(controller) }
             }
             if !detached {
+                action(bottom ? "sidebar.right" : "rectangle.bottomthird.inset.filled",
+                       bottom ? "Mover procesos al lateral" : "Mover procesos abajo") {
+                    controller.moveProcessesPanel(to: bottom ? .right : .bottom)
+                }
                 action("minus", "Minimizar panel de procesos") {
                     controller.processesVisible = false
                     manager.wasVisible = false
@@ -186,7 +226,7 @@ struct ProcessManagerView: View {
             }
         }
     }
-    private func processDetail(_ run: ProjectRun) -> some View {
+    private func processDetail(_ run: ProjectRun, compact: Bool) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 5) {
@@ -195,6 +235,7 @@ struct ProcessManagerView: View {
                         .foregroundStyle(.secondary).font(Theme.interfaceFont(13))
                 }
                 Spacer()
+                if !compact {
                 Button("Editar servicio…", systemImage: "gearshape") { editing = run }
                 Button { openProject(run) } label: {
                     HStack(spacing: 8) { Text("Abrir subproyecto")
@@ -202,12 +243,13 @@ struct ProcessManagerView: View {
                         .padding(.horizontal, 12).padding(.vertical, 7)
                         .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Theme.surfaceInk.opacity(0.3)))
                 }.buttonStyle(.fullArea).help("Abrir el proyecto de este proceso")
+                }
             }.padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 14)
             HStack(spacing: 0) {
                 ForEach(["Logs", "Puertos", "Detalles"], id: \.self) { tab in
                     Button { detail = tab } label: {
                         Text(tab).font(Theme.interfaceFont(14, weight: detail == tab ? .semibold : .regular))
-                            .padding(.horizontal, 20).frame(height: 44)
+                            .padding(.horizontal, compact ? 10 : 20).frame(height: 44)
                             .overlay(alignment: .bottom) {
                                 if detail == tab { ProcessManagerAppearance.link.frame(height: 3) }
                             }
@@ -215,8 +257,13 @@ struct ProcessManagerView: View {
                     }.buttonStyle(.fullArea).help("Mostrar \(tab.lowercased()) del proceso")
                 }
                 Spacer(minLength: 8)
-                if detail == "Logs" { logControls(run) }
+                if detail == "Logs" && !compact { logControls(run) }
             }.padding(.horizontal, 4)
+            if detail == "Logs" && compact {
+                HStack { Spacer()
+                    logControls(run)
+                }.padding(.vertical, 4)
+            }
             Divider()
             if detail == "Logs" { logs(run) }
             else if detail == "Puertos" {

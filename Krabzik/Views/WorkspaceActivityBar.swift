@@ -17,6 +17,9 @@ struct WorkspaceActivityBar: View {
                      selected: controller.database.resultsVisible && !controller.workflowVisible) {
                 if let url = controller.workspaceURL { controller.terminals.setVisible(false, for: url) }
                 controller.workflowVisible = false
+                if controller.processManager.dockPosition == .bottom && !controller.processManager.isDetached {
+                    controller.processesVisible = false
+                }
                 controller.database.resultsVisible.toggle()
                 if controller.database.resultsVisible { controller.outputVisible = false }
             }

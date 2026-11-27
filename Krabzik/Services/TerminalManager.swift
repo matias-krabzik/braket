@@ -165,6 +165,9 @@ extension WorkspaceController {
         let show = !terminals.visible
         if show, terminals.configuration(for: url).tabs.isEmpty, !isReadOnly { terminals.addTab(url) }
         else { terminals.setVisible(show, for: url) }
-        if show { workflowVisible = false }
+        if show {
+            workflowVisible = false
+            if processManager.dockPosition == .bottom && !processManager.isDetached { processesVisible = false }
+        }
     }
 }
